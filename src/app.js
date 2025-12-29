@@ -15,6 +15,7 @@ export const createApp = async () => {
 
   console.log('Registering modules...');
   await registerModule('auth'); 
+  await registerModule('user'); 
 
   configureSystemRoutes(app);
   

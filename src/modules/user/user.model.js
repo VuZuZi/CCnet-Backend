@@ -26,6 +26,21 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: 'https://www.gravatar.com/avatar/3b3be63a4c2a439b013787725dfce802?d=identicon' 
     },
+    phone: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    location: {
+      type: String,
+      trim: true,
+      default: ''
+    },
+    bio: {
+      type: String,
+      trim: true,
+      default: ''
+    },
     fullName: {
       type: String, 
       required: true, 

@@ -13,6 +13,10 @@ class UserRepository {
     return await User.findById(id);
   }
 
+  async findByIdWithPassword(id) {
+    return await User.findById(id).select('+password');
+  }
+
   async create(userData) {
     const user = new User(userData);
     return await user.save();

@@ -5,12 +5,28 @@ class UserService {
     this.userRepository = userRepository;
   }
 
+  sanitizeUser(user) {
+    if (!user) return null;
+    const obj = user.toObject();
+    delete obj.password;
+    obj.hasPassword = !!user.password;
+    return obj;
+  }
+
   async getUserById(id) {
     const user = await this.userRepository.findById(id);
     if (!user) {
       throw new AppError('User not found', 404);
     }
     return user;
+  }
+
+  async getProfile(userId) {
+    const user = await this.userRepository.findByIdWithPassword(userId);
+    if (!user) {
+      throw new AppError('User not found', 404);
+    }
+    return this.sanitizeUser(user);
   }
 
   async getUserByEmail(email) {
@@ -35,6 +51,36 @@ class UserService {
       throw new AppError('User not found to update', 404);
     }
     return user;
+  }
+
+  async updateProfile(id, updateData) {
+    const allowedFields = ['fullName', 'phone', 'location', 'bio', 'avatar'];
+    const safePayload = {};
+    for (const field of allowedFields) {
+      if (updateData[field] !== undefined) {
+        safePayload[field] = updateData[field];
+      }
+    }
+
+    const user = await this.userRepository.updateById(id, safePayload);
+    if (!user) {
+      throw new AppError('User not found to update', 404);
+    }
+    const fresh = await this.userRepository.findByIdWithPassword(id);
+    return this.sanitizeUser(fresh);
+  }
+
+  async changePassword(id, currentPassword, newPassword) {
+    const user = await this.userRepository.findByIdWithPassword(id);
+    if (!user) throw new AppError('User not found', 404);
+    if (!user.password) throw new AppError('This account does not have a password to change', 400);
+
+    const isMatch = await user.comparePassword(currentPassword);
+    if (!isMatch) throw new AppError('Current password is incorrect', 400);
+
+    user.password = newPassword; // will be hashed by pre-save hook
+    await user.save();
+    return this.sanitizeUser(user);
   }
 
   async checkEmailExists(email) {
