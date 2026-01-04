@@ -1,16 +1,35 @@
-import Post from './post.model.js';
+import Post from './post.model.js'
 
 class PostRepository {
   async findAll() {
-    return Post.find().sort({ createdAt: -1 });
+    return Post.find()
+      .populate('author', 'fullName email avatar') 
+      .populate('likes', 'fullName avatar')
+      .populate('dislikes', 'fullName avatar')
+      .populate('comments.author', 'fullName email avatar')
+      .sort({ createdAt: -1 })
   }
-  findById = async (id) => {
-  return await Post.findById(id).populate('author', 'fullName email')
+
+  async findById(id) {
+    return Post.findById(id)
+      .populate('author', 'fullName email avatar')
+      .populate('likes', 'fullName avatar')
+      .populate('dislikes', 'fullName avatar')
+      .populate('comments.author', 'fullName email avatar')
   }
 
   async create(data) {
-    return Post.create(data);
+    const post = new Post(data)
+    return post.save()
+  }
+
+  async findByIdRaw(id) {
+    return Post.findById(id)
+  }
+
+  async save(post) {
+    return post.save()
   }
 }
 
-export default PostRepository;
+export default PostRepository
