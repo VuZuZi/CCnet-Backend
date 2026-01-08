@@ -27,11 +27,11 @@ export const createApp = async () => {
   console.log('Configuring routes...');
   configureRoutes(app);
 
+
   const rootDir = path.resolve(__dirname, '..');
   const uploadsPath = path.join(rootDir, 'uploads');
-
   console.log('Serving uploads from:', uploadsPath); 
-  app.use('/api/v1/uploads', express.static(uploadsPath));
+  app.use('/uploads', express.static(uploadsPath)); 
 
   configureErrorHandling(app, errorHandler);
 

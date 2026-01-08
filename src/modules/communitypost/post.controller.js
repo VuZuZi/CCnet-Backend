@@ -29,44 +29,41 @@ class PostController {
     }
   }
 
-  createPost = async (req, res, next) => {
-    try {
-      if (!req.user) {
-        return res.status(401).json({
-          status: 'error',
-          message: 'Authentication required',
-        })
-      }
-
-      const { content, links = [] } = req.body
-
-      if (!content || !content.trim()) {
-        return res.status(400).json({
-          status: 'error',
-          message: 'Post content is required',
-        })
-      }
-
-      const images =
-        req.files?.map(file => `/uploads/${file.filename}`) || []
-
-      const post = await this.postService.createPost({
-        content: content.trim(),
-        images,
-        links: links.filter(Boolean), // remove empty strings
-        author: req.user.userId,
+createPost = async (req, res, next) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({
+        status: 'error',
+        message: 'Authentication required',
       })
-
-      res.status(201).json({
-        status: 'success',
-        data: post,
-      })
-    } catch (error) {
-      next(error)
     }
-  }
 
-  // Toggle like: add if not liked, remove if already liked
+    console.log('Received body:', req.body) 
+
+    const { content, images = [] } = req.body
+
+    if (!content || !content.trim()) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Post content is required',
+      })
+    }
+
+    const post = await this.postService.createPost({
+      content: content.trim(),
+      images,
+      author: req.user.userId,
+    })
+
+    res.status(201).json({
+      status: 'success',
+      data: post,
+    })
+  } catch (error) {
+    next(error)
+  }
+}
+
   toggleLike = async (req, res, next) => {
     try {
       const post = await this.postService.toggleReaction({
@@ -96,7 +93,6 @@ class PostController {
     }
   }
 
-  // Add a comment
   addComment = async (req, res, next) => {
     try {
       const { content } = req.body
