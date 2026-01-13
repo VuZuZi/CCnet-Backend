@@ -1,14 +1,19 @@
 import authRoutes from '../modules/auth/auth.routes.js';
+import chatRoutes from '../modules/chat/chat.routes.js';
+
 export const configureRoutes = (app) => {
   const API_PREFIX = '/api/v1';
 
   app.use(`${API_PREFIX}/auth`, authRoutes);
+  app.use(`${API_PREFIX}/chat`, chatRoutes);
+
   app.use((req, res) => {
     res.status(404).json({
       status: 'error',
       message: `Route ${req.method} ${req.path} not found`,
       availableRoutes: [
         `${API_PREFIX}/auth/*`,
+        `${API_PREFIX}/chat/*`,
         '/health',
         '/api'
       ]
