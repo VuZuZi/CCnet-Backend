@@ -54,7 +54,7 @@ class UserService {
   }
 
   async updateProfile(id, updateData) {
-    const allowedFields = ['fullName', 'phone', 'location', 'bio', 'avatar'];
+    const allowedFields = ['fullName', 'phone', 'location', 'bio', 'avatar', 'skills'];
     const safePayload = {};
     for (const field of allowedFields) {
       if (updateData[field] !== undefined) {
@@ -78,7 +78,7 @@ class UserService {
     const isMatch = await user.comparePassword(currentPassword);
     if (!isMatch) throw new AppError('Current password is incorrect', 400);
 
-    user.password = newPassword; // will be hashed by pre-save hook
+    user.password = newPassword;
     await user.save();
     return this.sanitizeUser(user);
   }
