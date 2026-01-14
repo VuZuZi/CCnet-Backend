@@ -41,6 +41,10 @@ const userSchema = new mongoose.Schema(
       trim: true,
       default: ''
     },
+    skills: [{
+      type: String,
+      trim: true
+    }],
     fullName: {
       type: String, 
       required: true, 
