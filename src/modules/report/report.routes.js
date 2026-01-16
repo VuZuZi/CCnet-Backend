@@ -1,9 +1,13 @@
 import express from "express";
-const router = express.Router();
-
-import { authMiddleware } from "../../middlewares/auth.middleware.js";
+import { authenticate } from "../../middlewares/auth.middleware.js";
 import reportController from "./report.controller.js";
 
-router.post("/report", authMiddleware, reportController.createReport);
+const router = express.Router({ mergeParams: true });
+
+router.post("/", authenticate, (req, res, next) => {
+  req.body.target_ref = req.params.postId;
+  req.body.target_type = "post";
+  return reportController.createReport(req, res, next);
+});
 
 export default router;

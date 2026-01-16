@@ -6,7 +6,6 @@ class ReportService {
   }
 
   async createReport(data) {
-    // 1. Prevent duplicate reports from the same user on the same target
     const existingReport = await this.reportRepository.findOne({
       reporter_ref: data.reporter_ref,
       target_ref: data.target_ref,
@@ -18,7 +17,6 @@ class ReportService {
       throw error;
     }
 
-    // 2. Validate existence of target
     if (data.target_type === "post") {
       const post = await Post.findById(data.target_ref);
       if (!post) {
@@ -28,7 +26,7 @@ class ReportService {
       }
     }
 
-    return await this.reportRepository.create(data);
+    return this.reportRepository.create(data);
   }
 
   async getReports(query = {}) {
@@ -36,7 +34,7 @@ class ReportService {
   }
 
   async reviewReport(reportId, reviewerId, updateData) {
-    return await this.reportRepository.update(reportId, {
+    return this.reportRepository.update(reportId, {
       ...updateData,
       reviewed_by_ref: reviewerId,
       reviewed_at: new Date(),

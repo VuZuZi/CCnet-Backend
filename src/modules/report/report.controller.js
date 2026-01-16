@@ -1,17 +1,18 @@
 import mongoose from "mongoose";
+import { getContainer } from "../../container/index.js";
 
 class ReportController {
-  constructor({ reportService }) {
-    this.reportService = reportService;
-  }
-
-  createReport = async (req, res, next) => {
+  async createReport(req, res, next) {
     try {
       if (!req.user) {
-        return res
-          .status(401)
-          .json({ status: "error", message: "Authentication required" });
+        return res.status(401).json({
+          status: "error",
+          message: "Authentication required",
+        });
       }
+
+      const container = getContainer();
+      const reportService = container.resolve("reportService");
 
       const {
         reason_code,
@@ -31,17 +32,18 @@ class ReportController {
       let target_ref;
       try {
         target_ref = new mongoose.Types.ObjectId(rawTargetRef);
-      } catch (err) {
-        return res
-          .status(400)
-          .json({ status: "error", message: "Invalid target_ref format" });
+      } catch {
+        return res.status(400).json({
+          status: "error",
+          message: "Invalid target_ref format",
+        });
       }
 
       const reportData = {
         report_ref: `REP-${Date.now()}-${Math.random()
           .toString(36)
           .slice(2, 10)}`,
-        reporter_ref: req.user._id,
+        reporter_ref: req.user.userId,
         target_type,
         target_ref,
         reason_code: reason_code.trim(),
@@ -50,7 +52,7 @@ class ReportController {
         status: "pending",
       };
 
-      const report = await this.reportService.createReport(reportData);
+      const report = await reportService.createReport(reportData);
 
       res.status(201).json({
         status: "success",
@@ -60,37 +62,7 @@ class ReportController {
     } catch (error) {
       next(error);
     }
-  };
-
-  getReports = async (req, res, next) => {
-    try {
-      const reports = await this.reportService.getReports(req.query);
-
-      res.json({ status: "success", data: reports });
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  reviewReport = async (req, res, next) => {
-    try {
-      const { reportId } = req.params;
-
-      const update = req.body;
-
-      const updated = await this.reportService.reviewReport(
-        reportId,
-
-        req.user._id,
-
-        update
-      );
-
-      res.json({ status: "success", data: updated });
-    } catch (error) {
-      next(error);
-    }
-  };
+  }
 }
 
-export default ReportController;
+export default new ReportController();
