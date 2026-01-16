@@ -1,35 +1,40 @@
-import Post from './post.model.js'
+import Post from "./post.model.js";
 
 class PostRepository {
-  async findAll() {
+  async findAll({ skip = 0, limit = 10, sort = { createdAt: -1 } } = {}) {
     return Post.find()
-      .populate('author', 'fullName email avatar') 
-      .populate('likes', 'fullName avatar')
-      .populate('dislikes', 'fullName avatar')
-      .populate('comments.author', 'fullName email avatar')
-      .sort({ createdAt: -1 })
+      .sort(sort)
+      .skip(skip)
+      .limit(limit)
+      .populate("author", "fullName avatar email username")
+      .populate({
+        path: "comments.author",
+        select: "fullName avatar email username",
+      })
+      .exec();
   }
 
   async findById(id) {
     return Post.findById(id)
-      .populate('author', 'fullName email avatar')
-      .populate('likes', 'fullName avatar')
-      .populate('dislikes', 'fullName avatar')
-      .populate('comments.author', 'fullName email avatar')
+      .populate("author", "fullName avatar email username")
+      .populate({
+        path: "comments.author",
+        select: "fullName avatar email username",
+      });
   }
 
   async create(data) {
-    const post = new Post(data)
-    return post.save()
+    const post = new Post(data);
+    return post.save();
   }
 
   async findByIdRaw(id) {
-    return Post.findById(id)
+    return Post.findById(id);
   }
 
   async save(post) {
-    return post.save()
+    return post.save();
   }
 }
 
-export default PostRepository
+export default PostRepository;
