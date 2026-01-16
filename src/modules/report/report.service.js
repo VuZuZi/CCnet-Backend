@@ -36,7 +36,6 @@ class ReportService {
   }
 
   async reviewReport(reportId, reviewerId, updateData) {
-    // Explicitly set metadata for the review
     return await this.reportRepository.update(reportId, {
       ...updateData,
       reviewed_by_ref: reviewerId,

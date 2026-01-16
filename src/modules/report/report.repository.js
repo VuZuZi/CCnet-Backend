@@ -2,7 +2,6 @@ import mongoose from "mongoose"; // FIX: Added missing import
 import Report from "./report.model.js";
 
 class ReportRepository {
-  // Added findOne for duplicate checking
   async findOne(filter) {
     return Report.findOne(filter);
   }
@@ -24,19 +23,16 @@ class ReportRepository {
 
     const skip = (page - 1) * limit;
 
-    return (
-      Report.find(filter)
-        .populate("reporter_ref", "fullName avatar")
-        .populate("reviewed_by_ref", "fullName")
-        // FIX: This now works because of refPath in the model
-        .populate({
-          path: "target_ref",
-          select: "content title text", // Adjust fields based on what Post/Comment has
-        })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-    );
+    return Report.find(filter)
+      .populate("reporter_ref", "fullName avatar")
+      .populate("reviewed_by_ref", "fullName")
+      .populate({
+        path: "target_ref",
+        select: "content title text",
+      })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
   }
 
   async update(reportId, updateData) {

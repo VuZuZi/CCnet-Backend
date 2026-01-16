@@ -16,12 +16,11 @@ class ReportController {
       const {
         reason_code,
         description = "",
-        target_type = "post", // Defaults to lowercase 'post'
+        target_type = "post",
         target_ref: rawTargetRef,
         evidence_files = [],
       } = req.body;
 
-      // Validation
       if (!reason_code?.trim() || !rawTargetRef) {
         return res.status(400).json({
           status: "error",
@@ -29,7 +28,6 @@ class ReportController {
         });
       }
 
-      // Convert string to ObjectId safely
       let target_ref;
       try {
         target_ref = new mongoose.Types.ObjectId(rawTargetRef);

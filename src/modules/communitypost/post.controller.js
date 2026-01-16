@@ -16,7 +16,7 @@ class PostController {
       const posts = await this.postService.getAllPosts({
         skip,
         limit,
-        sort: { createdAt: -1 }, // Newest first
+        sort: { createdAt: -1 },
       });
       res.json({ status: "success", data: posts });
     } catch (error) {
@@ -116,8 +116,6 @@ class PostController {
         reporter_ref: reporterId,
         target_ref: req.params.id,
       };
-
-      // Now you can use this.reportService directly (clean & injected)
       const report = await this.reportService.createReport(reportData);
 
       res.status(201).json({
@@ -128,8 +126,6 @@ class PostController {
       next(error);
     }
   };
-
-  // ... other methods ...
 
   addComment = async (req, res, next) => {
     try {

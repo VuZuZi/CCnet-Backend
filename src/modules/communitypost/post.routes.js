@@ -44,8 +44,6 @@ router.post("/:id/comment", authenticate, (req, res, next) => {
 
 router.post("/:id/report", authenticate, (req, res, next) => {
   const { cradle } = getContainer();
-
-  // Manual Wiring
   req.body.target_ref = req.params.id;
   req.body.target_type = "post";
 
