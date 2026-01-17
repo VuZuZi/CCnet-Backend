@@ -23,7 +23,14 @@ class ProjectService {
   }
 
   async getProjectById(id) {
-    const project = await this.projectRepository.findById(id);
+    // Try to find by projectId first, then by MongoDB _id
+    let project = await this.projectRepository.findByProjectId(id);
+    
+    if (!project) {
+      // If not found by projectId, try MongoDB ObjectId
+      project = await this.projectRepository.findById(id);
+    }
+    
     if (!project) {
       throw new AppError('Project not found', 404);
     }
@@ -47,7 +54,11 @@ class ProjectService {
   }
 
   async updateProject(id, userId, updateData) {
-    const project = await this.projectRepository.findById(id);
+    // Try to find by projectId first, then by MongoDB _id
+    let project = await this.projectRepository.findByProjectId(id);
+    if (!project) {
+      project = await this.projectRepository.findById(id);
+    }
     
     if (!project) {
       throw new AppError('Project not found', 404);
@@ -61,12 +72,16 @@ class ProjectService {
     // Prevent updating certain fields
     const { projectId, userId: _, ...allowedUpdates } = updateData;
 
-    const updatedProject = await this.projectRepository.update(id, allowedUpdates);
+    const updatedProject = await this.projectRepository.update(project._id, allowedUpdates);
     return updatedProject;
   }
 
   async deleteProject(id, userId) {
-    const project = await this.projectRepository.findById(id);
+    // Try to find by projectId first, then by MongoDB _id
+    let project = await this.projectRepository.findByProjectId(id);
+    if (!project) {
+      project = await this.projectRepository.findById(id);
+    }
     
     if (!project) {
       throw new AppError('Project not found', 404);
@@ -77,7 +92,7 @@ class ProjectService {
       throw new AppError('You are not authorized to delete this project', 403);
     }
 
-    await this.projectRepository.delete(id);
+    await this.projectRepository.delete(project._id);
     return { deleted: true };
   }
 }

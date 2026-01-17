@@ -1,4 +1,5 @@
 import Project from './project.model.js';
+import mongoose from 'mongoose';
 
 class ProjectRepository {
   async create(projectData) {
@@ -8,6 +9,10 @@ class ProjectRepository {
   }
 
   async findById(id) {
+    // Check if id is a valid MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return null;
+    }
     return await Project.findById(id).populate('userId', 'fullName email avatar');
   }
 
