@@ -8,16 +8,26 @@ const reportSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+
     target_type: {
       type: String,
-      enum: ["post", "comment", "user"],
+      enum: ["post", "comment", "user", "Post", "Comment", "User"],
       default: "post",
     },
+
     target_ref: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,
-      refPath: "target_type",
+      ref: (doc) => {
+        if (doc && doc.target_type) {
+          return (
+            doc.target_type.charAt(0).toUpperCase() + doc.target_type.slice(1)
+          );
+        }
+        return "Post";
+      },
     },
+
     reason_code: {
       type: String,
       enum: [
@@ -32,20 +42,24 @@ const reportSchema = new mongoose.Schema(
     },
     description: { type: String, maxlength: 1000 },
     evidence_files: [{ type: String }],
+
     status: {
       type: String,
       enum: ["pending", "reviewed", "resolved", "rejected"],
       default: "pending",
     },
+
     reviewed_by_ref: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     reviewed_at: { type: Date },
+
     action: {
       type: String,
-      enum: ["none", "warning", "delete", "hide", "ban"],
+      default: "none",
     },
+
     decision_note: { type: String, maxlength: 1000 },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 export default mongoose.model("Report", reportSchema);
