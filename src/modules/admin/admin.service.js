@@ -1,54 +1,38 @@
 import Post from "../communitypost/post.model.js";
 import Report from "../report/report.model.js";
+import User from "../user/user.model.js";
+import Notification from "../notification/notification.model.js";
 class AdminService {
   constructor({ adminRepository, notificationRepository }) {
     this.adminRepository = adminRepository;
     this.notificationRepository = notificationRepository;
   }
 
-  async getDashboardStats() {
+  getDashboardStats = async () => {
     return await this.adminRepository.getSystemStats();
-  }
+  };
 
-  async getUsers() {
+  getUsers = async () => {
     return await this.adminRepository.findAllUsers();
-  }
+  };
 
-  async toggleUserBan(userId, reason) {
-    const user = await this.adminRepository.findUserById(userId);
-    if (!user) throw new Error("User not found");
-
-    const newStatus = !user.isBanned;
-
-    await this.notificationRepository.create({
-      recipient: userId,
-      type: "alert",
-      title: newStatus ? "Account Banned" : "Account Restored",
-      message: newStatus
-        ? `You have been banned. Reason: ${reason}`
-        : "Your account access has been restored.",
-    });
-
-    return await this.adminRepository.updateUser(userId, {
-      isBanned: newStatus,
-      banReason: newStatus ? reason : null,
-    });
-  }
-
-  async createSystemNotification(data) {
-    return await this.notificationRepository.create({
-      recipient: data.recipient || null,
-      title: data.title,
-      message: data.message,
-      type: "system",
-    });
-  }
-
-  async getReports() {
+  getReports = async () => {
     return await this.adminRepository.findAllReports();
-  }
+  };
 
-  async resolveReportWithActions(reportId, actions, note) {
+  toggleUserBan = async (userId) => {
+    const user = await User.findById(userId);
+    if (!user) throw new Error("User not found");
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { $set: { isActive: !user.isActive } },
+      { new: true },
+    );
+
+    return updatedUser;
+  };
+
+  resolveReportWithActions = async (reportId, actions, note) => {
     const report = await Report.findById(reportId).populate("target_ref");
     if (!report) throw new Error("Report not found");
 
@@ -61,10 +45,7 @@ class AdminService {
     if (actions.includes("ban_user")) {
       const authorId = report.target_ref?.author;
       if (authorId) {
-        await this.toggleUserBan(
-          authorId,
-          `Report Resolution #${reportId}: ${note}`,
-        );
+        await this.toggleUserBan(authorId);
       }
     }
 
@@ -75,14 +56,25 @@ class AdminService {
 
     await report.save();
     return report;
-  }
+  };
+  createSystemNotification = async (notificationData) => {
+    const { title, message, recipient } = notificationData;
 
-  async getProjects() {
-    return await this.adminRepository.findAllProjects();
-  }
+    if (!title || !message) {
+      throw new Error("Title and message are required to send a notification.");
+    }
 
-  async deleteProject(id) {
-    return await this.adminRepository.deleteProject(id);
-  }
+    const notification = new Notification({
+      title,
+      message,
+      recipient: recipient || "all",
+      sender: "system",
+    });
+
+    await notification.save();
+
+    return notification;
+  };
 }
+
 export default AdminService;

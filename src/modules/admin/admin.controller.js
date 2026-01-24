@@ -21,10 +21,10 @@ class AdminController {
     }
   };
 
+
   banUser = async (req, res, next) => {
     try {
-      const { reason } = req.body;
-      const user = await this.adminService.toggleUserBan(req.params.id, reason);
+      const user = await this.adminService.toggleUserBan(req.params.id);
       res.json({ status: "success", data: user });
     } catch (e) {
       next(e);
@@ -43,13 +43,11 @@ class AdminController {
   resolveReport = async (req, res, next) => {
     try {
       const { actions, note } = req.body;
-
       const result = await this.adminService.resolveReportWithActions(
         req.params.id,
         actions || [],
         note,
       );
-
       res.json({ status: "success", data: result });
     } catch (e) {
       next(e);
