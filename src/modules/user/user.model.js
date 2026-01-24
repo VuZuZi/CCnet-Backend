@@ -26,6 +26,9 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: 'https://www.gravatar.com/avatar/3b3be63a4c2a439b013787725dfce802?d=identicon' 
     },
+    avatarPublicId: { 
+      type: String, 
+      select: false },
     phone: {
       type: String,
       trim: true,
@@ -75,11 +78,12 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-userSchema.methods.toJSON = function () {
-  const obj = this.toObject();
-  delete obj.password;
-  return obj;
-};
+userSchema.pre('validate', function(next) {
+  if (!this.googleId && !this.password) {
+    this.invalidate('password', 'Password is required for email registration');
+  }
+  next();
+});
 
 const User = mongoose.model('User', userSchema);
 export default User;

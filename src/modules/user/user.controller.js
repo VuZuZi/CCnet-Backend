@@ -35,20 +35,29 @@ class UserController {
 
     changePassword = async (req, res, next) => {
         try {
-            const userId = req.user?.userId;
-            if (!userId) throw new AppError('Unauthorized', 401);
+            const { error, value } = changePasswordSchema.validate(req.body);
+            if (error) throw new AppError(error.details[0].message, 400);
 
-            const { currentPassword, newPassword } = req.body;
-            if (!currentPassword || !newPassword) {
-                throw new AppError('Current password and new password are required', 400);
-            }
+            const updatedUser = await this.userService.changePassword(
+                req.user.userId, 
+                value.currentPassword, 
+                value.newPassword
+            );
 
-            const updatedUser = await this.userService.changePassword(userId, currentPassword, newPassword);
             return ApiResponse.success(res, { user: updatedUser }, 'Password changed successfully');
         } catch (error) {
             next(error);
         }
     };
+
+    changeAvatar = async (req, res, next) => {
+    try {
+        const updatedUser = await this.userService.changeAvatar(req.user.userId, req.file);
+        return ApiResponse.success(res, { user: updatedUser }, 'Avatar updated successfully');
+    } catch (error) {
+        next(error);
+    }
+};
 }
 
 export default UserController;

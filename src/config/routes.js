@@ -1,10 +1,12 @@
 import authRoutes from '../modules/auth/auth.routes.js';
 import userRoutes from '../modules/user/user.routes.js';
+import mediaRoutes from '../modules/media/media.routes.js';
 export const configureRoutes = (app) => {
   const API_PREFIX = '/api/v1';
 
   app.use(`${API_PREFIX}/auth`, authRoutes);
   app.use(`${API_PREFIX}/user`, userRoutes);
+  app.use(`${API_PREFIX}/media`, mediaRoutes);
   app.use((req, res) => {
     res.status(404).json({
       status: 'error',

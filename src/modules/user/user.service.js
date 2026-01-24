@@ -1,16 +1,11 @@
 import AppError from '../../core/AppError.js';
+import { toUserResponse } from './user.dto.js';
 
 class UserService {
-  constructor({ userRepository }) {
+  constructor({ userRepository , mediaRepository, cloudinaryProvider}) {
     this.userRepository = userRepository;
-  }
-
-  sanitizeUser(user) {
-    if (!user) return null;
-    const obj = user.toObject();
-    delete obj.password;
-    obj.hasPassword = !!user.password;
-    return obj;
+    this.mediaRepository = mediaRepository;
+    this.cloudinaryProvider = cloudinaryProvider;
   }
 
   async getUserById(id) {
@@ -22,11 +17,10 @@ class UserService {
   }
 
   async getProfile(userId) {
-    const user = await this.userRepository.findByIdWithPassword(userId);
-    if (!user) {
-      throw new AppError('User not found', 404);
-    }
-    return this.sanitizeUser(user);
+    const user = await this.userRepository.findById(userId);
+    if (!user) throw new AppError('User not found', 404);
+    
+    return toUserResponse(user);
   }
 
   async getUserByEmail(email) {
@@ -53,39 +47,72 @@ class UserService {
     return user;
   }
 
-  async updateProfile(id, updateData) {
+  async updateProfile(userId, updateData) {
+    const user = await this.userRepository.findByIdWithPassword(userId); 
+    if (!user) throw new AppError('User not found', 404);
+    
     const allowedFields = ['fullName', 'phone', 'location', 'bio', 'avatar', 'skills'];
-    const safePayload = {};
-    for (const field of allowedFields) {
-      if (updateData[field] !== undefined) {
-        safePayload[field] = updateData[field];
-      }
-    }
+    
+    allowedFields.forEach(field => {
+        if (updateData[field] !== undefined) {
+            user[field] = updateData[field];
+        }
+    });
 
-    const user = await this.userRepository.updateById(id, safePayload);
-    if (!user) {
-      throw new AppError('User not found to update', 404);
-    }
-    const fresh = await this.userRepository.findByIdWithPassword(id);
-    return this.sanitizeUser(fresh);
+    const updatedUser = await user.save();
+    
+    return toUserResponse(updatedUser);
   }
 
   async changePassword(id, currentPassword, newPassword) {
-    const user = await this.userRepository.findByIdWithPassword(id);
+        const user = await this.userRepository.findByIdWithPassword(id);
+        if (!user) throw new AppError('User not found', 404);
+        if (!user.password) throw new AppError('This account does not have a password to change', 400);
+
+        const isMatch = await user.comparePassword(currentPassword);
+        if (!isMatch) throw new AppError('Current password is incorrect', 400);
+
+        user.password = newPassword;
+        await user.save();
+        return toUserResponse(user);
+    }
+  
+  async changeAvatar(userId, file) {
+    if (!file) throw new AppError('Please upload an image', 400);
+
+    const user = await this.userRepository.findByIdWithPassword(userId); 
     if (!user) throw new AppError('User not found', 404);
-    if (!user.password) throw new AppError('This account does not have a password to change', 400);
 
-    const isMatch = await user.comparePassword(currentPassword);
-    if (!isMatch) throw new AppError('Current password is incorrect', 400);
+    const uploadResult = await this.cloudinaryProvider.uploadImage(
+        file.buffer, 
+        `users/${userId}/avatar`
+    );
 
-    user.password = newPassword;
+    const newMedia = await this.mediaRepository.create({
+        originalName: file.originalname,
+        url: uploadResult.secure_url,
+        publicId: uploadResult.public_id,
+        mimetype: file.mimetype,
+        size: file.size,
+        uploadedBy: userId,
+        context: 'avatar'
+    });
+
+    if (user.avatarPublicId) {
+        this.cloudinaryProvider.deleteImage(user.avatarPublicId)
+            .catch(err => console.error(`[Cleanup] Failed to delete old avatar ${user.avatarPublicId}:`, err));
+
+        await this.mediaRepository.deleteByPublicId(user.avatarPublicId);
+    }
+
+    user.avatar = newMedia.url;
+    user.avatarPublicId = newMedia.publicId; 
+    
     await user.save();
-    return this.sanitizeUser(user);
-  }
 
-  async checkEmailExists(email) {
-    return await this.userRepository.existsByEmail(email);
+    return toUserResponse(user);
   }
+    
 }
 
 export default UserService;

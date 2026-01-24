@@ -22,3 +22,15 @@ export const updateProfileSchema = Joi.object({
     'string.max': 'Each skill must be at most 50 characters'
     })
 });
+
+
+export const changePasswordSchema = Joi.object({
+  currentPassword: Joi.string().required().messages({
+    'any.required': 'Current password is required'
+  }),
+  newPassword: Joi.string().min(6).required().disallow(Joi.ref('currentPassword')).messages({
+    'string.min': 'New password must be at least 6 characters',
+    'any.required': 'New password is required',
+    'any.invalid': 'New password must be different from current password'
+  })
+});
