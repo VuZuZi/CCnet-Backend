@@ -1,6 +1,8 @@
 import authRoutes from '../modules/auth/auth.routes.js';
 import postRoutes from '../modules/communitypost/post.routes.js';
 
+import userRoutes from '../modules/user/user.routes.js';
+import mediaRoutes from '../modules/media/media.routes.js';
 export const configureRoutes = (app) => {
   const API_PREFIX = '/api/v1';
 
@@ -8,10 +10,18 @@ export const configureRoutes = (app) => {
   app.use(`${API_PREFIX}/posts`, postRoutes);
 
 
+  app.use(`${API_PREFIX}/user`, userRoutes);
+  app.use(`${API_PREFIX}/media`, mediaRoutes);
   app.use((req, res) => {
     res.status(404).json({
       status: 'error',
-      message: `Route ${req.method} ${req.path} not found`
+      message: `Route ${req.method} ${req.path} not found`,
+      availableRoutes: [
+        `${API_PREFIX}/auth/*`,
+        `${API_PREFIX}/user/*`,
+        '/health',
+        '/api'
+      ]
     });
   });
 };
