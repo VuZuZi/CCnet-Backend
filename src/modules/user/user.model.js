@@ -59,9 +59,12 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
 userSchema.pre('validate', function(next) {
-  if (!this.googleId && !this.password) {
-    this.invalidate('password', 'Password is required for email registration');
+  if (this.isNew || this.isModified('password')) {
+    if (!this.googleId && !this.password) {
+      this.invalidate('password', 'Password is required for email registration');
+    }
   }
   next();
 });
@@ -77,13 +80,6 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
   if (!this.password) return false;
   return await bcrypt.compare(candidatePassword, this.password);
 };
-
-userSchema.pre('validate', function(next) {
-  if (!this.googleId && !this.password) {
-    this.invalidate('password', 'Password is required for email registration');
-  }
-  next();
-});
 
 const User = mongoose.model('User', userSchema);
 export default User;

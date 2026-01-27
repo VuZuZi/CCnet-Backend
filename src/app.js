@@ -4,6 +4,8 @@ import { configureRoutes, configureErrorHandling } from './config/routes.js';
 import errorHandler from './middlewares/errorHandler.js';
 import { initializeContainer, registerModule } from './container/index.js';
 
+import { initPostWorkers } from './modules/communitypost/post.worker.js';
+
 export const createApp = async () => {
   const app = express();
 
@@ -16,6 +18,10 @@ export const createApp = async () => {
   console.log('Registering modules...');
   await registerModule('auth'); 
   await registerModule('user'); 
+  await registerModule('communitypost');
+
+  console.log('Starting Background Workers...');
+  initPostWorkers();
 
   configureSystemRoutes(app);
   

@@ -22,6 +22,8 @@
   "dependencies": {
     "awilix": "^10.0.2",
     "bcryptjs": "^2.4.3",
+    "blurhash": "^2.0.5",
+    "bullmq": "^5.67.1",
     "cloudinary": "^2.9.0",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
@@ -38,6 +40,7 @@
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
     "nodemailer": "^7.0.12",
+    "sharp": "^0.34.5",
     "uuid": "^9.0.1"
   },
   "devDependencies": {

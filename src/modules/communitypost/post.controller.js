@@ -1,24 +1,29 @@
-import mongoose from "mongoose";
-import Report from "../report/report.model.js";
-import { getContainer } from "../../container/index.js";
+import ApiResponse from '../../core/Response.js';
+
 class PostController {
   constructor({ postService, reportService }) {
     this.postService = postService;
     this.reportService = reportService;
   }
 
-  getAllPosts = async (req, res, next) => {
+ getNewsFeed = async (req, res, next) => {
     try {
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 6;
-      const skip = (page - 1) * limit;
+      const limit = parseInt(req.query.limit) || 10;
+      const cursor = req.query.cursor || null;
+      
+      const currentUserId = req.user ? req.user.userId : null;
 
-      const posts = await this.postService.getAllPosts({
-        skip,
+      const result = await this.postService.getNewsFeed({
+        cursor,
         limit,
-        sort: { createdAt: -1 },
+        userId: currentUserId 
       });
-      res.json({ status: "success", data: posts });
+
+      res.json({
+        status: "success",
+        data: result.data,
+        paging: result.paging
+      });
     } catch (error) {
       next(error);
     }
@@ -43,66 +48,43 @@ class PostController {
 
   createPost = async (req, res, next) => {
     try {
-      if (!req.user) {
-        return res.status(401).json({
-          status: "error",
-          message: "Authentication required",
-        });
-      }
+      const { content, privacy } = req.body;
+      const files = req.files || [];
 
-      console.log("Received body:", req.body);
-
-      const { content, images = [] } = req.body;
-
-      if (!content || !content.trim()) {
-        return res.status(400).json({
-          status: "error",
-          message: "Post content is required",
-        });
-      }
+      const currentUser = {
+        _id: req.user.userId, 
+        username: req.user.email.split('@')[0],
+        avatar: req.user.avatar,
+        fullName: req.user.fullName
+      };
 
       const post = await this.postService.createPost({
-        content: content.trim(),
-        images,
-        author: req.user.userId,
+        content,
+        files,
+        user: currentUser, 
+        privacy
       });
 
-      res.status(201).json({
-        status: "success",
-        data: post,
-      });
+      return ApiResponse.created(res, post);
     } catch (error) {
       next(error);
     }
   };
 
-  toggleLike = async (req, res, next) => {
+ toggleReaction = async (req, res, next) => {
     try {
-      const post = await this.postService.toggleReaction({
+      const { type } = req.body; 
+      const result = await this.postService.toggleReaction({
         postId: req.params.id,
         userId: req.user.userId,
-        reactionType: "like",
+        type
       });
-
-      res.json({ status: "success", data: post });
+      return ApiResponse.success(res, result);
     } catch (error) {
       next(error);
     }
   };
 
-  toggleDislike = async (req, res, next) => {
-    try {
-      const post = await this.postService.toggleReaction({
-        postId: req.params.id,
-        userId: req.user.userId,
-        reactionType: "dislike",
-      });
-
-      res.json({ status: "success", data: post });
-    } catch (error) {
-      next(error);
-    }
-  };
   reportPost = async (req, res, next) => {
     try {
       if (!req.user) {
@@ -129,26 +111,35 @@ class PostController {
 
   addComment = async (req, res, next) => {
     try {
-      const { content } = req.body;
-
-      if (!content || !content.trim()) {
-        return res.status(400).json({
-          status: "error",
-          message: "Comment content is required",
-        });
-      }
-
-      const updatedPost = await this.postService.addComment({
+      if (!req.body.content) throw new Error("Content required");
+      
+      const currentUser = {
+        _id: req.user.userId,
+        fullName: req.user.fullName,
+        avatar: req.user.avatar,
+        username: req.user.email.split('@')[0] 
+      };
+      
+      const comment = await this.postService.addComment({
         postId: req.params.id,
-        userId: req.user.userId,
-        content: content.trim(),
+        user: currentUser,
+        content: req.body.content
       });
-      const newComment = updatedPost.comments[updatedPost.comments.length - 1];
 
-      res.status(201).json({
-        status: "success",
-        data: newComment,
+      res.status(201).json({ status: "success", data: comment });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  getComments = async (req, res, next) => {
+    try {
+      const page = parseInt(req.query.page) || 1;
+      const comments = await this.postService.getComments({
+        postId: req.params.id,
+        page: page
       });
+      res.json({ status: "success", data: comments });
     } catch (error) {
       next(error);
     }

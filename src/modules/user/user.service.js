@@ -2,10 +2,11 @@ import AppError from '../../core/AppError.js';
 import { toUserResponse } from './user.dto.js';
 
 class UserService {
-  constructor({ userRepository , mediaRepository, cloudinaryProvider}) {
+  constructor({ userRepository , mediaRepository, cloudinaryProvider,jobQueue}) {
     this.userRepository = userRepository;
     this.mediaRepository = mediaRepository;
     this.cloudinaryProvider = cloudinaryProvider;
+    this.jobQueue = jobQueue;
   }
 
   async getUserById(id) {
@@ -94,6 +95,8 @@ class UserService {
         publicId: uploadResult.public_id,
         mimetype: file.mimetype,
         size: file.size,
+        width: uploadResult.width,   
+        height: uploadResult.height, 
         uploadedBy: userId,
         context: 'avatar'
     });
@@ -101,14 +104,20 @@ class UserService {
     if (user.avatarPublicId) {
         this.cloudinaryProvider.deleteImage(user.avatarPublicId)
             .catch(err => console.error(`[Cleanup] Failed to delete old avatar ${user.avatarPublicId}:`, err));
-
-        await this.mediaRepository.deleteByPublicId(user.avatarPublicId);
+        this.mediaRepository.deleteById(user.avatarPublicId) 
+             .catch(() => {}); 
     }
 
     user.avatar = newMedia.url;
     user.avatarPublicId = newMedia.publicId; 
     
     await user.save();
+    await this.jobQueue.addJob('user-updates', 'sync-profile', {
+        userId: user._id,
+        fullName: user.fullName,
+        avatar: user.avatar,
+        username: user.email.split('@')[0] 
+    });
 
     return toUserResponse(user);
   }
