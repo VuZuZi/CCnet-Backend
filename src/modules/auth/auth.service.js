@@ -20,7 +20,8 @@ class AuthService {
         userId: user._id,
         email: user.email,
         role: user.role,
-        fullName: user.fullName
+        fullName: user.fullName,
+        avatar: user.avatar
       },
       this.config.jwt.accessSecret,
       { expiresIn: this.config.jwt.accessExpire }
