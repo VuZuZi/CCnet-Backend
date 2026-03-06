@@ -46,6 +46,13 @@ const gracefulShutdown = async (signal) => {
       
       try {
         const container = getContainer();
+
+        const jobQueue = container.resolve('jobQueue');
+        if (jobQueue && jobQueue.close) {
+            console.log('Closing Job Queues & Workers...');
+            await jobQueue.close(); 
+        }
+
         const redis = container.resolve('redis');
         await redis.getClient().quit();
         console.log('Redis connection closed');

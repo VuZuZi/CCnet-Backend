@@ -3,6 +3,8 @@ import { config } from '../config/index.js';
 
 import RedisClient from '../core/RedisClient.js';
 import MailProvider from '../core/MailProvider.js';
+import CloudinaryProvider from '../core/CloudinaryProvider.js';
+import JobQueue from '../core/JobQueue.js';
 
 let container;
 
@@ -13,6 +15,8 @@ export const initializeContainer = () => {
     config: asValue(config),
     redis: asClass(RedisClient).singleton(),
     mailProvider: asClass(MailProvider).singleton(),
+    cloudinaryProvider: asClass(CloudinaryProvider).singleton(),
+    jobQueue: asClass(JobQueue).singleton(),
   });
 
   container.loadModules(

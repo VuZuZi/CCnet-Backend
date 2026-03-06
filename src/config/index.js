@@ -21,6 +21,11 @@ const envSchema = Joi.object({
   REDIS_PORT: Joi.number().default(6379),
   REDIS_PASSWORD: Joi.string().allow('').optional(),
   
+  // Cloudinary
+  CLOUDINARY_CLOUD_NAME: Joi.string().required(),
+  CLOUDINARY_API_KEY: Joi.string().required(),
+  CLOUDINARY_API_SECRET: Joi.string().required(),
+
   // Google
   GOOGLE_CLIENT_ID: Joi.string().required(),
   
@@ -35,7 +40,7 @@ const envSchema = Joi.object({
 const { error, value: envVars } = envSchema.validate(process.env);
 
 if (error) {
-  throw new Error(` Config validation error: ${error.message}`);
+  throw new Error(`Config validation error: ${error.message}`);
 }
 
 export const config = {
@@ -61,6 +66,12 @@ export const config = {
     refreshSecret: envVars.JWT_REFRESH_SECRET,
     accessExpire: envVars.JWT_ACCESS_EXPIRE,
     refreshExpireSeconds: envVars.JWT_REFRESH_EXPIRE_DAYS * 24 * 60 * 60, 
+  },
+
+  cloudinary: {
+    cloudName: envVars.CLOUDINARY_CLOUD_NAME,
+    apiKey: envVars.CLOUDINARY_API_KEY,
+    apiSecret: envVars.CLOUDINARY_API_SECRET,
   },
   
   google: {
