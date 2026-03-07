@@ -3,11 +3,13 @@ import AppError from '../core/AppError.js';
 
 const storage = multer.memoryStorage();
 
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith('image/')) {
+  if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new AppError('Not an image! Please upload only images.', 400), false);
+    cb(new AppError('Invalid file type. Only JPG, PNG, WEBP and GIF are allowed.', 400), false);
   }
 };
 
@@ -15,6 +17,7 @@ export const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024 
+    fileSize: 5 * 1024 * 1024, 
+    files: 5 
   }
 });

@@ -3,27 +3,34 @@ import { getContainer } from '../../container/index.js';
 import { authenticate } from '../../middlewares/auth.middleware.js';
 import { upload } from '../../middlewares/upload.middleware.js';
 import { optionalAuthenticate } from '../../middlewares/optionalAuth.middleware.js';
+import { validate } from '../../middlewares/validate.middleware.js';
+import { PostValidation } from './post.validation.js'; 
 
 const router = Router();
 
 const execute = (action) => (req, res, next) => {
   const container = getContainer();
-  const controller = container.resolve('postController'); 
+  const controller = container.resolve('postController');
   return controller[action](req, res, next);
 };
 
-router.get('/', optionalAuthenticate, execute('getNewsFeed'));
-router.get('/:id', optionalAuthenticate, execute('getPostById'));
-router.get('/:id/comments', optionalAuthenticate, execute('getComments'));
+router.get('/', optionalAuthenticate, validate(PostValidation.pagination), execute('getNewsFeed'));
+
+router.get('/:id', optionalAuthenticate, validate(PostValidation.paramsId), execute('getPostById'));
+
+router.get('/:id/comments', optionalAuthenticate, validate(PostValidation.pagination), execute('getComments'));
+
 router.post(
-    '/', 
-    authenticate, 
-    upload.array('images', 5), 
-    execute('createPost')
+  '/',
+  authenticate,
+  upload.array('images', 5),
+  validate(PostValidation.createPost),
+  execute('createPost')
 );
-router.delete('/:id', authenticate, execute('deletePost'));
-router.post('/:id/reaction', authenticate, execute('toggleReaction'));
-router.post('/:id/comments', authenticate, execute('addComment'));
-router.post('/:id/report', authenticate, execute('reportPost'));
+
+router.delete('/:id', authenticate, validate(PostValidation.paramsId), execute('deletePost'));
+router.post('/:id/reaction', authenticate, validate(PostValidation.toggleReaction), execute('toggleReaction'));
+router.post('/:id/comments', authenticate, validate(PostValidation.addComment), execute('addComment'));
+router.post('/:id/report', authenticate, validate(PostValidation.paramsId), execute('reportPost'));
 
 export default router;

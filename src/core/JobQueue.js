@@ -11,6 +11,7 @@ class JobQueue {
       maxRetriesPerRequest: null, 
     };
   }
+
   getQueue(queueName) {
     if (!this.queues[queueName]) {
       this.queues[queueName] = new Queue(queueName, { 
@@ -20,26 +21,26 @@ class JobQueue {
     return this.queues[queueName];
   }
 
-  async addJob(queueName, jobName, data) {
+  async addJob(queueName, jobName, data, customOptions = {}) {
     const queue = this.getQueue(queueName);
-    return await queue.add(jobName, data, { 
+    const defaultOptions = {
         removeOnComplete: true, 
         attempts: 3,        
-        backoff: { type: 'exponential', delay: 1000 } 
-    });
+        backoff: { type: 'exponential', delay: 1000 }
+    };
+    return await queue.add(jobName, data, { ...defaultOptions, ...customOptions });
   }
 
   async close() {
     await Promise.all(this.workers.map(worker => worker.close()));
-    
     await Promise.all(Object.values(this.queues).map(queue => queue.close()));
-    
     console.log('[JobQueue] All queues and workers closed gracefully.');
   }
 
-  registerWorker(queueName, processor) {
+  registerWorker(queueName, processor, workerOptions = {}) {
     const worker = new Worker(queueName, processor, { 
-      connection: this.redisConfig 
+      connection: this.redisConfig,
+      ...workerOptions 
     });
     
     worker.on('completed', (job) => {
@@ -47,7 +48,7 @@ class JobQueue {
     });
 
     worker.on('failed', (job, err) => {
-      console.error(`[JobQueue] Job ${job.name} failed: ${err.message}`);
+      console.error(`[JobQueue] [CRITICAL] Job ${job.name} failed: ${err.message}`);
     });
 
     this.workers.push(worker);

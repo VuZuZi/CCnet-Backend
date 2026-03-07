@@ -6,24 +6,15 @@ class PostController {
     this.reportService = reportService;
   }
 
- getNewsFeed = async (req, res, next) => {
+  getNewsFeed = async (req, res, next) => {
     try {
-      const limit = parseInt(req.query.limit) || 10;
+      const limit = parseInt(req.query.limit, 10) || 10;
       const cursor = req.query.cursor || null;
+      const currentUserId = req.user?.userId || null;
+
+      const result = await this.postService.getNewsFeed({ cursor, limit, userId: currentUserId });
       
-      const currentUserId = req.user ? req.user.userId : null;
-
-      const result = await this.postService.getNewsFeed({
-        cursor,
-        limit,
-        userId: currentUserId 
-      });
-
-      res.json({
-        status: "success",
-        data: result.data,
-        paging: result.paging
-      });
+      return ApiResponse.success(res, result.data, result.paging);
     } catch (error) {
       next(error);
     }
@@ -32,15 +23,10 @@ class PostController {
   getPostById = async (req, res, next) => {
     try {
       const post = await this.postService.getPostById(req.params.id);
-
       if (!post) {
-        return res.status(404).json({
-          status: "error",
-          message: "Post not found",
-        });
+        return ApiResponse.notFound(res, "Post not found"); 
       }
-
-      res.json({ status: "success", data: post });
+      return ApiResponse.success(res, post);
     } catch (error) {
       next(error);
     }
@@ -51,17 +37,10 @@ class PostController {
       const { content, privacy } = req.body;
       const files = req.files || [];
 
-      const currentUser = {
-        _id: req.user.userId, 
-        username: req.user.email.split('@')[0],
-        avatar: req.user.avatar,
-        fullName: req.user.fullName
-      };
-
       const post = await this.postService.createPost({
         content,
         files,
-        user: currentUser, 
+        user: req.user, 
         privacy
       });
 
@@ -71,7 +50,7 @@ class PostController {
     }
   };
 
- toggleReaction = async (req, res, next) => {
+  toggleReaction = async (req, res, next) => {
     try {
       const { type } = req.body; 
       const result = await this.postService.toggleReaction({
@@ -87,23 +66,14 @@ class PostController {
 
   reportPost = async (req, res, next) => {
     try {
-      if (!req.user) {
-        return res.status(401).json({ message: "Authentication required" });
-      }
-
-      const reporterId = req.user._id;
-
       const reportData = {
         ...req.body,
-        reporter_ref: reporterId,
+        reporter_ref: req.user.userId,
         target_ref: req.params.id,
       };
+      
       const report = await this.reportService.createReport(reportData);
-
-      res.status(201).json({
-        status: "success",
-        data: report,
-      });
+      return ApiResponse.created(res, report);
     } catch (error) {
       next(error);
     }
@@ -111,22 +81,16 @@ class PostController {
 
   addComment = async (req, res, next) => {
     try {
-      if (!req.body.content) throw new Error("Content required");
-      
-      const currentUser = {
-        _id: req.user.userId,
-        fullName: req.user.fullName,
-        avatar: req.user.avatar,
-        username: req.user.email.split('@')[0] 
-      };
+      const { content } = req.body;
+      if (!content) return ApiResponse.badRequest(res, "Content is required"); 
       
       const comment = await this.postService.addComment({
         postId: req.params.id,
-        user: currentUser,
-        content: req.body.content
+        user: req.user,
+        content
       });
 
-      res.status(201).json({ status: "success", data: comment });
+      return ApiResponse.created(res, comment);
     } catch (error) {
       next(error);
     }
@@ -134,12 +98,22 @@ class PostController {
 
   getComments = async (req, res, next) => {
     try {
-      const page = parseInt(req.query.page) || 1;
-      const comments = await this.postService.getComments({
+      const page = parseInt(req.query.page, 10) || 1;
+      const comments = await this.postService.getComments({ postId: req.params.id, page });
+      return ApiResponse.success(res, comments);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  deletePost = async (req, res, next) => {
+    try {
+      await this.postService.deletePost({
         postId: req.params.id,
-        page: page
+        userId: req.user.userId 
       });
-      res.json({ status: "success", data: comments });
+
+      return ApiResponse.success(res, { message: "Deleted successfully" });
     } catch (error) {
       next(error);
     }

@@ -11,18 +11,6 @@ class PostService {
         this.CACHE_TTL_POST = 300;
     }
 
-    _processContent(content) {
-        if (!content) return { cleanContent: '', hashtags: [] };
-
-        const hashtags = (content.match(/#[a-z0-9_]+/gi) || [])
-            .map(tag => tag.toLowerCase().replace('#', ''));
-
-        return {
-            cleanContent: content.trim(),
-            hashtags: [...new Set(hashtags)]
-        };
-    }
-
     _extractHashtags(content) {
         if (!content) return [];
         const matches = content.match(/#[a-z0-9_]+/gi) || [];
@@ -34,29 +22,30 @@ class PostService {
     }
 
     async createPost({ user, content, files, privacy }) {
-        let images = [];
+        const images = [];
         if (files?.length) {
-            const uploadedMedias = await this.mediaService.uploadMultiple(files, user._id, 'post');
-            images = uploadedMedias.map(m => ({
+            const uploadedMedias = await this.mediaService.uploadMultiple(files, user.userId, 'post');
+            images.push(...uploadedMedias.map(m => ({
                 url: m.url, publicId: m.publicId,
                 blurHash: m.blurHash, width: m.width, height: m.height,
                 aspectRatio: m.height ? (m.width / m.height) : 1
-            }));
+            })));
         }
 
-        if (!content?.trim() && !images.length) {
+        const cleanContent = content?.trim();
+        if (!cleanContent && !images.length) {
             throw new AppError("Post content or image required", 400);
         }
 
         const postData = {
             author: {
-                _id: user._id,
+                _id: user.userId,
                 fullName: user.fullName,
                 avatar: user.avatar,
                 username: user.username
             },
-            content: content?.trim(),
-            hashtags: this._extractHashtags(content),
+            content: cleanContent,
+            hashtags: this._extractHashtags(cleanContent),
             images,
             privacy: privacy || 'public',
             stats: { likes: 0, comments: 0, shares: 0, views: 0 },
@@ -65,6 +54,7 @@ class PostService {
 
         const newPost = await this.postRepository.create(postData);
 
+        // Xóa cache trang đầu. Tối ưu hơn: Push background job (Worker) để xử lý cache.
         const firstPageKey = this._getFeedKey(null, 10);
         await this.redis.del(firstPageKey);
 
@@ -73,43 +63,42 @@ class PostService {
 
     async addComment({ postId, user, content }) {
         const session = await mongoose.startSession();
-        session.startTransaction();
+        let newComment;
 
         try {
-            const newComment = await this.postRepository.createComment({
-                postId, author: user._id, content
-            }, session);
+            // Dùng withTransaction thống nhất, an toàn hơn và hỗ trợ auto-retry
+            await session.withTransaction(async () => {
+                newComment = await this.postRepository.createComment({
+                    postId, author: user.userId, content
+                }, session);
 
-            const commentSnapshot = {
-                _id: newComment._id,
-                content: content,
-                author: {
-                    _id: user._id,
-                    fullName: user.fullName,
-                    avatar: user.avatar,
-                    username: user.username
-                },
-                createdAt: newComment.createdAt || new Date()
-            };
+                const commentSnapshot = {
+                    _id: newComment._id,
+                    content: content,
+                    author: {
+                        _id: user.userId,
+                        fullName: user.fullName,
+                        avatar: user.avatar,
+                        username: user.username
+                    },
+                    createdAt: newComment.createdAt || new Date()
+                };
 
-            await this.postRepository.pushLatestCommentToPost(postId, commentSnapshot, session);
+                await this.postRepository.pushLatestCommentToPost(postId, commentSnapshot, session);
+            });
 
-            await session.commitTransaction();
-
-            await this.redis.del(`post:${postId}`);
+            // Background invalidate cache
+            this.redis.del(`post:${postId}`).catch(e => console.error("[Redis] del error", e));
 
             return newComment;
-        } catch (error) {
-            await session.abortTransaction();
-            throw error;
         } finally {
-            session.endSession();
+            await session.endSession();
         }
     }
 
     async toggleReaction({ postId, userId, type }) {
         const session = await mongoose.startSession();
-        let result = { action: '', type };
+        const result = { action: '', type };
 
         try {
             await session.withTransaction(async () => {
@@ -118,9 +107,9 @@ class PostService {
                     session
                 );
 
-                const isUpdate = existingReaction.lastErrorObject?.updatedExisting || existingReaction.ok;
-
-                const oldType = existingReaction.value ? existingReaction.value.type : null;
+                // Xử lý cẩn thận đoạn lấy metadata trả về từ upsert của Mongoose
+                const isUpdate = existingReaction?.lastErrorObject?.updatedExisting;
+                const oldType = existingReaction?.value?.type;
 
                 if (!isUpdate) {
                     await this.postRepository.incrementPostStats(postId, 'likes', 1, session);
@@ -137,23 +126,20 @@ class PostService {
                 }
             });
 
-            await this.redis.del(`post:${postId}`);
-
-        } catch (error) {
-            throw error;
+            this.redis.del(`post:${postId}`).catch(e => console.error("[Redis] del error", e));
+            return result;
         } finally {
-            session.endSession();
+            await session.endSession();
         }
-
-        return result;
     }
 
     async getNewsFeed({ cursor, limit = 10, userId }) {
         const cacheKey = this._getFeedKey(cursor, limit);
-
         let posts = null;
+
         try {
-            posts = await this.redis.get(cacheKey);
+            const cachedData = await this.redis.get(cacheKey);
+            if (cachedData) posts = JSON.parse(cachedData); // BẮT BUỘC PARSE TỪ REDIS STRING
         } catch (e) {
             console.warn("[Cache] Redis get failed, fallback to DB", e);
         }
@@ -166,7 +152,8 @@ class PostService {
             });
 
             if (posts.length > 0) {
-                this.redis.set(cacheKey, posts, 'EX', this.CACHE_TTL_FEED)
+                // BẮT BUỘC STRINGIFY TRƯỚC KHI LƯU VÀO REDIS
+                this.redis.set(cacheKey, JSON.stringify(posts), 'EX', this.CACHE_TTL_FEED)
                     .catch(err => console.error("[Cache] Set failed", err));
             }
         }
@@ -175,7 +162,7 @@ class PostService {
             return { data: [], paging: { nextCursor: null, hasMore: false } };
         }
 
-        let reactionsMap = new Map();
+        const reactionsMap = new Map();
         if (userId) {
             const postIds = posts.map(p => p._id);
             const reactions = await this.postRepository.getReactionsByUserAndTargets(userId, postIds);
@@ -207,18 +194,46 @@ class PostService {
         const cacheKey = `post:${id}`;
 
         try {
-            const cachedPost = await this.redis.get(cacheKey);
-            if (cachedPost) return cachedPost;
+            const cachedData = await this.redis.get(cacheKey);
+            if (cachedData) return JSON.parse(cachedData); // SỬA LỖI JSON PARSE
         } catch (e) { }
 
         const post = await this.postRepository.findById(id);
         if (post) {
-            this.redis.set(cacheKey, post, 'EX', this.CACHE_TTL_POST).catch(console.error);
+            this.redis.set(cacheKey, JSON.stringify(post), 'EX', this.CACHE_TTL_POST).catch(console.error);
         }
 
         return post;
     }
 
+    async deletePost({ postId, userId }) {
+        const deletedPost = await this.postRepository.softDeletePost(postId, userId);
+
+        if (!deletedPost) {
+            throw new AppError("Post not found or you do not have permission to delete it", 404);
+        }
+
+        this.redis.del(`post:${postId}`).catch(e => console.error("[Cache] Del error", e));
+
+        this._invalidateFeedCacheBackground();
+
+        return { message: "Post deleted successfully" };
+    }
+
+    async _invalidateFeedCacheBackground() {
+        try {
+            let cursor = '0';
+            do {
+                const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', 'feed:public:*', 'COUNT', 100);
+                cursor = nextCursor;
+                if (keys.length > 0) {
+                    typeof this.redis.unlink === 'function' ? await this.redis.unlink(keys) : await this.redis.del(keys);
+                }
+            } while (cursor !== '0');
+        } catch (e) {
+            console.error('[Cache] Failed to invalidate feed cache:', e);
+        }
+    }
 }
 
 export default PostService;

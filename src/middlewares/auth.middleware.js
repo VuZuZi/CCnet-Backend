@@ -3,20 +3,29 @@ import { getContainer } from "../container/index.js";
 
 export const authenticate = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) {
-      throw new AppError("Unauthorized: Token missing", 401);
+    const authHeader = req.headers?.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      throw new AppError("Unauthorized: Token missing or invalid format", 401);
     }
 
     const token = authHeader.split(" ")[1];
+    if (!token) {
+        throw new AppError("Unauthorized: Token missing", 401);
+    }
 
     const container = getContainer();
     const redis = container.resolve("redis");
     const authService = container.resolve("authService");
 
-    const isBlacklisted = await redis.get(`bl:${token}`);
-    if (isBlacklisted) {
-      throw new AppError("Session expired or revoked", 401);
+    try {
+      const isBlacklisted = await redis.get(`bl:${token}`);
+      if (isBlacklisted) {
+        throw new AppError("Session expired or revoked", 401);
+      }
+    } catch (redisError) {
+      if (redisError instanceof AppError) throw redisError; 
+      console.error("[Auth Middleware] Redis connection failed:", redisError.message);
+      throw new AppError("Authentication service is temporarily unavailable", 503);
     }
 
     const decoded = authService.verifyAccessToken(token);
@@ -26,7 +35,8 @@ export const authenticate = async (req, res, next) => {
       email: decoded.email,
       role: decoded.role,
       fullName: decoded.fullName,
-      avatar: decoded.avatar
+      avatar: decoded.avatar,
+      username: decoded.username || decoded.email.split('@')[0] 
     };
 
     next();

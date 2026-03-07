@@ -9,15 +9,20 @@ class PostMaintenanceService {
     console.log(`[Maintenance] Batch sync started for user ${userId}`);
     
     const batchSize = 500;
-    
     const updateData = {
       "author.fullName": fullName,
       "author.avatar": avatar,
       "author.username": username
     };
 
-    const processedPosts = await this._processBatchUpdate(
-        this.postRepository.getPostsByAuthorCursor(userId), 
+    let processedPosts = 0;
+    let processedComments = 0;
+
+    const postCursor = this.postRepository.getPostsByAuthorCursor(userId).addCursorFlag('noCursorTimeout', true);
+    
+    try {
+      processedPosts = await this._processBatchUpdate(
+        postCursor, 
         (doc) => ({
             updateOne: {
                 filter: { _id: doc._id },
@@ -26,7 +31,10 @@ class PostMaintenanceService {
         }),
         batchSize,
         true 
-    );
+      );
+    } finally {
+      await postCursor.close(); 
+    }
 
     const commentUpdateOpsBuilder = (doc) => ({
         updateOne: {
@@ -42,23 +50,19 @@ class PostMaintenanceService {
         }
     });
 
-    const processedComments = await this._processBatchUpdate(
-        this.postRepository.getPostsWithCommentByAuthorCursor(userId),
+    const commentCursor = this.postRepository.getPostsWithCommentByAuthorCursor(userId).addCursorFlag('noCursorTimeout', true);
+    
+    try {
+      processedComments = await this._processBatchUpdate(
+        commentCursor,
         commentUpdateOpsBuilder,
         batchSize,
         true 
-    );
-    try {
-        console.log('[Maintenance] Invalidating NewsFeed caches...');
-        if (this.redis.deletePattern) {
-             await this.redis.deletePattern('feed:public:*');
-        } else {
-             await this.redis.del('feed:public:10:start');
-             await this.redis.del('feed:public:10:null');
-        }
-    } catch (e) {
-        console.error('[Maintenance] Failed to clear feed cache:', e);
+      );
+    } finally {
+      await commentCursor.close();
     }
+    await this._invalidateFeedCache();
 
     const duration = Date.now() - start;
     console.log(`[Maintenance] Sync completed in ${duration}ms.`);
@@ -80,7 +84,8 @@ class PostMaintenanceService {
         count += bulkOps.length;
         bulkOps = [];
         affectedIds = [];
-        await new Promise(r => setTimeout(r, 20)); 
+        
+        await new Promise(r => setImmediate(r)); 
       }
     }
 
@@ -93,14 +98,45 @@ class PostMaintenanceService {
   }
 
   async _executeBatch(ops, idsToInvalidate) {
+    try {
       await this.postRepository.bulkWrite(ops);
 
       if (idsToInvalidate && idsToInvalidate.length > 0) {
-          const keys = idsToInvalidate.map(id => `post:${id}`);
-          this.redis.del(keys).catch(err => 
-              console.error('[Maintenance] Cache clear error:', err)
-          );
+        const keys = idsToInvalidate.map(id => `post:${id}`);
+        if (typeof this.redis.unlink === 'function') {
+            await this.redis.unlink(keys);
+        } else {
+            await this.redis.del(keys);
+        }
       }
+    } catch (error) {
+      console.error('[Maintenance] Bulk write failed:', error);
+      throw error; 
+    }
+  }
+
+  async _invalidateFeedCache() {
+    console.log('[Maintenance] Invalidating NewsFeed caches non-blocking...');
+    try {
+      let cursor = '0';
+      const pattern = 'feed:public:*';
+
+      do {
+        const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+        cursor = nextCursor;
+
+        if (keys.length > 0) {
+           if (typeof this.redis.unlink === 'function') {
+               await this.redis.unlink(keys);
+           } else {
+               await this.redis.del(keys);
+           }
+        }
+      } while (cursor !== '0');
+      
+    } catch (e) {
+      console.error('[Maintenance] Failed to scan & clear feed cache:', e);
+    }
   }
 }
 

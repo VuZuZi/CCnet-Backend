@@ -84,8 +84,6 @@ class PostRepository {
     );
   }
 
-  // === MAINTENANCE / BATCH SUPPORT  ===
-
   getPostsByAuthorCursor(authorId) {
     return Post.find({ "author._id": authorId }).cursor();
   }
@@ -97,6 +95,19 @@ class PostRepository {
   async bulkWrite(operations) {
     if (!operations.length) return;
     return Post.bulkWrite(operations, { ordered: false });
+  }
+
+  async softDeletePost(postId, userId) {
+    return Post.findOneAndUpdate(
+      { _id: postId, "author._id": userId, isDeleted: false },
+      { 
+        $set: { 
+          isDeleted: true, 
+          deletedAt: new Date() 
+        } 
+      },
+      { new: true }
+    );
   }
 }
 

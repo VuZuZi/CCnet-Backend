@@ -6,8 +6,7 @@ const commentSchema = new mongoose.Schema(
     postId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Post",
-      required: true,
-      index: true
+      required: true
     },
     author: {
       type: mongoose.Schema.Types.ObjectId,
@@ -17,12 +16,15 @@ const commentSchema = new mongoose.Schema(
     parentCommentId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Comment",
-      default: null,
-      index: true
+      default: null
     },
     isDeleted: { type: Boolean, default: false }
   },
   { timestamps: true }
 );
+
+commentSchema.index({ postId: 1, isDeleted: 1, createdAt: -1 });
+
+commentSchema.index({ parentCommentId: 1, isDeleted: 1, createdAt: -1 });
 
 export default mongoose.model("Comment", commentSchema);
