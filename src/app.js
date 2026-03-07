@@ -13,18 +13,22 @@ export const createApp = async () => {
   initializeContainer();
 
   console.log('Configuring middleware...');
-  configureMiddleware(app); 
+  configureMiddleware(app);
 
   console.log('Registering modules...');
-  await registerModule('auth'); 
-  await registerModule('user'); 
+  await registerModule('auth');
+  await registerModule('user');
   await registerModule('communitypost');
+
+  await registerModule('chat');
+  await registerModule('follow');
+  await registerModule('search');
 
   console.log('Starting Background Workers...');
   initPostWorkers();
 
   configureSystemRoutes(app);
-  
+
   console.log('Configuring routes...');
   configureRoutes(app);
 
