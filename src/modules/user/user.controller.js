@@ -1,6 +1,4 @@
 import ApiResponse from '../../core/Response.js';
-import AppError from '../../core/AppError.js';
-import { updateProfileSchema } from './user.validation.js';
 
 class UserController {
     constructor({ userService }) {
@@ -9,9 +7,7 @@ class UserController {
 
     getProfile = async (req, res, next) => {
         try {
-            const userId = req.user?.userId;
-            if (!userId) throw new AppError('Unauthorized', 401);
-            const user = await this.userService.getProfile(userId);
+            const user = await this.userService.getProfile(req.user.userId);
             return ApiResponse.success(res, { user });
         } catch (error) {
             next(error);
@@ -20,13 +16,7 @@ class UserController {
 
     updateProfile = async (req, res, next) => {
         try {
-            const userId = req.user?.userId;
-            if (!userId) throw new AppError('Unauthorized', 401);
-
-            const { error, value } = updateProfileSchema.validate(req.body);
-            if (error) throw new AppError(error.details[0].message, 400);
-
-            const updatedUser = await this.userService.updateProfile(userId, value);
+            const updatedUser = await this.userService.updateProfile(req.user.userId, req.body);
             return ApiResponse.success(res, { user: updatedUser }, 'Profile updated successfully');
         } catch (error) {
             next(error);
@@ -35,15 +25,12 @@ class UserController {
 
     changePassword = async (req, res, next) => {
         try {
-            const { error, value } = changePasswordSchema.validate(req.body);
-            if (error) throw new AppError(error.details[0].message, 400);
-
+            const { currentPassword, newPassword } = req.body;
             const updatedUser = await this.userService.changePassword(
-                req.user.userId, 
-                value.currentPassword, 
-                value.newPassword
+                req.user.userId,
+                currentPassword,
+                newPassword
             );
-
             return ApiResponse.success(res, { user: updatedUser }, 'Password changed successfully');
         } catch (error) {
             next(error);
@@ -51,13 +38,32 @@ class UserController {
     };
 
     changeAvatar = async (req, res, next) => {
-    try {
-        const updatedUser = await this.userService.changeAvatar(req.user.userId, req.file);
-        return ApiResponse.success(res, { user: updatedUser }, 'Avatar updated successfully');
-    } catch (error) {
-        next(error);
-    }
-};
+        try {
+            const updatedUser = await this.userService.changeAvatar(req.user.userId, req.file);
+            return ApiResponse.success(res, { user: updatedUser }, 'Avatar updated successfully');
+        } catch (error) {
+            next(error);
+        }
+    };
+
+    changeCoverPhoto = async (req, res, next) => {
+        try {
+            const updatedUser = await this.userService.changeCoverPhoto(req.user.userId, req.file);
+            return ApiResponse.success(res, { user: updatedUser }, 'Cover photo updated successfully');
+        } catch (error) {
+            next(error);
+        }
+    };
+
+    getPublicProfile = async (req, res, next) => {
+        try {
+            const { id } = req.params;
+            const user = await this.userService.getProfile(id);
+            return ApiResponse.success(res, { user });
+        } catch (error) {
+            next(error);
+        }
+    };
 }
 
 export default UserController;

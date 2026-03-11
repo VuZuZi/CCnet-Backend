@@ -28,6 +28,17 @@ class CloudinaryProvider {
     });
   }
 
+  async deleteImage(publicId) {
+    if (!publicId) return null;
+    try {
+      const result = await cloudinary.uploader.destroy(publicId);
+      return result;
+    } catch (error) {
+      console.error(`[CloudinaryProvider] Failed to delete image ${publicId}:`, error.message);
+      throw error;
+    }
+  }
+
   async deleteMany(publicIds) {
       if (!publicIds || publicIds.length === 0) return;
       return await cloudinary.api.delete_resources(publicIds);

@@ -6,10 +6,20 @@ export const toUserResponse = (user) => {
         email: u.email,
         fullName: u.fullName,
         avatar: u.avatar,
+        coverPhoto: u.coverPhoto,
         phone: u.phone,
         location: u.location,
-        bio: u.bio,
+        
+        headline: u.headline,
+        about: u.about,
+        
         skills: u.skills,
+        
+        followersCount: u.followersCount,
+        followingCount: u.followingCount,
+        level: u.level,
+        title: u.title,
+        
         role: u.role,
         createdAt: u.createdAt
     };

@@ -2,45 +2,50 @@ import User from './user.model.js';
 
 class UserRepository {
   async findByEmailWithPassword(email) {
-    return await User.findOne({ email }).select('+password');
+    return await User.findOne({ email }).select('+password').exec();
   }
 
   async findByEmail(email) {
-    return await User.findOne({ email });
+    return await User.findOne({ email }).lean().exec();
   }
 
   async findById(id) {
-    return await User.findById(id).lean();
+    return await User.findById(id).lean().exec();
   }
 
-  async findByIdWithPassword(id) {
-    return await User.findById(id).select('+password +googleId');
+  async findByIdWithSecurityData(id) {
+    return await User.findById(id)
+      .select('+password +googleId +avatarPublicId +coverPhotoPublicId')
+      .exec();
   }
 
   async create(userData) {
-    const user = new User(userData);
-    return await user.save();
-  }
-
-  async update(userDocument, updateData) {
-    Object.assign(userDocument, updateData);
-    return await userDocument.save();
+    return await User.create(userData);
   }
 
   async updateById(id, updateData) {
-    return await User.findByIdAndUpdate(id, updateData, { 
-      new: true,
-      runValidators: true 
-    });
+    return await User.findByIdAndUpdate(
+      id, 
+      { $set: updateData }, 
+      { new: true, runValidators: true }
+    ).lean().exec();
   }
 
   async deleteById(id) {
-    return await User.findByIdAndDelete(id);
+    return await User.findByIdAndDelete(id).lean().exec();
   }
 
   async existsByEmail(email) {
-    const result = await User.exists({ email });
-    return !!result; 
+    const user = await User.exists({ email });
+    return !!user; 
+  }
+
+  async updateCounters(userId, counters) {
+    return await User.findByIdAndUpdate(
+      userId,
+      { $inc: counters },
+      { new: true }
+    ).lean().exec();
   }
 }
 
