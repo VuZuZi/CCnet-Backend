@@ -5,6 +5,7 @@ import errorHandler from './middlewares/errorHandler.js';
 import { initializeContainer, registerModule } from './container/index.js';
 
 import { initPostWorkers } from './modules/communitypost/post.worker.js';
+import { initFollowWorkers } from './modules/follow/follow.worker.js';
 
 export const createApp = async () => {
   const app = express();
@@ -26,6 +27,7 @@ export const createApp = async () => {
 
   console.log('Starting Background Workers...');
   initPostWorkers();
+  initFollowWorkers();
 
   configureSystemRoutes(app);
 

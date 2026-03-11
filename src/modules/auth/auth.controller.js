@@ -7,8 +7,9 @@ import {
 } from "./auth.validation.js";
 
 class AuthController {
-  constructor({ authService, config }) {
+constructor({ authService, userService, config }) {
     this.authService = authService;
+    this.userService = userService;
     this.config = config;
   }
 
@@ -40,16 +41,18 @@ class AuthController {
     }
   };
 
-  login = async (req, res, next) => {
+ login = async (req, res, next) => {
     try {
       const { error, value } = loginSchema.validate(req.body);
-      if (error) throw new AppError(error.details[0].message, 400);
+      if (error) throw new AppError(error.details.message, 400);
 
       const result = await this.authService.login(value.email, value.password);
+      this._setRefreshTokenCookie(res, result.refreshToken);
 
-      this._setRefreshTokenCookie(res, result.tokens.refreshToken);
-
-      return ApiResponse.success(res, result, "Login successful");
+      return ApiResponse.success(res, { 
+          user: result.user, 
+          tokens: { accessToken: result.accessToken } 
+      }, "Login successful");
     } catch (error) {
       next(error);
     }
@@ -61,9 +64,12 @@ class AuthController {
       if (!idToken) throw new AppError("Google ID Token is required", 400);
 
       const result = await this.authService.loginWithGoogle(idToken);
-      this._setRefreshTokenCookie(res, result.tokens.refreshToken);
+      this._setRefreshTokenCookie(res, result.refreshToken);
 
-      return ApiResponse.success(res, result, "Google Login successful");
+      return ApiResponse.success(res, { 
+          user: result.user, 
+          tokens: { accessToken: result.accessToken } 
+      }, "Google Login successful");
     } catch (error) {
       next(error);
     }
@@ -71,10 +77,10 @@ class AuthController {
 
   refreshToken = async (req, res, next) => {
     try {
-      const refreshToken = req.cookies?.refreshToken || req.body.refreshToken;
+      const refreshToken = req.cookies?.refreshToken;
 
       if (!refreshToken) {
-        throw new AppError("Refresh token not found", 401);
+        throw new AppError("Refresh token not found in cookies", 401);
       }
 
       const result = await this.authService.refreshAccessToken(refreshToken);
@@ -83,8 +89,8 @@ class AuthController {
 
       return ApiResponse.success(
         res,
-        { accessToken: result.accessToken },
-        "Access token refreshed",
+        { accessToken: result.accessToken }, 
+        "Access token refreshed"
       );
     } catch (error) {
       next(error);
@@ -110,8 +116,8 @@ class AuthController {
 
   logout = async (req, res, next) => {
     try {
-      const refreshToken = req.cookies?.refreshToken || req.body.refreshToken;
-      const accessToken = req.headers.authorization?.split(" ")[1];
+      const refreshToken = req.cookies?.refreshToken; 
+      const accessToken = req.headers.authorization?.split(" ");
       const userId = req.user?.userId;
 
       await this.authService.logout(userId, accessToken, refreshToken);
@@ -140,13 +146,14 @@ class AuthController {
 
   getCurrentUser = async (req, res, next) => {
     try {
-      return ApiResponse.success(res, { user: req.user });
+      const freshUser = await this.userService.getProfile(req.user.userId);
+      return ApiResponse.success(res, { user: freshUser });
     } catch (error) {
       next(error);
     }
   };
 
-  _setRefreshTokenCookie(res, token) {
+ _setRefreshTokenCookie(res, token) {
     res.cookie("refreshToken", token, {
       httpOnly: true,
       secure: this.config.env === "production",

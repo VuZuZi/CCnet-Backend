@@ -77,7 +77,7 @@ class AuthService {
     if (!storedOTP) throw new AppError('OTP expired or invalid', 400);
     if (storedOTP !== parseInt(otp)) throw new AppError('Invalid OTP', 400);
 
-    await this.userService.updateUser(userId, { isEmailVerified: true });
+    await this.userService.updateProfile(userId, { isEmailVerified: true });
     await this.redis.del(otpKey); 
 
     return { verified: true };
@@ -128,7 +128,7 @@ class AuthService {
 
       if (user) {
         if (!user.googleId) {
-           await this.userService.updateUser(user._id, { googleId, avatar: user.avatar || picture });
+           await this.userService.updateProfile(user._id, { googleId, avatar: user.avatar || picture });
         }
         if (!user.isActive) throw new AppError('Account is deactivated', 403);
       } else {
@@ -221,7 +221,8 @@ class AuthService {
         role: user.role,
         avatar: user.avatar
       },
-      tokens: { accessToken, refreshToken }
+      accessToken,
+      refreshToken 
     };
   }
 }

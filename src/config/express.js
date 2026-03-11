@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan'; 
+import cookieParser from 'cookie-parser'; 
 import { config } from './index.js';
 
 export const configureMiddleware = (app) => {
@@ -13,14 +14,15 @@ export const configureMiddleware = (app) => {
 
   app.use(cors({
     origin: config.cors.origin, 
-    credentials: true, 
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
   }));
 
   app.use(express.json({ limit: '10mb' })); 
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
+  
+  app.use(cookieParser()); 
 
   if (config.env === 'development') {
     app.use(morgan('dev')); 

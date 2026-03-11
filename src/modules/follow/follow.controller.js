@@ -1,6 +1,4 @@
 import ApiResponse from '../../core/Response.js';
-import AppError from '../../core/AppError.js';
-import { idParamSchema, listFollowingSchema } from './follow.validation.js';
 
 class FollowController {
   constructor({ followService }) {
@@ -9,12 +7,8 @@ class FollowController {
 
   followUser = async (req, res, next) => {
     try {
-      const { error, value } = idParamSchema.validate(req.params);
-      if (error) throw new AppError(error.details[0].message, 400);
-
-      const followerId = req.user?.userId;
-      const data = await this.followService.followUser(followerId, value.id);
-      return ApiResponse.success(res, data, 'Followed');
+      const data = await this.followService.followUser(req.user.userId, req.params.id);
+      return ApiResponse.success(res, data, 'Followed successfully');
     } catch (e) {
       next(e);
     }
@@ -22,12 +16,8 @@ class FollowController {
 
   unfollowUser = async (req, res, next) => {
     try {
-      const { error, value } = idParamSchema.validate(req.params);
-      if (error) throw new AppError(error.details[0].message, 400);
-
-      const followerId = req.user?.userId;
-      const data = await this.followService.unfollowUser(followerId, value.id);
-      return ApiResponse.success(res, data, 'Unfollowed');
+      const data = await this.followService.unfollowUser(req.user.userId, req.params.id);
+      return ApiResponse.success(res, data, 'Unfollowed successfully');
     } catch (e) {
       next(e);
     }
@@ -35,12 +25,8 @@ class FollowController {
 
   statusUser = async (req, res, next) => {
     try {
-      const { error, value } = idParamSchema.validate(req.params);
-      if (error) throw new AppError(error.details[0].message, 400);
-
-      const followerId = req.user?.userId;
-      const data = await this.followService.statusUser(followerId, value.id);
-      return ApiResponse.success(res, data, 'Status');
+      const data = await this.followService.statusUser(req.user.userId, req.params.id);
+      return ApiResponse.success(res, data, 'Status retrieved');
     } catch (e) {
       next(e);
     }
@@ -48,11 +34,8 @@ class FollowController {
 
   statsUser = async (req, res, next) => {
     try {
-      const { error, value } = idParamSchema.validate(req.params);
-      if (error) throw new AppError(error.details[0].message, 400);
-
-      const data = await this.followService.statsUser(value.id);
-      return ApiResponse.success(res, data, 'Stats');
+      const data = await this.followService.statsUser(req.params.id);
+      return ApiResponse.success(res, data, 'Stats retrieved');
     } catch (e) {
       next(e);
     }
@@ -60,12 +43,9 @@ class FollowController {
 
   getMyFollowing = async (req, res, next) => {
     try {
-      const { error, value } = listFollowingSchema.validate(req.query);
-      if (error) throw new AppError(error.details[0].message, 400);
-
-      const userId = req.user?.userId;
-      const data = await this.followService.getMyFollowing(userId, value.limit);
-      return ApiResponse.success(res, data, 'Following list');
+      const { limit, cursor } = req.query;
+      const data = await this.followService.getMyFollowing(req.user.userId, limit, cursor);
+      return ApiResponse.success(res, data, 'Following list retrieved');
     } catch (e) {
       next(e);
     }

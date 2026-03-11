@@ -1,8 +1,10 @@
 import AppError from '../../core/AppError.js';
 import { toUserResponse } from './user.dto.js';
+import bcrypt from 'bcryptjs';
+import sharp from 'sharp';
 
 class UserService {
-  constructor({ userRepository , mediaRepository, cloudinaryProvider,jobQueue}) {
+  constructor({ userRepository, mediaRepository, cloudinaryProvider, jobQueue }) {
     this.userRepository = userRepository;
     this.mediaRepository = mediaRepository;
     this.cloudinaryProvider = cloudinaryProvider;
@@ -11,16 +13,13 @@ class UserService {
 
   async getUserById(id) {
     const user = await this.userRepository.findById(id);
-    if (!user) {
-      throw new AppError('User not found', 404);
-    }
+    if (!user) throw new AppError('User not found', 404);
     return user;
   }
 
   async getProfile(userId) {
     const user = await this.userRepository.findById(userId);
     if (!user) throw new AppError('User not found', 404);
-    
     return toUserResponse(user);
   }
 
@@ -30,98 +29,179 @@ class UserService {
 
   async createUser(userData) {
     const exists = await this.userRepository.existsByEmail(userData.email);
-    if (exists) {
-      throw new AppError('Email already registered', 409);
-    }
+    if (exists) throw new AppError('Email already registered', 409);
     return await this.userRepository.create(userData);
   }
 
-  async updateUser(id, updateData) {
-    if (updateData.password) {
-      delete updateData.password;
-    }
-
-    const user = await this.userRepository.updateById(id, updateData);
-    if (!user) {
-      throw new AppError('User not found to update', 404);
-    }
-    return user;
-  }
-
   async updateProfile(userId, updateData) {
-    const user = await this.userRepository.findByIdWithPassword(userId); 
-    if (!user) throw new AppError('User not found', 404);
-    
-    const allowedFields = ['fullName', 'phone', 'location', 'bio', 'avatar', 'skills'];
-    
-    allowedFields.forEach(field => {
-        if (updateData[field] !== undefined) {
-            user[field] = updateData[field];
-        }
-    });
+    const updatedUser = await this.userRepository.updateById(userId, updateData);
+    if (!updatedUser) throw new AppError('User not found', 404);
 
-    const updatedUser = await user.save();
-    
     return toUserResponse(updatedUser);
   }
 
   async changePassword(id, currentPassword, newPassword) {
-        const user = await this.userRepository.findByIdWithPassword(id);
-        if (!user) throw new AppError('User not found', 404);
-        if (!user.password) throw new AppError('This account does not have a password to change', 400);
+    const user = await this.userRepository.findByIdWithSecurityData(id);
+    if (!user) throw new AppError('User not found', 404);
+    if (!user.password) throw new AppError('This account is linked to Google. Password change not allowed.', 400);
 
-        const isMatch = await user.comparePassword(currentPassword);
-        if (!isMatch) throw new AppError('Current password is incorrect', 400);
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) throw new AppError('Current password is incorrect', 400);
 
-        user.password = newPassword;
-        await user.save();
-        return toUserResponse(user);
-    }
-  
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    const updatedUser = await this.userRepository.updateById(id, { password: hashedPassword });
+    return toUserResponse(updatedUser);
+  }
+
   async changeAvatar(userId, file) {
     if (!file) throw new AppError('Please upload an image', 400);
 
-    const user = await this.userRepository.findByIdWithPassword(userId); 
-    if (!user) throw new AppError('User not found', 404);
+    try {
+      const metadata = await sharp(file.buffer).metadata();
+      if (!['jpeg', 'png', 'webp', 'gif'].includes(metadata.format)) {
+        throw new AppError('Invalid image format detected inside file', 400);
+      }
+    } catch (error) {
+      throw new AppError('Corrupted or invalid image file', 400);
+    }
 
-    const uploadResult = await this.cloudinaryProvider.uploadImage(
-        file.buffer, 
+    const oldUser = await this.userRepository.findByIdWithSecurityData(userId);
+    if (!oldUser) throw new AppError('User not found', 404);
+
+    let uploadResult;
+    let newMedia;
+
+    try {
+      uploadResult = await this.cloudinaryProvider.uploadImage(
+        file.buffer,
         `users/${userId}/avatar`
-    );
+      );
 
-    const newMedia = await this.mediaRepository.create({
+      newMedia = await this.mediaRepository.create({
         originalName: file.originalname,
         url: uploadResult.secure_url,
         publicId: uploadResult.public_id,
         mimetype: file.mimetype,
         size: file.size,
-        width: uploadResult.width,   
-        height: uploadResult.height, 
+        width: uploadResult.width,
+        height: uploadResult.height,
         uploadedBy: userId,
         context: 'avatar'
-    });
+      });
 
-    if (user.avatarPublicId) {
-        this.cloudinaryProvider.deleteImage(user.avatarPublicId)
-            .catch(err => console.error(`[Cleanup] Failed to delete old avatar ${user.avatarPublicId}:`, err));
-        this.mediaRepository.deleteById(user.avatarPublicId) 
-             .catch(() => {}); 
+      const updatedUser = await this.userRepository.updateById(userId, {
+        avatar: newMedia.url,
+        avatarPublicId: newMedia.publicId
+      });
+
+      if (oldUser.avatarPublicId) {
+        this._cleanupOldAvatar(oldUser.avatarPublicId).catch(err =>
+          console.error(`[Background Task] Failed to cleanup old avatar: ${err.message}`)
+        );
+      }
+
+      await this.jobQueue.addJob('user-updates', 'sync-profile', {
+        userId: updatedUser._id,
+        fullName: updatedUser.fullName,
+        avatar: updatedUser.avatar,
+        username: updatedUser.email.split('@')
+      });
+
+      return toUserResponse(updatedUser);
+
+    } catch (error) {
+      console.error('[Avatar Transaction Failed] Rolling back...', error);
+
+      if (uploadResult?.public_id) {
+        await this.cloudinaryProvider.deleteImage(uploadResult.public_id).catch(() => { });
+      }
+      if (newMedia?._id) {
+        await this.mediaRepository.deleteById(newMedia._id).catch(() => { });
+      }
+
+      throw new AppError('Failed to update avatar due to system error. Rolled back.', 500);
+    }
+  }
+
+  async _cleanupOldAvatar(publicId) {
+    await this.cloudinaryProvider.deleteImage(publicId);
+    await this.mediaRepository.deleteByPublicId(publicId);
+  }
+
+  async _cleanupOldMedia(publicId) {
+    await this.cloudinaryProvider.deleteImage(publicId);
+    await this.mediaRepository.deleteByPublicId(publicId);
+  }
+
+  async changeCoverPhoto(userId, file) {
+    if (!file) throw new AppError('Please upload an image for cover photo', 400);
+
+    try {
+      const metadata = await sharp(file.buffer).metadata();
+      if (!['jpeg', 'png', 'webp', 'gif'].includes(metadata.format)) {
+        throw new AppError('Invalid image format detected inside file', 400);
+      }
+    } catch (error) {
+      throw new AppError('Corrupted or invalid image file', 400);
     }
 
-    user.avatar = newMedia.url;
-    user.avatarPublicId = newMedia.publicId; 
-    
-    await user.save();
-    await this.jobQueue.addJob('user-updates', 'sync-profile', {
-        userId: user._id,
-        fullName: user.fullName,
-        avatar: user.avatar,
-        username: user.email.split('@')[0] 
-    });
+    const oldUser = await this.userRepository.findByIdWithSecurityData(userId);
+    if (!oldUser) throw new AppError('User not found', 404);
 
-    return toUserResponse(user);
+    let uploadResult;
+    let newMedia;
+
+    try {
+      uploadResult = await this.cloudinaryProvider.uploadImage(
+        file.buffer,
+        `users/${userId}/cover`
+      );
+
+      newMedia = await this.mediaRepository.create({
+        originalName: file.originalname,
+        url: uploadResult.secure_url,
+        publicId: uploadResult.public_id,
+        mimetype: file.mimetype,
+        size: file.size,
+        width: uploadResult.width,
+        height: uploadResult.height,
+        uploadedBy: userId,
+        context: 'cover'
+      });
+
+      const updatedUser = await this.userRepository.updateById(userId, {
+        coverPhoto: newMedia.url,
+        coverPhotoPublicId: newMedia.publicId
+      });
+
+      if (oldUser.coverPhotoPublicId) {
+        this._cleanupOldMedia(oldUser.coverPhotoPublicId).catch(err =>
+          console.error(`[Background Task] Failed to cleanup old cover photo: ${err.message}`)
+        );
+      }
+
+      await this.jobQueue.addJob('user-updates', 'sync-profile', {
+        userId: updatedUser._id,
+        coverPhoto: updatedUser.coverPhoto
+      });
+
+      return toUserResponse(updatedUser);
+
+    } catch (error) {
+      console.error('[Cover Photo Transaction Failed] Rolling back...', error);
+
+      if (uploadResult?.public_id) {
+        await this.cloudinaryProvider.deleteImage(uploadResult.public_id).catch(() => { });
+      }
+      if (newMedia?._id) {
+        await this.mediaRepository.deleteById(newMedia._id).catch(() => { });
+      }
+
+      throw new AppError('Failed to update cover photo. System error, rolled back.', 500);
+    }
   }
-    
 }
 
 export default UserService;

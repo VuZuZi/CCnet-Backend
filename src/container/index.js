@@ -23,7 +23,8 @@ export const initializeContainer = () => {
     [
       '../modules/**/*.service.js',
       '../modules/**/*.repository.js',
-      '../modules/**/*.controller.js'
+      '../modules/**/*.controller.js',
+      '../modules/**/*.processor.js'
     ],
     {
       cwd: import.meta.dirname, 
@@ -48,4 +49,13 @@ export const getContainer = () => {
     throw new Error('DI Container not initialized. Call initializeContainer() first.');
   }
   return container;
+};
+
+export const startWorkers = () => {
+  const container = getContainer();
+  const jobQueue = container.resolve('jobQueue');
+  const followProcessor = container.resolve('followProcessor');
+  jobQueue.registerWorker('follow-updates', followProcessor.getProcessor());
+  
+  console.log('[Worker] All queue workers have been started.');
 };

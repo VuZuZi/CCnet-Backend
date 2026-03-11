@@ -17,7 +17,7 @@ const mediaSchema = new mongoose.Schema(
     },
     context: { 
       type: String, 
-      enum: ['avatar', 'post', 'comment', 'general'], 
+      enum: ['avatar', 'post', 'comment', 'general', 'cover'], 
       default: 'general' 
     }
   },
