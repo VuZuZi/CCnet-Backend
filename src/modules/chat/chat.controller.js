@@ -35,7 +35,11 @@ class ChatController {
       const userId = req.user?.userId;
       if (!userId) throw new AppError('Unauthorized', 401);
 
-      const convo = await this.chatService.createOrGetConversation(userId, value.participantId);
+      const convo = await this.chatService.createOrGetConversation(
+        userId,
+        value.participantId
+      );
+
       return ApiResponse.success(res, convo, 'Conversation ready');
     } catch (error) {
       next(error);
@@ -59,19 +63,37 @@ class ChatController {
 
   sendMessage = async (req, res, next) => {
     try {
-      const { error, value } = sendMessageSchema.validate(req.body);
-      if (error) throw new AppError(error.details[0].message, 400);
+      console.log('[chat/sendMessage] body =', req.body);
+      console.log('[chat/sendMessage] files =', req.files);
 
       const userId = req.user?.userId;
       if (!userId) throw new AppError('Unauthorized', 401);
 
-      const files = req.files || [];
+      const files = Array.isArray(req.files) ? req.files : [];
       const attachments = files.map((file) => ({
         originalName: file.originalname,
         mimetype: file.mimetype,
         size: file.size,
         filename: file.filename,
       }));
+
+      const payload = {
+        conversationId: req.body?.conversationId,
+        text: req.body?.text ?? '',
+        attachmentsCount: attachments.length,
+      };
+
+      console.log('[chat/sendMessage] payload =', payload);
+
+      const { error, value } = sendMessageSchema.validate(payload, {
+        abortEarly: true,
+        stripUnknown: true,
+      });
+
+      if (error) {
+        console.error('[chat/sendMessage] validation error =', error.details);
+        throw new AppError(error.details[0].message, 400);
+      }
 
       const hostBaseUrl = `${req.protocol}://${req.get('host')}`;
 
@@ -85,6 +107,7 @@ class ChatController {
 
       return ApiResponse.success(res, message, 'Message sent successfully');
     } catch (error) {
+      console.error('[chat/sendMessage] failed =', error);
       next(error);
     }
   };
@@ -108,6 +131,7 @@ class ChatController {
     try {
       const { error, value } = downloadFileSchema.validate(req.params);
       if (error) throw new AppError(error.details[0].message, 400);
+
       const safeName = path.basename(value.filename);
       const filePath = path.resolve(process.cwd(), 'uploads', safeName);
 

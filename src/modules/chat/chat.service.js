@@ -7,19 +7,30 @@ class ChatService {
   constructor({ conversationRepository, messageRepository, redis }) {
     this.conversationRepository = conversationRepository;
     this.messageRepository = messageRepository;
-    this.redis = redis; 
+    this.redis = redis;
   }
 
   async createOrGetConversation(userId, participantId) {
-    if (!participantId) throw new AppError('Participant ID is required', 400);
+    if (!participantId) {
+      throw new AppError('Participant ID is required', 400);
+    }
+
     if (String(participantId) === String(userId)) {
       throw new AppError('Cannot create conversation with yourself', 400);
     }
 
-    let convo = await this.conversationRepository.findDirectConversation(userId, participantId);
+    let convo = await this.conversationRepository.findDirectConversation(
+      userId,
+      participantId
+    );
+
     if (!convo) {
-      convo = await this.conversationRepository.createDirectConversation(userId, participantId);
+      convo = await this.conversationRepository.createDirectConversation(
+        userId,
+        participantId
+      );
     }
+
     return convo;
   }
 
@@ -33,31 +44,53 @@ class ChatService {
     }
 
     const convo = await this.conversationRepository.findById(conversationId);
-    if (!convo) throw new AppError('Conversation not found', 404);
+    if (!convo) {
+      throw new AppError('Conversation not found', 404);
+    }
 
-    const isMember = (convo.participants || []).some((p) => String(p) === String(userId));
-    if (!isMember) throw new AppError('Forbidden', 403);
+    const isMember = (convo.participants || []).some(
+      (p) => String(p) === String(userId)
+    );
+
+    if (!isMember) {
+      throw new AppError('Forbidden', 403);
+    }
 
     return this.messageRepository.findConversationMessages(conversationId, limit);
   }
 
-  async sendMessage(conversationId, senderId, text, attachments = [], hostBaseUrl = null) {
-    if (!conversationId) throw new AppError('Conversation ID is required', 400);
+  async sendMessage(
+    conversationId,
+    senderId,
+    text,
+    attachments = [],
+    hostBaseUrl = null
+  ) {
+    if (!conversationId) {
+      throw new AppError('Conversation ID is required', 400);
+    }
+
     if (!mongoose.Types.ObjectId.isValid(conversationId)) {
       throw new AppError('Invalid conversationId format', 400);
     }
 
     const hasText = !!(text && String(text).trim());
     const hasAttach = Array.isArray(attachments) && attachments.length > 0;
+
     if (!hasText && !hasAttach) {
       throw new AppError('Message text or attachments is required', 400);
     }
 
     const convo = await this.conversationRepository.findById(conversationId);
-    if (!convo) throw new AppError('Conversation not found', 404);
+    if (!convo) {
+      throw new AppError('Conversation not found', 404);
+    }
 
     const participantIds = (convo.participants || []).map((p) => String(p));
-    if (!participantIds.includes(String(senderId))) throw new AppError('Forbidden', 403);
+
+    if (!participantIds.includes(String(senderId))) {
+      throw new AppError('Forbidden', 403);
+    }
 
     const normalizedAttachments = (attachments || []).map((a) => {
       const url = hostBaseUrl
@@ -80,25 +113,38 @@ class ChatService {
       status: 'sent',
     });
 
-    const unreadCounts = convo.unreadCounts || {};
+    const currentUnreadCounts =
+      convo.unreadCounts instanceof Map
+        ? Object.fromEntries(convo.unreadCounts.entries())
+        : typeof convo.unreadCounts?.entries === 'function'
+          ? Object.fromEntries(convo.unreadCounts.entries())
+          : { ...(convo.unreadCounts || {}) };
+
     for (const pid of participantIds) {
-      unreadCounts[pid] = pid === String(senderId) ? 0 : (unreadCounts[pid] || 0) + 1;
+      currentUnreadCounts[pid] =
+        pid === String(senderId) ? 0 : (Number(currentUnreadCounts[pid]) || 0) + 1;
     }
 
     convo.lastMessage = msg._id;
-    convo.unreadCounts = unreadCounts;
+    convo.unreadCounts = currentUnreadCounts;
+
     await this.conversationRepository.save(convo);
 
     const populated = await this.messageRepository.findByIdPopulated(msg._id);
 
     try {
-      const payload = JSON.stringify({
+      const payload = {
         conversationId: String(conversationId),
         message: populated,
         participantIds,
-      });
+      };
 
-      await this.redis.publish(CHAT_NEW_MESSAGE_CHANNEL, payload);
+      const receivers = await this.redis.publish(CHAT_NEW_MESSAGE_CHANNEL, payload);
+
+      console.log('[chat publish] channel=', CHAT_NEW_MESSAGE_CHANNEL);
+      console.log('[chat publish] messageId=', populated?._id);
+      console.log('[chat publish] conversationId=', String(conversationId));
+      console.log('[chat publish] receivers=', receivers);
     } catch (e) {
       console.error('[chat publish] failed', e?.message || e);
     }
@@ -112,14 +158,22 @@ class ChatService {
     }
 
     const convo = await this.conversationRepository.findById(conversationId);
-    if (!convo) throw new AppError('Conversation not found', 404);
+    if (!convo) {
+      throw new AppError('Conversation not found', 404);
+    }
 
     const participantIds = (convo.participants || []).map((p) => String(p));
+
     if (!participantIds.includes(String(userId))) {
       throw new AppError('Forbidden: user not participant', 403);
     }
 
-    await this.conversationRepository.setUnreadCount(conversationId, String(userId), 0);
+    await this.conversationRepository.setUnreadCount(
+      conversationId,
+      String(userId),
+      0
+    );
+
     return { success: true };
   }
 }
