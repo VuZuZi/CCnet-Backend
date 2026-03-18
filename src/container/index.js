@@ -5,6 +5,7 @@ import RedisClient from '../core/RedisClient.js';
 import MailProvider from '../core/MailProvider.js';
 import CloudinaryProvider from '../core/CloudinaryProvider.js';
 import JobQueue from '../core/JobQueue.js';
+import TransactionManager from '../core/TransactionManager.js';
 
 let container;
 
@@ -17,6 +18,7 @@ export const initializeContainer = () => {
     mailProvider: asClass(MailProvider).singleton(),
     cloudinaryProvider: asClass(CloudinaryProvider).singleton(),
     jobQueue: asClass(JobQueue).singleton(),
+    transactionManager: asClass(TransactionManager).singleton(),
   });
 
   container.loadModules(
@@ -28,7 +30,6 @@ export const initializeContainer = () => {
     ],
     {
       cwd: import.meta.dirname, 
-      
       formatName: 'camelCase', 
       resolverOptions: {
         lifetime: Lifetime.SCOPED,

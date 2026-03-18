@@ -1,5 +1,7 @@
 import { v2 as cloudinary } from 'cloudinary';
 import { config } from '../config/index.js';
+import fs from 'fs';
+import { Readable } from 'stream';
 
 cloudinary.config({
   cloud_name: config.cloudinary.cloudName,
@@ -8,11 +10,11 @@ cloudinary.config({
 });
 
 class CloudinaryProvider {
-  async uploadImage(fileBuffer, folder = 'general', publicId = null) {
+  async uploadImage(fileData, folder = 'general', publicId = null) {
     return new Promise((resolve, reject) => {
       const options = {
         folder: folder,
-        resource_type: 'image',
+        resource_type: 'auto', 
       };
       
       if (publicId) options.public_id = publicId;
@@ -24,15 +26,25 @@ class CloudinaryProvider {
           resolve(result); 
         }
       );
-      uploadStream.end(fileBuffer);
+
+      let readStream;
+      if (Buffer.isBuffer(fileData)) {
+        readStream = Readable.from(fileData);
+      } else if (typeof fileData === 'string') {
+        readStream = fs.createReadStream(fileData);
+      } else {
+        return reject(new Error('Định dạng file không hợp lệ. Yêu cầu Buffer hoặc File Path (String).'));
+      }
+      
+      readStream.on('error', (err) => reject(new Error(`Lỗi luồng đọc file: ${err.message}`)));
+      readStream.pipe(uploadStream);
     });
   }
 
   async deleteImage(publicId) {
     if (!publicId) return null;
     try {
-      const result = await cloudinary.uploader.destroy(publicId);
-      return result;
+      return await cloudinary.uploader.destroy(publicId);
     } catch (error) {
       console.error(`[CloudinaryProvider] Failed to delete image ${publicId}:`, error.message);
       throw error;
@@ -42,6 +54,20 @@ class CloudinaryProvider {
   async deleteMany(publicIds) {
       if (!publicIds || publicIds.length === 0) return;
       return await cloudinary.api.delete_resources(publicIds);
+  }
+
+  generateSignature(paramsToSign) {
+    const timestamp = Math.round(new Date().getTime() / 1000);
+    const signature = cloudinary.utils.api_sign_request(
+      { ...paramsToSign, timestamp },
+      config.cloudinary.apiSecret
+    );
+    return {
+      signature,
+      timestamp,
+      cloudName: config.cloudinary.cloudName,
+      apiKey: config.cloudinary.apiKey
+    };
   }
 }
 

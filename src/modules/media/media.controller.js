@@ -16,6 +16,19 @@ class MediaController {
       next(error);
     }
   };
+
+  getSignature = async (req, res, next) => {
+    try {
+      const userId = req.user.userId;
+      const context = req.query.context || 'project_cover';
+      
+      const signatureData = this.mediaService.getUploadSignature(userId, context);
+
+      return ApiResponse.success(res, signatureData, 'Đã cấp chữ ký tải lên mây thành công');
+    } catch (error) {
+      next(error);
+    }
+  };
 }
 
 export default MediaController;
