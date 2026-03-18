@@ -8,6 +8,7 @@ import mediaRoutes from "../modules/media/media.routes.js";
 import searchRoutes from "../modules/search/search.routes.js";
 import chatRoutes from "../modules/chat/chat.routes.js";
 import followRoutes from "../modules/follow/follow.routes.js";
+import projectRoutes from "../modules/project/project.routes.js"
 
 export const configureRoutes = (app) => {
   const API_PREFIX = "/api/v1";
@@ -21,6 +22,7 @@ export const configureRoutes = (app) => {
   app.use(`${API_PREFIX}/search`, searchRoutes);
   app.use(`${API_PREFIX}/chat`, chatRoutes);
   app.use(`${API_PREFIX}/follow`, followRoutes);
+  app.use(`${API_PREFIX}/project`, projectRoutes);
 
   app.use((req, res) => {
     res.status(404).json({
@@ -35,6 +37,7 @@ export const configureRoutes = (app) => {
         `${API_PREFIX}/search/*`,
         `${API_PREFIX}/chat/*`,
         `${API_PREFIX}/follow/*`,
+        `${API_PREFIX}/project/*`,
         "/health",
         "/api",
       ],

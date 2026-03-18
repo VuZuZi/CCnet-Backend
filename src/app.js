@@ -6,6 +6,7 @@ import { initializeContainer, registerModule } from './container/index.js';
 
 import { initPostWorkers } from './modules/communitypost/post.worker.js';
 import { initFollowWorkers } from './modules/follow/follow.worker.js';
+import { initProjectWorkers } from './modules/project/project.worker.js';
 
 export const createApp = async () => {
   const app = express();
@@ -25,9 +26,12 @@ export const createApp = async () => {
   await registerModule('follow');
   await registerModule('search');
 
+  await registerModule('project');
+
   console.log('Starting Background Workers...');
   initPostWorkers();
   initFollowWorkers();
+  initProjectWorkers();
 
   configureSystemRoutes(app);
 

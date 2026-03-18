@@ -37,6 +37,10 @@ class RedisClient {
     }
   }
 
+  async incr(key) {
+    return await this.client.incr(key);
+  }
+
   async set(key, value, expiryMode = null, time = null) {
     const stringValue = typeof value === 'object' ? JSON.stringify(value) : value;
 
@@ -61,30 +65,39 @@ class RedisClient {
   }
 
   async deletePattern(pattern) {
-    const stream = this.client.scanStream({
-      match: pattern,
-      count: 100,
-    });
-
+    const stream = this.client.scanStream({ match: pattern, count: 500 });
     let count = 0;
 
-    return new Promise((resolve, reject) => {
-      stream.on('data', async (keys) => {
-        try {
-          if (keys.length) {
-            const pipeline = this.client.pipeline();
-            keys.forEach((key) => pipeline.del(key));
-            await pipeline.exec();
-            count += keys.length;
-          }
-        } catch (error) {
-          reject(error);
-        }
-      });
+    for await (const keys of stream) {
+      if (keys.length > 0) {
+        const pipeline = this.client.pipeline();
+        keys.forEach((key) => pipeline.del(key));
+        await pipeline.exec();
+        count += keys.length;
+      }
+    }
 
-      stream.on('end', () => resolve(count));
-      stream.on('error', reject);
-    });
+    return count;
+  }
+
+  async scanAndGetValues(pattern) {
+    const stream = this.client.scanStream({ match: pattern, count: 500 });
+    const keyValues = [];
+
+    for await (const keys of stream) {
+      if (keys.length > 0) {
+        const pipeline = this.client.pipeline();
+        keys.forEach(key => pipeline.get(key));
+        const results = await pipeline.exec();
+
+        keys.forEach((key, index) => {
+          const value = parseInt(results[index][1], 10) || 0;
+          keyValues.push({ key, value });
+        });
+      }
+    }
+
+    return keyValues;
   }
 }
 

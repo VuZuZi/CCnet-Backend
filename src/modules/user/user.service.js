@@ -58,8 +58,10 @@ class UserService {
   async changeAvatar(userId, file) {
     if (!file) throw new AppError('Please upload an image', 400);
 
+    const sourceData = file.path || file.buffer;
+
     try {
-      const metadata = await sharp(file.buffer).metadata();
+      const metadata = await sharp(sourceData).metadata();
       if (!['jpeg', 'png', 'webp', 'gif'].includes(metadata.format)) {
         throw new AppError('Invalid image format detected inside file', 400);
       }
@@ -75,7 +77,7 @@ class UserService {
 
     try {
       uploadResult = await this.cloudinaryProvider.uploadImage(
-        file.buffer,
+        sourceData,
         `users/${userId}/avatar`
       );
 
@@ -138,8 +140,10 @@ class UserService {
   async changeCoverPhoto(userId, file) {
     if (!file) throw new AppError('Please upload an image for cover photo', 400);
 
+    const sourceData = file.path || file.buffer;
+
     try {
-      const metadata = await sharp(file.buffer).metadata();
+      const metadata = await sharp(sourceData).metadata();
       if (!['jpeg', 'png', 'webp', 'gif'].includes(metadata.format)) {
         throw new AppError('Invalid image format detected inside file', 400);
       }
@@ -155,7 +159,7 @@ class UserService {
 
     try {
       uploadResult = await this.cloudinaryProvider.uploadImage(
-        file.buffer,
+        sourceData,
         `users/${userId}/cover`
       );
 
