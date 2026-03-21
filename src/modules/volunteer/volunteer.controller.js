@@ -1,0 +1,99 @@
+import ApiResponse from '../../core/Response.js';
+
+class VolunteerController {
+  constructor({ volunteerService }) {
+    this.volunteerService = volunteerService;
+  }
+
+  // Apply volunteer
+  applyVolunteer = async (req, res, next) => {
+    try {
+      const data = await this.volunteerService.applyVolunteer(
+        req.user.userId,
+        req.params.projectId,
+        req.body
+      );
+      return ApiResponse.success(res, data, 'Applied successfully');
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  // Approve application
+  approveVolunteer = async (req, res, next) => {
+    try {
+      const data = await this.volunteerService.approveVolunteer(
+        req.params.id
+      );
+
+      return ApiResponse.success(res, data, 'Approved successfully');
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  // Reject application
+  rejectVolunteer = async (req, res, next) => {
+    try {
+      const { rejectReason } = req.body;
+
+      const data = await this.volunteerService.rejectVolunteer(
+        req.params.id,
+        rejectReason
+      );
+
+      return ApiResponse.success(res, data, 'Rejected successfully');
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  // Get my applications
+  getMyApplications = async (req, res, next) => {
+    try {
+      const { limit, cursor } = req.query;
+
+      const data = await this.volunteerService.getMyApplications(
+        req.user.userId,
+        limit,
+        cursor
+      );
+
+      return ApiResponse.success(res, data, 'Applications retrieved');
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  // Get applications of a project
+  getProjectApplications = async (req, res, next) => {
+    try {
+      const { limit, cursor } = req.query;
+
+      const data = await this.volunteerService.getProjectApplications(
+        req.params.opportunityId,
+        limit,
+        cursor
+      );
+
+      return ApiResponse.success(res, data, 'Project applications retrieved');
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  // Get volunteer stats
+  getStats = async (req, res, next) => {
+    try {
+      const data = await this.volunteerService.getStats(
+        req.params.id
+      );
+
+      return ApiResponse.success(res, data, 'Stats retrieved');
+    } catch (e) {
+      next(e);
+    }
+  };
+}
+
+export default VolunteerController;
