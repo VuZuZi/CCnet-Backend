@@ -4,6 +4,8 @@ import { authenticate } from '../../middlewares/auth.middleware.js';
 import { validate } from '../../middlewares/validate.middleware.js';
 import { idParamSchema, listVolunteeringSchema } from './volunteer.validation.js';
 import VolunteerController from './volunteer.controller.js';
+import multer from 'multer';
+
 
 const router = Router();
 
