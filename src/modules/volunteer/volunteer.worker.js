@@ -8,7 +8,7 @@ export const initVolunteerWorkers = () => {
     const container = getContainer();
     const jobQueue = container.resolve('jobQueue');
     const volunteerProcessor = container.resolve('volunteerProcessor');
-    jobQueue.registerWorker('volunteer-updates', volunteerProcessor.getProcessor());
+    jobQueue.registerWorker('volunteer-create', volunteerProcessor.getProcessor());
 
     console.log('[Worker] Volunteer workers initialized successfully.');
   } catch (error) {

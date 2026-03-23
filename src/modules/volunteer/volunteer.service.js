@@ -29,6 +29,10 @@ class VolunteerService {
 
   // APPLY VOLUNTEER
   async applyVolunteer(volunteerId, data) {
+    console.log("+++++++++++++++++++++s");
+    console.log(volunteerId);
+    console.log(data);
+
     const { opportunityId, skills, motivation, availability } = data;
 
     if (!opportunityId) {
@@ -37,8 +41,16 @@ class VolunteerService {
 
     await this._ensureUserExists(volunteerId);
     await this._ensureProjectExists(opportunityId);
+    console.log("++++++++++++++sss+++++++s");
 
     try {
+      console.log("volunteerId:" + volunteerId,
+        "opportunityId:" + opportunityId,
+        "skills:" + skills,
+        "motivation:" + motivation,
+        "availabilit:" + availability
+      );
+
       const application =
         await this.volunteerRepository.create({
           volunteerId,
@@ -47,6 +59,9 @@ class VolunteerService {
           motivation,
           availability,
         });
+      console.log("++++++++++++++xxxxxx+++++s");
+
+      console.log(application);
 
       return application;
     } catch (e) {

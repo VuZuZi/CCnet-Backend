@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 
 const volunteerSchema = new mongoose.Schema(
   {
+    
     opportunityId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Project',
@@ -54,7 +55,10 @@ const volunteerSchema = new mongoose.Schema(
     isCertificateSent: {
       type: Boolean,
       default: false,
-    }
+    },
+    appliedAt: {
+      type: String,
+    },
   },
   { timestamps: true }
 );

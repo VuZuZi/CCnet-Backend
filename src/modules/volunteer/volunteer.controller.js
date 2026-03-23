@@ -12,7 +12,7 @@ class VolunteerController {
     try {
       const data = await this.volunteerService.applyVolunteer(
         req.user.userId,
-        req.params.projectId,
+        // req.params.projectId,
         req.body
       );
       return ApiResponse.success(res, data, 'Applied successfully');
@@ -98,52 +98,4 @@ class VolunteerController {
   };
 }
 
-export default VolunteerController = {
-  applyVolunteer: async (req, res) => {
-    try {
-      console.log('🔍 [Controller] Request body:', req.body);
-      console.log('🔍 [Controller] Request user:', req.user);
-
-      // ✅ Tạo data object từ req.body và req.user
-      const data = {
-        opportunityId: req.body.opportunityId,
-        volunteerId: req.user?.id,  // Lấy từ token
-        skills: req.body.skills,
-        motivation: req.body.motivation,
-        availability: req.body.availability
-      };
-
-      console.log('📦 [Controller] Data to service:', data);
-
-      // ✅ Kiểm tra data có đầy đủ không
-      if (!data.opportunityId) {
-        return res.status(400).json({
-          success: false,
-          message: 'opportunityId is required'
-        });
-      }
-
-      if (!data.volunteerId) {
-        return res.status(401).json({
-          success: false,
-          message: 'User not authenticated'
-        });
-      }
-
-      // ✅ Gọi service với data
-      const result = await volunteerService.applyVolunteer(data);
-
-      res.status(201).json({
-        success: true,
-        data: result,
-        message: 'Đăng ký thành công'
-      });
-    } catch (error) {
-      console.error('❌ [Controller] Error:', error);
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
-    }
-  }
-};
+export default VolunteerController;

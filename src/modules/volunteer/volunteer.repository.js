@@ -8,8 +8,29 @@ class VolunteerRepository {
 
   // create đơn apply
   async create(data) {
-    return await Volunteer.create({ data });
+    console.log("🔍 [Repository] Creating with data:", data);
+    let result;
+    try {
+      // ✅ Kiểm tra data trước khi tạo
+      if (!data.skills) {
+        throw new Error('skills is required in repository');
+      }
+      if (!data.motivation) {
+        throw new Error('motivation is required in repository');
+      }
+      if (!data.availability) {
+        throw new Error('availability is required in repository');
+      }
+
+      result = await Volunteer.create(data);
+      console.log("✅ [Repository] idddd:", result._id);
+      return result;
+    } catch (error) {
+      console.error("❌ [Repository] Error:", error);
+      throw error;
+    }
   }
+
 
   // xóa đơn
   async delete(volunteererId) {
