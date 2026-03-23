@@ -9,6 +9,7 @@ import searchRoutes from "../modules/search/search.routes.js";
 import chatRoutes from "../modules/chat/chat.routes.js";
 import followRoutes from "../modules/follow/follow.routes.js";
 import projectRoutes from "../modules/project/project.routes.js"
+import helpRequestRoutes from "../modules/helprequest/helprequest.routes.js";
 
 export const configureRoutes = (app) => {
   const API_PREFIX = "/api/v1";
@@ -23,6 +24,7 @@ export const configureRoutes = (app) => {
   app.use(`${API_PREFIX}/chat`, chatRoutes);
   app.use(`${API_PREFIX}/follow`, followRoutes);
   app.use(`${API_PREFIX}/project`, projectRoutes);
+  app.use(`${API_PREFIX}/help-requests`, helpRequestRoutes);
 
   app.use((req, res) => {
     res.status(404).json({
@@ -38,6 +40,7 @@ export const configureRoutes = (app) => {
         `${API_PREFIX}/chat/*`,
         `${API_PREFIX}/follow/*`,
         `${API_PREFIX}/project/*`,
+        `${API_PREFIX}/help-requests/*`,
         "/health",
         "/api",
       ],
