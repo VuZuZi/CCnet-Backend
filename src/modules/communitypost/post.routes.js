@@ -70,7 +70,7 @@ router.post(
 router.post(
   "/:id/report",
   authenticate,
-  validate(PostValidation.paramsId),
+  validate(PostValidation.reportPost),
   execute("reportPost"),
 );
 

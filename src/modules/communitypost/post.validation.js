@@ -69,4 +69,13 @@ export const PostValidation = {
   paramsId: z.object({
     params: z.object({ id: objectId }),
   }),
+  reportPost: z.object({
+    params: z.object({ id: objectId }),
+    body: z.object({
+      reason_code: z.string().min(1, "Reason is required"),
+      description: z.string().optional(),
+      report_ref: z.string(),
+      target_type: z.string(),
+    }),
+  }),
 };
