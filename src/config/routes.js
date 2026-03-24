@@ -6,9 +6,8 @@ import mediaRoutes from "../modules/media/media.routes.js";
 import searchRoutes from "../modules/search/search.routes.js";
 import chatRoutes from "../modules/chat/chat.routes.js";
 import followRoutes from "../modules/follow/follow.routes.js";
-import projectRoutes from "../modules/project/project.routes.js"
-import helpRequestRoutes from "../modules/helprequest/helprequest.routes.js";
 import projectRoutes from "../modules/project/project.routes.js";
+import helpRequestRoutes from "../modules/helprequest/helprequest.routes.js";
 import {
   organizerRequestUserRouter,
   organizerRequestAdminRouter,
@@ -29,7 +28,10 @@ export const configureRoutes = (app) => {
   app.use(`${API_PREFIX}/help-requests`, helpRequestRoutes);
 
   app.use(`${API_PREFIX}/organizer-requests`, organizerRequestUserRouter);
-  app.use(`${API_PREFIX}/admin/organizer-requests`, organizerRequestAdminRouter);
+  app.use(
+    `${API_PREFIX}/admin/organizer-requests`,
+    organizerRequestAdminRouter,
+  );
 
   app.use((req, res) => {
     res.status(404).json({
