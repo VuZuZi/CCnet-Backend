@@ -5,9 +5,9 @@
   "description": "",
   "main": "src/server.js",
   "scripts": {
-  "dev": "concurrently -n API,SOCKET \"nodemon src/server.js\" \"nodemon src/socket/socketServer.js\"",
-  "start": "node src/server.js"
-},
+    "dev": "concurrently -n API,SOCKET \"nodemon src/server.js\" \"nodemon src/socket/socketServer.js\"",
+    "start": "node src/server.js"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/VuZuZi/CCnet-Backend.git"

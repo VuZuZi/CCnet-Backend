@@ -12,10 +12,20 @@ class SearchController {
       const { error, value } = globalSearchSchema.validate(req.query);
       if (error) throw new AppError(error.details[0].message, 400);
 
-      const userId = req.user?.userId;
+      const userId =
+        req.user?.userId ||
+        req.user?._id ||
+        req.user?.id ||
+        req.user?.sub;
+
       if (!userId) throw new AppError('Unauthorized', 401);
 
-      const data = await this.searchService.globalSearch(userId, value.q, value.limit);
+      const data = await this.searchService.globalSearch(
+        userId,
+        value.q,
+        value.limit
+      );
+
       return ApiResponse.success(res, data, 'Search results');
     } catch (err) {
       next(err);
