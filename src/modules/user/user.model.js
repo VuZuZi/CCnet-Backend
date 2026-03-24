@@ -6,34 +6,36 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
     password: { type: String, minlength: 6, select: false },
     googleId: { type: String, unique: true, sparse: true, select: false },
-    
-    avatar: { 
-      type: String, 
-      default: 'https://www.gravatar.com/avatar/3b3be63a4c2a439b013787725dfce802?d=identicon' 
+
+    avatar: {
+      type: String,
+      default: 'https://www.gravatar.com/avatar/3b3be63a4c2a439b013787725dfce802?d=identicon'
     },
     avatarPublicId: { type: String, select: false },
-    coverPhoto: { 
-      type: String, 
-      default: '' 
+    coverPhoto: {
+      type: String,
+      default: ''
     },
     coverPhotoPublicId: { type: String, select: false },
 
     fullName: { type: String, required: true, trim: true },
     phone: { type: String, trim: true, default: '' },
     location: { type: String, trim: true, default: '' },
-    
-    headline: { type: String, trim: true, default: '' }, 
-    about: { type: String, trim: true, default: '' },   
-    
+
+    headline: { type: String, trim: true, default: '' },
+    about: { type: String, trim: true, default: '' },
+
     skills: [{ type: String, trim: true }],
 
     followersCount: { type: Number, default: 0 },
     followingCount: { type: Number, default: 0 },
-    level: { type: Number, default: 1 },                 
-    title: { type: String, default: 'Advocate' },        
+    level: { type: Number, default: 1 },
+    title: { type: String, default: 'Advocate' },
 
     isEmailVerified: { type: Boolean, default: false },
-    role: { type: String, enum: ['user', 'admin'], default: 'user' },
+
+    role: { type: String, enum: ['user', 'admin', 'organizer', 'Organizer'], default: 'user' },
+
     isActive: { type: Boolean, default: true }
   },
   { timestamps: true }
