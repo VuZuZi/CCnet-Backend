@@ -59,6 +59,46 @@ class VolunteerService {
       throw e;
     }
   }
+
+  // ✅ UPDATE application
+  async updateApplication(id, updateData) {
+    console.log('🔍 [Service] updateApplication:', { id, updateData });
+
+    // Kiểm tra application tồn tại
+    const application = await this.volunteerRepository.findById(id);
+    if (!application) {
+      throw new AppError('Application not found', 404);
+    }
+
+    // Chỉ cho phép update khi status là PENDING
+    if (application.status !== 'PENDING') {
+      throw new AppError('Cannot update application that is not pending', 400);
+    }
+
+    // Cập nhật
+    const updated = await this.volunteerRepository.update(id, updateData);
+
+    return updated;
+  }
+
+  async cancelApplication(id) {
+    const application = await this.volunteerRepository.findById(id);
+    if (!application) {
+      throw new AppError('Application not found', 404);
+    }
+
+    if (application.status !== 'PENDING') {
+      throw new AppError('Cannot cancel application that is not pending', 400);
+    }
+
+    const updated = await this.volunteerRepository.update(id, {
+      status: 'CANCELLED'
+    });
+
+    return updated;
+  }
+
+
   // checkStatus
   async application(volunteerId, data) {
     try {

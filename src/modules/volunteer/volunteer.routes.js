@@ -33,5 +33,16 @@ router.get(
     authenticate,
     execute('application')
 )
+router.patch(
+    '/applications/:id',
+    authenticate,
+    execute('updateApplication')
+);
+// route PATCH để hủy application
+router.patch(
+    '/applications/:id/cancel',
+    authenticate,
+    execute('cancelApplication')
+);
 
 export default router;

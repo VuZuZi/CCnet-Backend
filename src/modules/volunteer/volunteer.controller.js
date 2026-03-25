@@ -15,7 +15,6 @@ class VolunteerController {
         req.user.userId,
         req.query
       );
-      console.log('🎯 [Controller] applsssication called');
       return ApiResponse.success(res, data, 'Applied successfully');
     } catch (e) {
       next(e);
@@ -36,7 +35,35 @@ class VolunteerController {
       next(e);
     }
   };
+  // UPDATE application
+  updateApplication = async (req, res, next) => {
+    console.log('🎯 [Controller] UPDATE application called');
 
+    try {
+      const { id } = req.params;
+      const { skills, availability, motivation } = req.body;
+
+      const data = await this.volunteerService.updateApplication(id, {
+        skills,
+        availability,
+        motivation
+      });
+
+      return ApiResponse.success(res, data, 'Application updated successfully');
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  cancelApplication = async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const data = await this.volunteerService.cancelApplication(id);
+      return ApiResponse.success(res, data, 'Application cancelled successfully');
+    } catch (e) {
+      next(e);
+    }
+  };
   // Approve application
   approveVolunteer = async (req, res, next) => {
     try {

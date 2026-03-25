@@ -47,14 +47,28 @@ class VolunteerRepository {
         volunteerId: volunteerId,
         opportunityId: opportunityId
       });
-      console.log('✅ [Repository] application found:', application);
+      // console.log('✅ [Repository] application found:', application);
       return application;
     } catch (error) {
       console.error('❌ [Repository] application error:', error);
       throw error;
     }
   }
+  async update(id, updateData) {
+    console.log('🔍 [Repository] update:', { id, updateData });
 
+    try {
+      const updated = await this.model.findByIdAndUpdate(
+        id,
+        updateData,
+        { new: true, runValidators: true }
+      );
+      return updated;
+    } catch (error) {
+      console.error('❌ [Repository] update error:', error);
+      throw error;
+    }
+  }
   // xóa đơn
   async delete(volunteererId) {
     return await Volunteer.deleteOne({ volunteererId, volunteeringId });

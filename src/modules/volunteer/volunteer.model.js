@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 
 const volunteerSchema = new mongoose.Schema(
   {
-    
+
     opportunityId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Project',
@@ -34,7 +34,7 @@ const volunteerSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ['PENDING', 'APPROVED', 'REJECTED'],
+      enum: ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'],
       default: 'PENDING',
     },
 
