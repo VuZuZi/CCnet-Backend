@@ -29,20 +29,12 @@ class VolunteerService {
 
   // APPLY VOLUNTEER
   async applyVolunteer(volunteerId, data) {
-    console.log("+++++++++++++++++++++s");
-    console.log(volunteerId);
-    console.log(data);
-
     const { opportunityId, skills, motivation, availability } = data;
-
     if (!opportunityId) {
       throw new AppError('Missing opportunityId', 400);
     }
-
     await this._ensureUserExists(volunteerId);
     await this._ensureProjectExists(opportunityId);
-    console.log("++++++++++++++sss+++++++s");
-
     try {
       console.log("volunteerId:" + volunteerId,
         "opportunityId:" + opportunityId,
@@ -50,7 +42,6 @@ class VolunteerService {
         "motivation:" + motivation,
         "availabilit:" + availability
       );
-
       const application =
         await this.volunteerRepository.create({
           volunteerId,
@@ -59,10 +50,6 @@ class VolunteerService {
           motivation,
           availability,
         });
-      console.log("++++++++++++++xxxxxx+++++s");
-
-      console.log(application);
-
       return application;
     } catch (e) {
       // ❗ duplicate apply
@@ -72,7 +59,40 @@ class VolunteerService {
       throw e;
     }
   }
+  // checkStatus
+  async application(volunteerId, data) {
+    try {
+      //  Lấy từ data param truyền vào
+      const { opportunityId } = data;
+      console.log("sssssssssssssssss" + opportunityId);
 
+      if (!opportunityId) {
+        throw new AppError('Missing opportunityId', 400);
+      }
+      // Tìm application
+      const application = await this.volunteerRepository.application({
+        volunteerId,
+        opportunityId
+      });
+      if (!application) {
+        return {
+          hasApplied: false,
+          status: null
+        };
+      }
+      return {
+        hasApplied: true,
+        id: application.id,
+        status: application.status,
+        role: application.role,
+        skills: application.skills,
+        motivation: application.motivation,
+        availability: application.availability
+      };
+    } catch (e) {
+      throw e;
+    }
+  }
   // APPROVE
   async approveVolunteer(applicationId) {
     const application =

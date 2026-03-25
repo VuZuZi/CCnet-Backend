@@ -4,7 +4,23 @@ class VolunteerController {
   constructor({ volunteerService }) {
     this.volunteerService = volunteerService;
   }
+  // checkApply
+  application = async (req, res, next) => {
+    console.log('🎯 [Controller] application called' + req.user.userId);
+    console.log('🎯 [Controller] application called' + req.body);
+    console.log('📥 req.query:', req.query);  // ← Thêm dòng này để debug
 
+    try {
+      const data = await this.volunteerService.application(
+        req.user.userId,
+        req.query
+      );
+      console.log('🎯 [Controller] applsssication called');
+      return ApiResponse.success(res, data, 'Applied successfully');
+    } catch (e) {
+      next(e);
+    }
+  };
   // Apply volunteer
   applyVolunteer = async (req, res, next) => {
     console.log('🎯 [Controller] applyVolunteer called');
