@@ -1,22 +1,23 @@
+// backend/src/modules/volunteer/volunteer.model.js
 import mongoose from 'mongoose';
 
 const volunteerSchema = new mongoose.Schema(
   {
-
     opportunityId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Project',
       required: true,
-      index: true,
     },
 
     volunteerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
-      index: true,
     },
-
+    changerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
     skills: {
       type: String,
       required: true,
@@ -56,21 +57,26 @@ const volunteerSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+
     appliedAt: {
-      type: String,
+      type: Date,
+      default: Date.now,
     },
   },
   { timestamps: true }
 );
 
-// 1 user chỉ apply 1 lần
+// ✅ Partial Unique Index - chỉ áp dụng cho status KHÔNG phải CANCELLED
 volunteerSchema.index(
   { volunteerId: 1, opportunityId: 1 },
-  { unique: true }
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: { $nin: ['CANCELLED'] }  // Chỉ unique khi status không phải CANCELLED
+    }
+  }
 );
 
-const Volunteer =
-  mongoose.models.volunteer ||
-  mongoose.model('volunteer', volunteerSchema);
+const Volunteer = mongoose.models.volunteer || mongoose.model('volunteer', volunteerSchema);
 
 export default Volunteer;

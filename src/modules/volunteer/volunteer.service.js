@@ -29,7 +29,7 @@ class VolunteerService {
 
   // APPLY VOLUNTEER
   async applyVolunteer(volunteerId, data) {
-    const { opportunityId, skills, motivation, availability } = data;
+    const { opportunityId, changerId, skills, motivation, availability } = data;
     if (!opportunityId) {
       throw new AppError('Missing opportunityId', 400);
     }
@@ -42,15 +42,21 @@ class VolunteerService {
         "motivation:" + motivation,
         "availabilit:" + availability
       );
+      console.log("aaaaaaaaaaaa");
+
       const application =
         await this.volunteerRepository.create({
           volunteerId,
           opportunityId,
+          changerId,
           skills,
           motivation,
           availability,
         });
+      console.log("aaaaaaaasaaaaa" + application);
+
       return application;
+
     } catch (e) {
       // ❗ duplicate apply
       if (e?.code === 11000) {
@@ -76,12 +82,12 @@ class VolunteerService {
     }
 
     // Cập nhật
-    const updated = await this.volunteerRepository.update(id, updateData);
+    const updated = await this.volunteerRepository.update(id, updateData, userId);
 
     return updated;
   }
 
-  async cancelApplication(id) {
+  async cancelApplication(id, changerId) {
     const application = await this.volunteerRepository.findById(id);
     if (!application) {
       throw new AppError('Application not found', 404);
@@ -92,7 +98,8 @@ class VolunteerService {
     }
 
     const updated = await this.volunteerRepository.update(id, {
-      status: 'CANCELLED'
+      status: 'CANCELLED',
+      changerId: changerId,
     });
 
     return updated;
@@ -149,6 +156,7 @@ class VolunteerService {
     await this.volunteerRepository.create({
       volunteerId: application.volunteerId,
       opportunityId: application.opportunityId,
+      changerId: application.volunteerId,
     });
 
     // enqueue job (optional)

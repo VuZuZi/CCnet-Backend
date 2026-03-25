@@ -27,8 +27,7 @@ class VolunteerController {
     try {
       const data = await this.volunteerService.applyVolunteer(
         req.user.userId,
-        // req.params.projectId,
-        req.body
+        req.body, req.user.userId
       );
       return ApiResponse.success(res, data, 'Applied successfully');
     } catch (e) {
@@ -58,7 +57,7 @@ class VolunteerController {
   cancelApplication = async (req, res, next) => {
     try {
       const { id } = req.params;
-      const data = await this.volunteerService.cancelApplication(id);
+      const data = await this.volunteerService.cancelApplication(id, req.user.userId);
       return ApiResponse.success(res, data, 'Application cancelled successfully');
     } catch (e) {
       next(e);
