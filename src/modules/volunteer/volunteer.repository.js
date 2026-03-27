@@ -88,13 +88,21 @@ class VolunteerRepository {
   async findById(id) {
     return Volunteer.findById(id);
   }
-  // GET volunteers theo project
-  async findByProject(opportunityId) {
-    return Volunteer.find({ opportunityId })
-      .populate('volunteerId', 'fullName email avatar')
-      .lean();
-  }
 
+  async findByProject(opportunityId) {
+    try {
+      // ✅ Đúng: Đặt status filter trong find()
+      return await this.model.find({
+        opportunityId: opportunityId,
+        status: { $ne: 'CANCELLED' }  // Không lấy đơn đã hủy
+      })
+          .populate('volunteerId', 'fullName email avatar')
+          .lean();
+    } catch (error) {
+      console.error('❌ [Repository] findByProject error:', error);
+      throw error;
+    }
+  }
   // GET volunteers theo user
   async findByUser(volunteerId) {
     return Volunteer.find({ volunteerId })

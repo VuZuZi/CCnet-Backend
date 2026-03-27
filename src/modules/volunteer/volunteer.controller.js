@@ -9,7 +9,6 @@ class VolunteerController {
     console.log('🎯 [Controller] application called' + req.user.userId);
     console.log('🎯 [Controller] application called' + req.body);
     console.log('📥 req.query:', req.query);  // ← Thêm dòng này để debug
-
     try {
       const data = await this.volunteerService.application(
         req.user.userId,
@@ -110,18 +109,34 @@ class VolunteerController {
   };
 
   // Get applications of a project
-  getProjectApplications = async (req, res, next) => {
+  getProjectPendingApplications = async (req, res, next) => {
+    console.log('🎯 [Controller] getProjectPendingApplications called');
+    console.log('📥 projectId:', req.params.projectId);
+
     try {
-      const { limit, cursor } = req.query;
+      const { projectId } = req.params;
 
-      const data = await this.volunteerService.getProjectApplications(
-        req.params.opportunityId,
-        limit,
-        cursor
+      if (!projectId) {
+        return ApiResponse.error(res, 'Missing projectId', 400);
+      }
+
+      // Kiểm tra projectId có hợp lệ không
+      if (projectId.length !== 24) {
+        console.error('❌ Invalid projectId format:', projectId);
+        return ApiResponse.error(res, 'Invalid project ID format', 400);
+      }
+      console.log('📥 projessssssctId:', req.params.projectId);
+
+      const data = await this.volunteerService.getProjectPendingApplications(
+          projectId,
+          parseInt(req.query.limit) || 20,
+          req.query.cursor
       );
+      console.log('📥 projessssssaasctId:', data);
 
-      return ApiResponse.success(res, data, 'Project applications retrieved');
+      return ApiResponse.success(res, data, 'Pending applications retrieved');
     } catch (e) {
+      console.error('❌ Error in getProjectPendingApplications:', e);
       next(e);
     }
   };

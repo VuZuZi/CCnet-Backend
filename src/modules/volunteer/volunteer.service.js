@@ -12,6 +12,31 @@ class VolunteerService {
     this.projectRepository = projectRepository;
     this.jobQueue = jobQueue;
   }
+  // ✅ THÊM METHOD NÀY
+  async getProjectPendingApplications(projectId, limit = 20, cursor = null) {
+    console.log('🔍 [Service] getProjectPendingApplications called:', { projectId, limit, cursor });
+
+    // Kiểm tra project tồn tại (comment tạm thời nếu project chưa có)
+    try {
+      const volunteer = await this.volunteerRepository.findByProject(projectId);
+    return volunteer
+    } catch (error) {
+      console.log('⚠️ Project not found, returning empty list');
+      return {
+        data: [],
+        nextCursor: null,
+        hasMore: false,
+        total: 0
+      };
+    }}
+
+    // check volunteer của Project
+  async getProjectApplications(projectId) {
+    const volunteer = await this.volunteerRepository.findByProject(projectId);
+    if (!volunteer) throw new AppError('volunteer not found', 404);
+    return volunteer;
+  }
+
 
   // check user tồn tại
   async _ensureUserExists(userId) {
@@ -43,7 +68,6 @@ class VolunteerService {
         "availabilit:" + availability
       );
       console.log("aaaaaaaaaaaa");
-
       const application =
         await this.volunteerRepository.create({
           volunteerId,
@@ -54,9 +78,7 @@ class VolunteerService {
           availability,
         });
       console.log("aaaaaaaasaaaaa" + application);
-
       return application;
-
     } catch (e) {
       // ❗ duplicate apply
       if (e?.code === 11000) {
@@ -65,7 +87,6 @@ class VolunteerService {
       throw e;
     }
   }
-
   // ✅ UPDATE application
   async updateApplication(id, updateData) {
     console.log('🔍 [Service] updateApplication:', { id, updateData });

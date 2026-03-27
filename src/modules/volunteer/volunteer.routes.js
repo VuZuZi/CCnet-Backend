@@ -1,11 +1,10 @@
+// backend/src/modules/volunteer/volunteer.routes.js
 import { Router } from 'express';
 import { getContainer } from '../../container/index.js';
 import { authenticate, authorize } from '../../middlewares/auth.middleware.js';
 import { validate } from '../../middlewares/validate.middleware.js';
-// import { idParamSchema, listVolunteeringSchema } from './volunteer.validation.js';
 import VolunteerController from './volunteer.controller.js';
 import multer from 'multer';
-
 
 const router = Router();
 
@@ -23,26 +22,56 @@ const execute = (action) => (req, res, next) => {
     console.log(`✅ Calling controller.${action}`);
     return controller[action](req, res, next);
 };
+
+// Tạo đơn đăng ký
 router.post(
     '/submit',
     authenticate,
     execute('applyVolunteer')
 );
+
+// Kiểm tra trạng thái đơn
 router.get(
     '/application',
     authenticate,
     execute('application')
-)
+);
+
+// Cập nhật đơn
 router.patch(
     '/applications/:id',
     authenticate,
     execute('updateApplication')
 );
-// route PATCH để hủy application
+
+// Hủy đơn
 router.patch(
     '/applications/:id/cancel',
     authenticate,
     execute('cancelApplication')
+);
+
+// ✅ Lấy danh sách đơn đang chờ của project
+router.get(
+    '/projects/:projectId',  // ✅ Thêm :projectId
+    authenticate,
+    execute('getProjectPendingApplications')      // ✅ Đúng tên method
+);
+
+// Duyệt đơn
+router.patch(
+    '/applications/:id/approve',
+    authenticate,
+    authorize(['ADMIN', 'ORGANIZER']),
+    execute('approveVolunteer')
+);
+
+// Từ chối đơn
+router.patch(
+    '/applications/:id/reject',
+    authenticate,
+    authorize(['ADMIN', 'ORGANIZER']),
+    execute('rejectVolunteer')
 );
 
 export default router;
