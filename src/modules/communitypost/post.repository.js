@@ -14,24 +14,42 @@ class PostRepository {
     if (lastId) {
       query._id = { $lt: new mongoose.Types.ObjectId(lastId) };
     }
-    return Post.find(query).sort({ _id: -1 }).limit(limit).lean(); 
+    return Post.find(query).sort({ _id: -1 }).limit(limit).lean();
+  }
+  // Lấy bài viết để verify quyền edit
+  async findActivePostByIdAndAuthor(postId, authorId) {
+    return Post.findOne({
+      _id: postId,
+      "author._id": authorId,
+      isDeleted: false,
+    }).lean();
   }
 
+  async updatePost(postId, authorId, updateData) {
+    return Post.findOneAndUpdate(
+      { _id: postId, "author._id": authorId, isDeleted: false },
+      { $set: updateData },
+      { new: true },
+    ).lean();
+  }
   async getReactionsByUserAndTargets(userId, targetIds) {
     if (!userId || targetIds.length === 0) return [];
     return Reaction.find({
       userId: userId,
-      targetType: 'Post',
-      targetId: { $in: targetIds }
-    }).select('targetId type').lean();
+      targetType: "Post",
+      targetId: { $in: targetIds },
+    })
+      .select("targetId type")
+      .lean();
   }
 
   async getComments(postId, skip, limit) {
     return Comment.find({ postId, isDeleted: false })
       .sort({ createdAt: -1 })
-      .skip(skip).limit(limit)
-      .populate({ path: 'author', select: 'username fullName avatar' })
-      .lean(); 
+      .skip(skip)
+      .limit(limit)
+      .populate({ path: "author", select: "username fullName avatar" })
+      .lean();
   }
 
   // === WRITE  ===
@@ -42,16 +60,16 @@ class PostRepository {
 
   async upsertReaction({ userId, postId, type }, session) {
     return Reaction.findOneAndUpdate(
-      { userId, targetId: postId, targetType: 'Post' },
+      { userId, targetId: postId, targetType: "Post" },
       { $set: { type } },
-      { upsert: true, new: true, includeResultMetadata: true, session }
+      { upsert: true, new: true, includeResultMetadata: true, session },
     );
   }
 
   async deleteReaction({ userId, postId }, session) {
     return Reaction.findOneAndDelete(
-        { userId, targetId: postId, targetType: 'Post' },
-        { session }
+      { userId, targetId: postId, targetType: "Post" },
+      { session },
     );
   }
 
@@ -59,7 +77,7 @@ class PostRepository {
     return Post.updateOne(
       { _id: postId },
       { $inc: { [`stats.${field}`]: amount } },
-      { session }
+      { session },
     );
   }
 
@@ -72,15 +90,16 @@ class PostRepository {
     return Post.updateOne(
       { _id: postId },
       {
-        $inc: { 'stats.comments': 1 },
+        $inc: { "stats.comments": 1 },
         $push: {
           latestComments: {
             $each: [commentData],
             $sort: { createdAt: -1 },
-            $slice: 3
-          }
-        }
-      }, { session }
+            $slice: 3,
+          },
+        },
+      },
+      { session },
     );
   }
 
@@ -100,13 +119,13 @@ class PostRepository {
   async softDeletePost(postId, userId) {
     return Post.findOneAndUpdate(
       { _id: postId, "author._id": userId, isDeleted: false },
-      { 
-        $set: { 
-          isDeleted: true, 
-          deletedAt: new Date() 
-        } 
+      {
+        $set: {
+          isDeleted: true,
+          deletedAt: new Date(),
+        },
       },
-      { new: true }
+      { new: true },
     );
   }
 }

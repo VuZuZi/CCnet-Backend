@@ -1,4 +1,4 @@
-import ApiResponse from '../../core/Response.js';
+import ApiResponse from "../../core/Response.js";
 
 class PostController {
   constructor({ postService, reportService }) {
@@ -12,8 +12,12 @@ class PostController {
       const cursor = req.query.cursor || null;
       const currentUserId = req.user?.userId || null;
 
-      const result = await this.postService.getNewsFeed({ cursor, limit, userId: currentUserId });
-      
+      const result = await this.postService.getNewsFeed({
+        cursor,
+        limit,
+        userId: currentUserId,
+      });
+
       return ApiResponse.success(res, result.data, result.paging);
     } catch (error) {
       next(error);
@@ -24,7 +28,7 @@ class PostController {
     try {
       const post = await this.postService.getPostById(req.params.id);
       if (!post) {
-        return ApiResponse.notFound(res, "Post not found"); 
+        return ApiResponse.notFound(res, "Post not found");
       }
       return ApiResponse.success(res, post);
     } catch (error) {
@@ -40,8 +44,8 @@ class PostController {
       const post = await this.postService.createPost({
         content,
         files,
-        user: req.user, 
-        privacy
+        user: req.user,
+        privacy,
       });
 
       return ApiResponse.created(res, post);
@@ -52,11 +56,11 @@ class PostController {
 
   toggleReaction = async (req, res, next) => {
     try {
-      const { type } = req.body; 
+      const { type } = req.body;
       const result = await this.postService.toggleReaction({
         postId: req.params.id,
         userId: req.user.userId,
-        type
+        type,
       });
       return ApiResponse.success(res, result);
     } catch (error) {
@@ -71,7 +75,7 @@ class PostController {
         reporter_ref: req.user.userId,
         target_ref: req.params.id,
       };
-      
+
       const report = await this.reportService.createReport(reportData);
       return ApiResponse.created(res, report);
     } catch (error) {
@@ -82,12 +86,12 @@ class PostController {
   addComment = async (req, res, next) => {
     try {
       const { content } = req.body;
-      if (!content) return ApiResponse.badRequest(res, "Content is required"); 
-      
+      if (!content) return ApiResponse.badRequest(res, "Content is required");
+
       const comment = await this.postService.addComment({
         postId: req.params.id,
         user: req.user,
-        content
+        content,
       });
 
       return ApiResponse.created(res, comment);
@@ -99,7 +103,10 @@ class PostController {
   getComments = async (req, res, next) => {
     try {
       const page = parseInt(req.query.page, 10) || 1;
-      const comments = await this.postService.getComments({ postId: req.params.id, page });
+      const comments = await this.postService.getComments({
+        postId: req.params.id,
+        page,
+      });
       return ApiResponse.success(res, comments);
     } catch (error) {
       next(error);
@@ -110,10 +117,38 @@ class PostController {
     try {
       await this.postService.deletePost({
         postId: req.params.id,
-        userId: req.user.userId 
+        userId: req.user.userId,
       });
 
       return ApiResponse.success(res, { message: "Deleted successfully" });
+    } catch (error) {
+      next(error);
+    }
+  };
+  updatePost = async (req, res, next) => {
+    try {
+      const { content, privacy, removeFiles } = req.body;
+      const newFiles = req.files || [];
+      const postId = req.params.id;
+      const userId = req.user.userId;
+
+      const updatedPost = await this.postService.updatePost({
+        postId,
+        userId,
+        content,
+        privacy,
+        newFiles,
+        removeFiles,
+      });
+
+      if (!updatedPost) {
+        return ApiResponse.notFound(
+          res,
+          "Post not found or you don't have permission",
+        );
+      }
+
+      return ApiResponse.success(res, updatedPost, "Post updated successfully");
     } catch (error) {
       next(error);
     }
