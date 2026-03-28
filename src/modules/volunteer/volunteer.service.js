@@ -12,16 +12,13 @@ class VolunteerService {
     this.projectRepository = projectRepository;
     this.jobQueue = jobQueue;
   }
-  // ✅ THÊM METHOD NÀY
+  //  THÊM METHOD NÀY
   async getProjectPendingApplications(projectId, limit = 20, cursor = null) {
-    console.log('🔍 [Service] getProjectPendingApplications called:', { projectId, limit, cursor });
-
     // Kiểm tra project tồn tại (comment tạm thời nếu project chưa có)
     try {
       const volunteer = await this.volunteerRepository.findByProject(projectId);
     return volunteer
     } catch (error) {
-      console.log('⚠️ Project not found, returning empty list');
       return {
         data: [],
         nextCursor: null,
@@ -67,7 +64,6 @@ class VolunteerService {
         "motivation:" + motivation,
         "availabilit:" + availability
       );
-      console.log("aaaaaaaaaaaa");
       const application =
         await this.volunteerRepository.create({
           volunteerId,
@@ -77,7 +73,6 @@ class VolunteerService {
           motivation,
           availability,
         });
-      console.log("aaaaaaaasaaaaa" + application);
       return application;
     } catch (e) {
       // ❗ duplicate apply
@@ -87,21 +82,13 @@ class VolunteerService {
       throw e;
     }
   }
-  // ✅ UPDATE application
-  async updateApplication(id, updateData) {
-    console.log('🔍 [Service] updateApplication:', { id, updateData });
-
+  //  UPDATE application
+  async updateApplication(userId, id, updateData) { //id Project,
     // Kiểm tra application tồn tại
     const application = await this.volunteerRepository.findById(id);
     if (!application) {
       throw new AppError('Application not found', 404);
     }
-
-    // Chỉ cho phép update khi status là PENDING
-    if (application.status !== 'PENDING') {
-      throw new AppError('Cannot update application that is not pending', 400);
-    }
-
     // Cập nhật
     const updated = await this.volunteerRepository.update(id, updateData, userId);
 
@@ -132,8 +119,6 @@ class VolunteerService {
     try {
       //  Lấy từ data param truyền vào
       const { opportunityId } = data;
-      console.log("sssssssssssssssss" + opportunityId);
-
       if (!opportunityId) {
         throw new AppError('Missing opportunityId', 400);
       }
@@ -162,34 +147,37 @@ class VolunteerService {
     }
   }
   // APPROVE
-  async approveVolunteer(applicationId) {
-    const application =
-      await this.volunteerRepository.findById(applicationId);
-
+  async approveVolunteer(applicationId, adminId) {
+    const application = await this.volunteerRepository.findById(applicationId);
     if (!application) {
       throw new AppError('Application not found', 404);
     }
 
-    application.status = 'APPROVED';
-    await application.save();
-
-    // tạo volunteer chính thức
-    await this.volunteerRepository.create({
-      volunteerId: application.volunteerId,
-      opportunityId: application.opportunityId,
-      changerId: application.volunteerId,
-    });
-
-    // enqueue job (optional)
-    try {
-      await this.jobQueue.addJob('volunteer', 'approved', {
-        volunteerId: application.volunteerId,
-      });
-    } catch (e) {
-      console.error('[VolunteerService] Queue error:', e.message);
+    if (application.status !== 'PENDING') {
+      throw new AppError('Can only approve pending applications', 400);
     }
 
-    return application;
+    //  Sử dụng hàm update để cập nhật status
+    const updated = await this.volunteerRepository.update(
+        applicationId,
+        { status: 'APPROVED' },  // updateData
+        adminId                   // changerId
+    );
+
+    return updated;
+  }
+  // RESTORE
+  async restoreVolunteer(applicationId, userID) {
+    const application = await this.volunteerRepository.findById(applicationId);
+    if (!application) {
+      throw new AppError('Application not found', 404);
+    }
+    const restore = await this.volunteerRepository.update(
+        applicationId,
+        { status: 'PENDING' },  // updateData
+        userID                   // changerId
+    );
+    return restore;
   }
 
   // REJECT
@@ -208,6 +196,22 @@ class VolunteerService {
 
     return application;
   }
+
+  async pendingVolunteer(applicationId,userId) {
+    const application =
+        await this.volunteerRepository.findById(applicationId);
+
+    if (!application) {
+      throw new AppError('Application not found', 404);
+    }
+
+    application.status = 'PENDING';
+    application.changerId = userId;
+    await application.save();
+
+    return application;
+  }
+
 
   // GET MY APPLICATIONS
   async getMyApplications(userId, limit = 10, cursor) {

@@ -19,7 +19,6 @@ const execute = (action) => (req, res, next) => {
         console.log(`❌ Action '${action}' not found in controller`);
         return res.status(500).json({ error: `Action ${action} not found` });
     }
-    console.log(`✅ Calling controller.${action}`);
     return controller[action](req, res, next);
 };
 
@@ -53,16 +52,15 @@ router.patch(
 
 // ✅ Lấy danh sách đơn đang chờ của project
 router.get(
-    '/projects/:projectId',  // ✅ Thêm :projectId
+    '/projects/:projectId/:status',  // ✅ Thêm :projectId
     authenticate,
     execute('getProjectPendingApplications')      // ✅ Đúng tên method
 );
 
 // Duyệt đơn
 router.patch(
-    '/applications/:id/approve',
+    '/:id/approve',
     authenticate,
-    authorize(['ADMIN', 'ORGANIZER']),
     execute('approveVolunteer')
 );
 
@@ -70,8 +68,14 @@ router.patch(
 router.patch(
     '/applications/:id/reject',
     authenticate,
-    authorize(['ADMIN', 'ORGANIZER']),
     execute('rejectVolunteer')
 );
+// restore
+router.patch(
+    '/applications/:id/restore',
+    authenticate,
+    execute('restoreVolunteer')
+);
+
 
 export default router;

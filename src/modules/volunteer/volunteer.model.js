@@ -32,7 +32,9 @@ const volunteerSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-
+      reason:{
+          type: String
+      },
     status: {
       type: String,
       enum: ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'],
