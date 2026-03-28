@@ -7,6 +7,7 @@ import searchRoutes from "../modules/search/search.routes.js";
 import chatRoutes from "../modules/chat/chat.routes.js";
 import followRoutes from "../modules/follow/follow.routes.js";
 import projectRoutes from "../modules/project/project.routes.js"
+import volunteerRoutes from "../modules/volunteer/volunteer.routes.js"
 import helpRequestRoutes from "../modules/helprequest/helprequest.routes.js";
 import projectRoutes from "../modules/project/project.routes.js";
 import {
@@ -26,8 +27,8 @@ export const configureRoutes = (app) => {
   app.use(`${API_PREFIX}/chat`, chatRoutes);
   app.use(`${API_PREFIX}/follow`, followRoutes);
   app.use(`${API_PREFIX}/project`, projectRoutes);
+  app.use(`${API_PREFIX}/volunteer`, volunteerRoutes);
   app.use(`${API_PREFIX}/help-requests`, helpRequestRoutes);
-
   app.use(`${API_PREFIX}/organizer-requests`, organizerRequestUserRouter);
   app.use(`${API_PREFIX}/admin/organizer-requests`, organizerRequestAdminRouter);
 
@@ -46,6 +47,7 @@ export const configureRoutes = (app) => {
         `${API_PREFIX}/chat/*`,
         `${API_PREFIX}/follow/*`,
         `${API_PREFIX}/project/*`,
+        `${API_PREFIX}/volunteer/*`,
         `${API_PREFIX}/help-requests/*`,
         `${API_PREFIX}/organizer-requests/*`,
         "/health",

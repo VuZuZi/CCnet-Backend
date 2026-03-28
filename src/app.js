@@ -7,6 +7,7 @@ import { initializeContainer, registerModule } from './container/index.js';
 import { initPostWorkers } from './modules/communitypost/post.worker.js';
 import { initFollowWorkers } from './modules/follow/follow.worker.js';
 import { initProjectWorkers } from './modules/project/project.worker.js';
+import { initVolunteerWorkers } from './modules/volunteer/volunteer.worker.js';
 
 export const createApp = async () => {
   const app = express();
@@ -28,11 +29,13 @@ export const createApp = async () => {
 
   await registerModule('project');
 
+  await registerModule('volunteer');
+
   console.log('Starting Background Workers...');
   initPostWorkers();
   initFollowWorkers();
   initProjectWorkers();
-
+  initVolunteerWorkers(); //vudd6
   configureSystemRoutes(app);
 
   console.log('Configuring routes...');
