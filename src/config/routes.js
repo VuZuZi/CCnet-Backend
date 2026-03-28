@@ -9,7 +9,6 @@ import followRoutes from "../modules/follow/follow.routes.js";
 import projectRoutes from "../modules/project/project.routes.js"
 import volunteerRoutes from "../modules/volunteer/volunteer.routes.js"
 import helpRequestRoutes from "../modules/helprequest/helprequest.routes.js";
-import projectRoutes from "../modules/project/project.routes.js";
 import {
   organizerRequestUserRouter,
   organizerRequestAdminRouter,
