@@ -10,7 +10,8 @@ class ProjectService {
         cloudinaryProvider,
         jobQueue,
         transactionManager,
-        redis
+        redis,
+        helprequestRepository
     }) {
         this.projectRepository = projectRepository;
         this.mediaRepository = mediaRepository;
@@ -18,6 +19,7 @@ class ProjectService {
         this.jobQueue = jobQueue;
         this.transactionManager = transactionManager;
         this.redis = redis;
+        this.helpRequestRepository = helprequestRepository;
     }
 
 
@@ -171,7 +173,11 @@ class ProjectService {
         }
 
         if (!project.startDate || !project.endDate) throw new AppError('Bắt buộc phải có Ngày bắt đầu và Ngày kết thúc.', 400);
-        if (!project.documents || project.documents.length === 0) throw new AppError('Bắt buộc phải có tài liệu chứng minh.', 400);
+        // if (!project.documents || project.documents.length === 0) throw new AppError('Bắt buộc phải có tài liệu chứng minh.', 400);
+        const isFromHelpRequest = project.fromHelpRequestId && project.fromHelpRequestId.toString().length > 0;
+        if (!isFromHelpRequest && (!project.documents || project.documents.length === 0)) {
+            throw new AppError('Bắt buộc phải có tài liệu chứng minh.', 400);
+        }
         if (project.targetAmount > 0) {
             if (!project.milestones || project.milestones.length === 0) throw new AppError('Dự án có gọi vốn bắt buộc phải có mốc giải ngân.', 400);
             const sumMilestones = project.milestones.reduce((acc, curr) => acc + curr.targetAmount, 0);
@@ -360,7 +366,22 @@ class ProjectService {
                     currentAmount: 0
                 };
 
-                return await this.projectRepository.create(newProjectData, session);
+                // return await this.projectRepository.create(newProjectData, session);
+                const createdProject = await this.projectRepository.create(newProjectData, session);
+                // Link to help request if fromHelpRequestId is provided
+                if (projectData.fromHelpRequestId && this.helpRequestRepository) {
+                    try {
+                        await this.helpRequestRepository.updateById(
+                            projectData.fromHelpRequestId,
+                            { linkedProjectId: createdProject._id }
+                        );
+                    } catch (err) {
+                        console.error('[Project Creation] Failed to link help request:', err.message);
+                        // Don't fail the project creation if linking fails
+                    }
+                }
+
+                return createdProject;
             });
 
             return result;

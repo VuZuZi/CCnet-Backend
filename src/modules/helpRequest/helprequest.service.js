@@ -269,4 +269,56 @@ export default class HelpRequestService {
   async getStats() {
     return this.helpRequestRepository.getStats();
   }
+
+  async getAsProjectData(helpRequestId) {
+    const helpRequest = await this.helpRequestRepository.findById(helpRequestId, {
+      populate: ['requester'],
+    });
+
+    if (!helpRequest || helpRequest.isDeleted) {
+      throw new AppError('Help request not found', 404);
+    }
+
+    // Map help request category to project category
+    const categoryMapping = {
+      'Y_TE': 'Y_TE',
+      'GIAO_DUC': 'GIAO_DUC',
+      'THIEN_TAI': 'THIEN_TAI',
+      'XAY_DUNG': 'XAY_DUNG',
+      'MOI_TRUONG': 'MOI_TRUONG',
+      'KHAC': 'KHAC'
+    };
+
+    // Determine if it's urgent from urgency level
+    const isUrgent = ['HIGH', 'CRITICAL'].includes(helpRequest.urgencyLevel);
+
+    // Convert evidences to media format
+    const coverMedia = helpRequest.evidences?.find((e) => e.mediaType === 'image' || !e.mediaType) || null;
+
+    return {
+      title: helpRequest.title,
+      description: helpRequest.story,
+      category: categoryMapping[helpRequest.category] || 'KHAC',
+      location: helpRequest.location,
+      amountNeeded: helpRequest.amountNeeded,
+      targetAmount: helpRequest.amountNeeded > 0 ? helpRequest.amountNeeded : 0,
+      isFundraising: helpRequest.amountNeeded > 0,
+      isUrgent,
+      coverMedia: coverMedia ? [{
+        url: coverMedia.url,
+        publicId: coverMedia.publicId,
+        mediaType: coverMedia.mediaType || 'image',
+        originalName: coverMedia.originalName
+      }] : [],
+      documents: helpRequest.evidences || [],
+      helpRequestInfo: {
+        requesterId: helpRequest.requesterId,
+        requesterName: helpRequest.requester?.fullName,
+        requesterEmail: helpRequest.requester?.email,
+        requesterPhone: helpRequest.requester?.phone,
+        contactPhone: helpRequest.contactPhone,
+        contactEmail: helpRequest.contactEmail,
+      }
+    };
+  }
 }

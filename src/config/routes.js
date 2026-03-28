@@ -6,7 +6,6 @@ import mediaRoutes from "../modules/media/media.routes.js";
 import searchRoutes from "../modules/search/search.routes.js";
 import chatRoutes from "../modules/chat/chat.routes.js";
 import followRoutes from "../modules/follow/follow.routes.js";
-import projectRoutes from "../modules/project/project.routes.js"
 import helpRequestRoutes from "../modules/helprequest/helprequest.routes.js";
 import projectRoutes from "../modules/project/project.routes.js";
 import {

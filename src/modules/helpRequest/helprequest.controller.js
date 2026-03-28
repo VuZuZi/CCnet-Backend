@@ -217,4 +217,18 @@ export default class HelpRequestController {
       next(error);
     }
   };
+
+  getAsProjectData = async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const projectData = await this.helpRequestService.getAsProjectData(id);
+      return Response.success(
+        res,
+        projectData,
+        'Help request converted to project format successfully'
+      );
+    } catch (error) {
+      next(error);
+    }
+  };
 }

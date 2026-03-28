@@ -51,6 +51,7 @@ export const createDraftSchema = z.object({
   volunteerRoles: z.array(volunteerRoleSchema).max(20, "Tối đa 20 vai trò").optional(),
 
   isFundraising: z.boolean().optional(),
+  fromHelpRequestId: objectIdSchema.optional(),
 
   coverMedia: z.union([z.array(mediaPayloadSchema), mediaPayloadSchema]).optional(),
   documents: z.array(mediaPayloadSchema).optional(),
@@ -79,6 +80,7 @@ export const updateDraftSchema = z.object({
   volunteerRoles: z.array(volunteerRoleSchema).max(20, "Tối đa 20 vai trò").optional(),
 
   isFundraising: z.boolean().optional(),
+  fromHelpRequestId: objectIdSchema.optional(),
 
   deletedDocumentIds: z.union([
     z.array(objectIdSchema),
