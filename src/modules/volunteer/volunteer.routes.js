@@ -50,11 +50,11 @@ router.patch(
     execute('cancelApplication')
 );
 
-// ✅ Lấy danh sách đơn đang chờ của project
+//  Lấy danh sách đơn đang chờ của project
 router.get(
-    '/projects/:projectId/:status',  // ✅ Thêm :projectId
+    '/projects/:projectId/:status',  //  Thêm :projectId
     authenticate,
-    execute('getProjectPendingApplications')      // ✅ Đúng tên method
+    execute('getProjectPendingApplications')      //  Đúng tên method
 );
 
 // Duyệt đơn
