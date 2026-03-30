@@ -57,7 +57,7 @@ class AuthService {
 
     const user = await this.userService.createUser({
       email,
-      password, 
+      password,
       fullName,
       isEmailVerified: false
     });
@@ -80,7 +80,7 @@ class AuthService {
     const user = await this.userService.updateProfile(userId, { isEmailVerified: true });
     await this.redis.del(otpKey);
 
-    // ✅ Tự động tạo token để đăng nhập ngay lập tức sau khi verify thành công
+    // Tự động tạo token để đăng nhập ngay lập tức sau khi verify thành công
     return this._generateAuthResponse(user);
   }
 
