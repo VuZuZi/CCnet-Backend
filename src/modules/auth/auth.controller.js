@@ -35,7 +35,14 @@ constructor({ authService, userService, config }) {
       if (error) throw new AppError(error.details[0].message, 400);
 
       const result = await this.authService.verifyOTP(value.userId, value.otp);
-      return ApiResponse.success(res, result, "Email verified successfully");
+      
+      // Set refresh token cookie for auto login
+      this._setRefreshTokenCookie(res, result.refreshToken);
+
+      return ApiResponse.success(res, { 
+          user: result.user, 
+          tokens: { accessToken: result.accessToken } 
+      }, "Email verified successfully");
     } catch (error) {
       next(error);
     }
