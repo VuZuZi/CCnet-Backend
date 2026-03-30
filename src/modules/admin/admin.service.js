@@ -3,6 +3,7 @@ import Report from "../report/report.model.js";
 import User from "../user/user.model.js";
 import Notification from "../notification/notification.model.js";
 import Project from "../project/project.model.js";
+import { PROJECT_STATUS } from "../project/project.constant.js";
 
 class AdminService {
   constructor({ adminRepository, notificationRepository }) {
@@ -52,6 +53,31 @@ class AdminService {
       },
       { $sort: { createdAt: -1 } },
     ]);
+  };
+
+  updateProjectStatus = async (projectId, status) => {
+    if (!status) throw new Error("Status is required");
+
+    const normalized = String(status).trim().toUpperCase();
+    const mapped =
+      normalized === "PENDING" ? PROJECT_STATUS.PENDING_APPROVAL : normalized;
+
+    const allowed = new Set(Object.values(PROJECT_STATUS));
+    if (!allowed.has(mapped)) {
+      throw new Error("Invalid status");
+    }
+
+    const project = await Project.findByIdAndUpdate(
+      projectId,
+      { $set: { status: mapped } },
+      { new: true },
+    )
+      .select("status title organizerId targetAmount currentAmount stats needsVolunteers")
+      .lean()
+      .exec();
+
+    if (!project) throw new Error("Project not found");
+    return project;
   };
 
   deleteProject = async (projectId) => {
