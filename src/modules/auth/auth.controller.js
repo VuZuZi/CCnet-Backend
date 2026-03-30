@@ -36,7 +36,7 @@ constructor({ authService, userService, config }) {
 
       const result = await this.authService.verifyOTP(value.userId, value.otp);
       
-      // ✅ Set refresh token cookie for auto login
+      // Set refresh token cookie for auto login
       this._setRefreshTokenCookie(res, result.refreshToken);
 
       return ApiResponse.success(res, { 
