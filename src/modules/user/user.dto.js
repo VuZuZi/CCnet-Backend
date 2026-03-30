@@ -6,6 +6,7 @@ export const toUserResponse = (user) => {
         email: u.email,
         fullName: u.fullName,
         avatar: u.avatar,
+        isVerified: Boolean(u.isVerified),
         coverPhoto: u.coverPhoto,
         phone: u.phone,
         location: u.location,

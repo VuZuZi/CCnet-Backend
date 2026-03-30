@@ -92,6 +92,7 @@ class ProjectRepository {
             endDate: { $gt: new Date() }
         })
             .select(PROJECT_CARD_PROJECTION)
+            .populate({ path: 'organizerId', select: 'fullName avatar isVerified' })
             .sort({ createdAt: -1 })
             .limit(limit)
             .lean()
@@ -108,6 +109,7 @@ class ProjectRepository {
                 ...PROJECT_CARD_PROJECTION,
                 volunteerRoles: 1
             })
+            .populate({ path: 'organizerId', select: 'fullName avatar isVerified' })
             .sort({ createdAt: -1 })
             .limit(limit)
             .lean()
@@ -129,6 +131,7 @@ class ProjectRepository {
         const [projects, total] = await Promise.all([
             Project.find(queryFilter)
                 .select(projection)
+                .populate({ path: 'organizerId', select: 'fullName avatar isVerified' })
                 .sort(finalSort)
                 .skip(skip)
                 .limit(limit)

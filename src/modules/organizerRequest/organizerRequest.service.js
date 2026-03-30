@@ -98,6 +98,7 @@ class OrganizerRequestService {
   }
 
   user.role = 'Organizer';
+  user.isVerified = true;
   await user.save();
 
   const updated = await this.organizerRequestRepository.updateById(requestId, {

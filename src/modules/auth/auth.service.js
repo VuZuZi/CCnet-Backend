@@ -221,7 +221,8 @@ class AuthService {
         email: user.email,
         fullName: user.fullName,
         role: user.role,
-        avatar: user.avatar
+        avatar: user.avatar,
+        isVerified: Boolean(user.isVerified)
       },
       accessToken,
       refreshToken

@@ -245,6 +245,14 @@ class ProjectService {
         const redisKey = `project:${projectId}:views`;
         this.redis.incr(redisKey).catch(err => console.error(`[Redis Error]:`, err.message));
 
+        if (project.organizerId?._id) {
+            const stats = await this.projectRepository.getOrganizerStats(project.organizerId._id);
+            project.organizerId = {
+                ...project.organizerId,
+                activeProjects: stats.activeProjects
+            };
+        }
+
         return project;
     }
 

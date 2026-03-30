@@ -1,9 +1,6 @@
-import Post from "../communitypost/post.model.js";
-import Report from "../report/report.model.js";
-import User from "../user/user.model.js";
-import Notification from "../notification/notification.model.js";
-import Project from "../project/project.model.js";
+// backend/src/modules/admin/admin.service.js
 import { PROJECT_STATUS } from "../project/project.constant.js";
+import mongoose from "mongoose";
 
 class AdminService {
   constructor({ adminRepository, notificationRepository }) {
@@ -20,39 +17,7 @@ class AdminService {
   };
 
   getProjects = async () => {
-    return await Project.aggregate([
-      {
-        // 1. Join với bảng users để lấy thông tin organizer
-        $lookup: {
-          from: "users",
-          localField: "organizerId",
-          foreignField: "_id",
-          as: "organizer",
-        },
-      },
-      { $unwind: "$organizer" },
-      {
-        // 2. Join ngược lại với bảng projects để đếm số lượng dự án của organizer đó
-        $lookup: {
-          from: "projects",
-          localField: "organizerId",
-          foreignField: "organizerId",
-          as: "organizerProjects",
-        },
-      },
-      {
-        $addFields: {
-          "organizer.projectCount": { $size: "$organizerProjects" },
-        },
-      },
-      {
-        $project: {
-          organizerProjects: 0,
-          "organizer.password": 0,
-        },
-      },
-      { $sort: { createdAt: -1 } },
-    ]);
+    return await this.adminRepository.findAllProjects();
   };
 
   updateProjectStatus = async (projectId, status) => {
@@ -67,21 +32,14 @@ class AdminService {
       throw new Error("Invalid status");
     }
 
-    const project = await Project.findByIdAndUpdate(
-      projectId,
-      { $set: { status: mapped } },
-      { new: true },
-    )
-      .select("status title organizerId targetAmount currentAmount stats needsVolunteers")
-      .lean()
-      .exec();
-
+    const project = await this.adminRepository.updateProjectStatus(projectId, mapped);
     if (!project) throw new Error("Project not found");
+
     return project;
   };
 
   deleteProject = async (projectId) => {
-    const project = await Project.findByIdAndDelete(projectId);
+    const project = await this.adminRepository.deleteProject(projectId);
     if (!project) throw new Error("Project not found");
     return project;
   };
@@ -91,24 +49,33 @@ class AdminService {
   };
 
   toggleUserBan = async (userId) => {
-    const user = await User.findById(userId);
+    const user = await this.adminRepository.toggleUserBan(userId);
     if (!user) throw new Error("User not found");
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { $set: { isActive: !user.isActive } },
-      { new: true },
-    );
+    return user;
+  };
 
-    return updatedUser;
+  setUserVerified = async (userId, isVerified) => {
+    if (!mongoose.Types.ObjectId.isValid(userId)) throw new Error("Invalid user ID");
+
+    let nextValue = isVerified;
+    if (typeof nextValue !== "boolean") {
+      const current = await this.adminRepository.findUserById(userId);
+      if (!current) throw new Error("User not found");
+      nextValue = !Boolean(current.isVerified);
+    }
+
+    const updated = await this.adminRepository.setUserVerified(userId, nextValue);
+    if (!updated) throw new Error("User not found");
+    return updated;
   };
 
   resolveReportWithActions = async (reportId, actions, note) => {
-    const report = await Report.findById(reportId).populate("target_ref");
+    const report = await this.adminRepository.findReportById(reportId);
     if (!report) throw new Error("Report not found");
 
     if (actions.includes("delete_content")) {
       if (report.target_type.toLowerCase() === "post" && report.target_ref) {
-        await Post.findByIdAndDelete(report.target_ref._id);
+        await this.adminRepository.deletePost(report.target_ref._id);
       }
     }
 
@@ -119,14 +86,16 @@ class AdminService {
       }
     }
 
-    report.status = "resolved";
-    report.action = actions.length > 0 ? actions.join(",") : "none";
-    report.decision_note = note;
-    report.reviewed_at = new Date();
+    const updatedReport = await this.adminRepository.updateReport(reportId, {
+      status: "resolved",
+      action: actions.length > 0 ? actions.join(",") : "none",
+      decision_note: note,
+      reviewed_at: new Date(),
+    });
 
-    await report.save();
-    return report;
+    return updatedReport;
   };
+
   createSystemNotification = async (notificationData) => {
     const { title, message, recipient } = notificationData;
 
@@ -134,14 +103,12 @@ class AdminService {
       throw new Error("Title and message are required to send a notification.");
     }
 
-    const notification = new Notification({
+    const notification = await this.adminRepository.createNotification({
       title,
       message,
       recipient: recipient || "all",
       sender: "system",
     });
-
-    await notification.save();
 
     return notification;
   };
