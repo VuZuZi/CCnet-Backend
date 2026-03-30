@@ -77,10 +77,11 @@ class AuthService {
     if (!storedOTP) throw new AppError('OTP expired or invalid', 400);
     if (storedOTP !== parseInt(otp)) throw new AppError('Invalid OTP', 400);
 
-    await this.userService.updateProfile(userId, { isEmailVerified: true });
-    await this.redis.del(otpKey); 
+    const user = await this.userService.updateProfile(userId, { isEmailVerified: true });
+    await this.redis.del(otpKey);
 
-    return { verified: true };
+    // ✅ Tự động tạo token để đăng nhập ngay lập tức sau khi verify thành công
+    return this._generateAuthResponse(user);
   }
 
   async resendOTP(email) {
@@ -92,7 +93,7 @@ class AuthService {
     if (user.isEmailVerified) {
       throw new AppError('Account is already verified', 400);
     }
-    
+
     await this._sendOTPToUser(user);
 
     return { sent: true };
@@ -100,11 +101,11 @@ class AuthService {
 
   async login(email, password) {
     const user = await this.userService.getUserByEmail(email);
-    
+
     if (!user) throw new AppError('Invalid email or password', 401);
 
     if (!user.password) {
-        throw new AppError('This email is linked to a Google account. Please login with Google.', 400);
+      throw new AppError('This email is linked to a Google account. Please login with Google.', 400);
     }
 
     const isPasswordValid = await user.comparePassword(password);
@@ -128,7 +129,7 @@ class AuthService {
 
       if (user) {
         if (!user.googleId) {
-           await this.userService.updateProfile(user._id, { googleId, avatar: user.avatar || picture });
+          await this.userService.updateProfile(user._id, { googleId, avatar: user.avatar || picture });
         }
         if (!user.isActive) throw new AppError('Account is deactivated', 403);
       } else {
@@ -137,8 +138,8 @@ class AuthService {
           fullName: name,
           googleId,
           avatar: picture,
-          isEmailVerified: true, 
-          password: null 
+          isEmailVerified: true,
+          password: null
         });
       }
 
@@ -157,7 +158,7 @@ class AuthService {
     await this.tokenRepository.deleteToken(oldRefreshToken);
 
     if (tokenDoc.expiresAt < new Date()) {
-        throw new AppError('Refresh token expired, please login again', 401);
+      throw new AppError('Refresh token expired, please login again', 401);
     }
 
     const user = await this.userService.getUserById(tokenDoc.userId);
@@ -168,7 +169,7 @@ class AuthService {
 
   async logout(userId, accessToken, refreshToken) {
     if (refreshToken) {
-        await this.tokenRepository.deleteToken(refreshToken);
+      await this.tokenRepository.deleteToken(refreshToken);
     }
 
     if (accessToken) {
@@ -177,7 +178,7 @@ class AuthService {
         if (decoded && decoded.exp) {
           const now = Math.floor(Date.now() / 1000);
           const ttl = decoded.exp - now;
-          
+
           if (ttl > 0) {
             await this.redis.set(`bl:${accessToken}`, 'revoked', 'EX', ttl);
           }
@@ -194,35 +195,36 @@ class AuthService {
   async _sendOTPToUser(user) {
     const otp = crypto.randomInt(100000, 999999).toString();
     await this.redis.set(`otp:${user._id}`, otp, 'EX', 300);
-    
+
     try {
-        await this.mailProvider.sendEmail(user.email, 'Verify your account', 'OTP', { otp });
+      await this.mailProvider.sendEmail(user.email, 'Verify your account', 'OTP', { otp });
     } catch (err) {
-        console.error('Failed to send OTP email:', err);
+      console.error('Failed to send OTP email:', err);
     }
 
     if (this.config.env === 'development') {
-        console.log(`[DEV ONLY] OTP for ${user.email}: ${otp}`);
+      console.log(`[DEV ONLY] OTP for ${user.email}: ${otp}`);
     }
   }
 
   async _generateAuthResponse(user) {
+    const userId = user._id || user.id;
     const accessToken = this.generateAccessToken(user);
     const refreshToken = this.generateRefreshToken();
     const expiresAt = this.getRefreshTokenExpiry();
 
-    await this.tokenRepository.saveToken(refreshToken, user._id, expiresAt);
+    await this.tokenRepository.saveToken(refreshToken, userId, expiresAt);
 
     return {
       user: {
-        id: user._id,
+        id: userId,
         email: user.email,
         fullName: user.fullName,
         role: user.role,
         avatar: user.avatar
       },
       accessToken,
-      refreshToken 
+      refreshToken
     };
   }
 }
