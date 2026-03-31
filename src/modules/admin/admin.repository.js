@@ -24,7 +24,7 @@ class AdminRepository {
           $group: {
             _id: null,
             total: { $sum: 1 },
-            banned: { $sum: { $cond: ["$isActive", 0, 1] } }, // isActive = false là banned
+            banned: { $sum: { $cond: ["$isActive", 0, 1] } },
             verified: { $sum: { $cond: ["$isVerified", 1, 0] } },
           },
         },
@@ -52,6 +52,25 @@ class AdminRepository {
   // ==================== USERS ====================
   async findAllUsers() {
     return await this.User.aggregate([
+      // 1. Đếm dự án đã tạo với vai trò ORGANIZER (tất cả dự án)
+      {
+        $lookup: {
+          from: "projects",
+          let: { userId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $eq: ["$organizerId", "$$userId"],
+                },
+              },
+            },
+            { $count: "count" },
+          ],
+          as: "projectsAsOrganizerAgg",
+        },
+      },
+      // 2. Đếm dự án đã hoàn thành với vai trò ORGANIZER
       {
         $lookup: {
           from: "projects",
@@ -69,9 +88,10 @@ class AdminRepository {
             },
             { $count: "count" },
           ],
-          as: "completedProjectsAgg",
+          as: "completedProjectsAsOrganizerAgg",
         },
       },
+      // 3. Đếm số lần tham gia với vai trò VOLUNTEER (đã được duyệt)
       {
         $lookup: {
           from: "volunteers",
@@ -92,13 +112,68 @@ class AdminRepository {
           as: "volunteerJoinsAgg",
         },
       },
+      // 4. Đếm dự án đã tham gia với vai trò VOLUNTEER (lấy thông tin dự án)
+      {
+        $lookup: {
+          from: "volunteers",
+          let: { userId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$volunteerId", "$$userId"] },
+                    { $eq: ["$status", "APPROVED"] },
+                  ],
+                },
+              },
+            },
+            {
+              $lookup: {
+                from: "projects",
+                localField: "opportunityId",
+                foreignField: "_id",
+                as: "projectInfo",
+              },
+            },
+            { $unwind: "$projectInfo" },
+            {
+              $project: {
+                _id: 0,
+                projectId: "$projectInfo._id",
+                projectTitle: "$projectInfo.title",
+                projectStatus: "$projectInfo.status",
+                joinedAt: "$createdAt",
+              },
+            },
+          ],
+          as: "joinedProjectsAsVolunteerAgg",
+        },
+      },
       {
         $addFields: {
-          completedProjectsCount: {
-            $ifNull: [{ $arrayElemAt: ["$completedProjectsAgg.count", 0] }, 0],
+          // Tổng số dự án đã tạo (với vai trò ORGANIZER)
+          totalProjectsAsOrganizer: {
+            $ifNull: [{ $arrayElemAt: ["$projectsAsOrganizerAgg.count", 0] }, 0],
           },
-          volunteersJoinedCount: {
+          // Số dự án đã hoàn thành (với vai trò ORGANIZER)
+          completedProjectsAsOrganizer: {
+            $ifNull: [{ $arrayElemAt: ["$completedProjectsAsOrganizerAgg.count", 0] }, 0],
+          },
+          // Số lần tham gia với vai trò VOLUNTEER (đếm số lần đăng ký)
+          totalVolunteerJoins: {
             $ifNull: [{ $arrayElemAt: ["$volunteerJoinsAgg.count", 0] }, 0],
+          },
+          // Số dự án đã tham gia với vai trò VOLUNTEER
+          joinedProjectsAsVolunteerCount: {
+            $size: "$joinedProjectsAsVolunteerAgg",
+          },
+          //  TỔNG SỐ DỰ ÁN ĐÃ THAM GIA (ORGANIZER + VOLUNTEER)
+          totalProjectsParticipated: {
+            $add: [
+              { $ifNull: [{ $arrayElemAt: ["$projectsAsOrganizerAgg.count", 0] }, 0] },
+              { $size: "$joinedProjectsAsVolunteerAgg" },
+            ],
           },
         },
       },
@@ -108,8 +183,10 @@ class AdminRepository {
           googleId: 0,
           avatarPublicId: 0,
           coverPhotoPublicId: 0,
-          completedProjectsAgg: 0,
+          projectsAsOrganizerAgg: 0,
+          completedProjectsAsOrganizerAgg: 0,
           volunteerJoinsAgg: 0,
+          joinedProjectsAsVolunteerAgg: 0,
         },
       },
       { $sort: { createdAt: -1 } },
@@ -122,8 +199,8 @@ class AdminRepository {
 
   async updateUser(id, updateData) {
     return await this.User.findByIdAndUpdate(id, updateData, { new: true })
-      .select("_id fullName email avatar role isActive isVerified")
-      .lean();
+        .select("_id fullName email avatar role isActive isVerified")
+        .lean();
   }
 
   async toggleUserBan(userId) {
@@ -131,9 +208,9 @@ class AdminRepository {
     if (!user) return null;
 
     return await this.User.findByIdAndUpdate(
-      userId,
-      { $set: { isActive: !user.isActive } },
-      { new: true }
+        userId,
+        { $set: { isActive: !user.isActive } },
+        { new: true }
     ).select("_id fullName email avatar role isActive isVerified");
   }
 
@@ -141,9 +218,9 @@ class AdminRepository {
     if (!mongoose.Types.ObjectId.isValid(userId)) return null;
 
     return await this.User.findByIdAndUpdate(
-      userId,
-      { $set: { isVerified } },
-      { new: true }
+        userId,
+        { $set: { isVerified } },
+        { new: true }
     ).select("_id fullName email avatar role isActive isVerified");
   }
 
@@ -188,9 +265,9 @@ class AdminRepository {
 
   async updateProjectStatus(projectId, status) {
     return await this.Project.findByIdAndUpdate(
-      projectId,
-      { $set: { status } },
-      { new: true }
+        projectId,
+        { $set: { status } },
+        { new: true }
     ).select("status title organizerId targetAmount currentAmount stats needsVolunteers");
   }
 
@@ -201,12 +278,12 @@ class AdminRepository {
   // ==================== REPORTS ====================
   async findAllReports() {
     return await this.Report.find()
-      .populate("reporter_ref", "username email")
-      .populate({
-        path: "target_ref",
-        select: "content title",
-      })
-      .sort({ createdAt: -1 });
+        .populate("reporter_ref", "username email")
+        .populate({
+          path: "target_ref",
+          select: "content title",
+        })
+        .sort({ createdAt: -1 });
   }
 
   async findReportById(reportId) {
