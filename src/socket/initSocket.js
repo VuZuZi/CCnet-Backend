@@ -1,5 +1,5 @@
 import { Server } from 'socket.io';
-import Redis from '../lib/redis.js';
+import Redis from 'ioredis';
 
 const CHAT_NEW_MESSAGE_CHANNEL = 'chat:message:new';
 
