@@ -34,6 +34,10 @@ class UserService {
     return await this.userRepository.findByEmailWithPassword(email);
   }
 
+  async checkEmailExists(email) {
+    return await this.userRepository.existsByEmail(email);
+  }
+
   async createUser(userData) {
     const exists = await this.userRepository.existsByEmail(userData.email);
     if (exists) throw new AppError("Email already registered", 409);
