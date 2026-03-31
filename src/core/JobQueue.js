@@ -2,21 +2,25 @@ import { Queue, Worker } from 'bullmq';
 import Redis from 'ioredis';
 
 class JobQueue {
-  constructor({ config }) {
+  constructor() {
     this.queues = {};
     this.workers = [];
 
-    this.redisConfig = {
-      host: config.redis.host,
-      port: config.redis.port,
-      password: config.redis.password,
-      db: config.redis.db,
-      maxRetriesPerRequest: null,
-      enableReadyCheck: false
-    };
+    const redisUrl = process.env.REDIS_URL;
 
-    this.queueConnection = new Redis(this.redisConfig);
-    this.queueConnection.on('error', (err) => console.error('[JobQueue - Queue] Redis Lỗi kết nối:', err.message));
+    if (!redisUrl) {
+      throw new Error('❌ REDIS_URL is required');
+    }
+
+    this.queueConnection = new Redis(redisUrl);
+
+    this.queueConnection.on('connect', () => {
+      console.log('[JobQueue] ✅ Redis connected');
+    });
+
+    this.queueConnection.on('error', (err) => {
+      console.error('[JobQueue - Queue] Redis lỗi:', err.message);
+    });
   }
 
   getQueue(queueName) {
@@ -30,28 +34,23 @@ class JobQueue {
 
   async addJob(queueName, jobName, data, customOptions = {}) {
     const queue = this.getQueue(queueName);
+
     const defaultOptions = {
       removeOnComplete: true,
       removeOnFail: { count: 1000, age: 24 * 3600 },
       attempts: 3,
       backoff: { type: 'exponential', delay: 1000 }
     };
+
     return await queue.add(jobName, data, { ...defaultOptions, ...customOptions });
   }
 
-  async close() {
-    await Promise.all(this.workers.map(worker => worker.close()));
-    await Promise.all(Object.values(this.queues).map(queue => queue.close()));
-
-    if (this.queueConnection) {
-      await this.queueConnection.quit();
-    }
-    console.log('[JobQueue] Toàn bộ queues, workers và connections đã đóng an toàn.');
-  }
-
   registerWorker(queueName, processor, workerOptions = {}) {
-    const workerConnection = new Redis(this.redisConfig);
-    workerConnection.on('error', (err) => console.error(`[JobQueue - Worker ${queueName}] Lỗi kết nối:`, err.message));
+    const workerConnection = new Redis(process.env.REDIS_URL);
+
+    workerConnection.on('error', (err) => {
+      console.error(`[JobQueue - Worker ${queueName}] Redis lỗi:`, err.message);
+    });
 
     const worker = new Worker(queueName, processor, {
       connection: workerConnection,
@@ -61,19 +60,20 @@ class JobQueue {
     });
 
     worker.on('completed', (job) => {
-      console.log(`[JobQueue] Job ${job.name} in ${queueName} hoàn tất!`);
+      console.log(`[JobQueue] Job ${job.name} hoàn tất`);
     });
 
     worker.on('failed', (job, err) => {
-      console.error(`[JobQueue] [CRITICAL] Job ${job?.name} thất bại: ${err.message}`);
-    });
-
-    worker.on('closed', () => {
-      workerConnection.quit().catch(err => console.error(`[JobQueue] Lỗi đóng connection worker ${queueName}:`, err.message));
+      console.error(`[JobQueue] Job ${job?.name} thất bại:`, err.message);
     });
 
     this.workers.push(worker);
-    console.log(`[JobQueue] Worker đăng ký thành công cho: ${queueName} (Dedicated Connection)`);
+  }
+
+  async close() {
+    await Promise.all(this.workers.map(w => w.close()));
+    await Promise.all(Object.values(this.queues).map(q => q.close()));
+    await this.queueConnection.quit();
   }
 }
 
