@@ -16,11 +16,9 @@ export function initSocket(server) {
     cors: { origin: 'http://localhost:3000', credentials: true }
   });
 
-  const sub = new Redis({
-    host: process.env.REDIS_HOST || '127.0.0.1',
-    port: Number(process.env.REDIS_PORT || 6379),
-    password: process.env.REDIS_PASSWORD || undefined
-  });
+  const sub = new Redis(process.env.REDIS_URL, {
+    maxRetriesPerRequest: null
+  })
 
   sub.on('error', (e) => console.error('[redis:sub] error', e));
   sub.on('connect', () => console.log('[redis:sub] connected'));
