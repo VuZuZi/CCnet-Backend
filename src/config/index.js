@@ -59,9 +59,11 @@ export const config = {
   },
 
   redis: {
-    host: envVars.REDIS_HOST,
-    port: envVars.REDIS_PORT,
-    password: envVars.REDIS_PASSWORD,
+    url: process.env.REDIS_URL || null,
+    //
+    // host: envVars.REDIS_HOST,
+    // port: envVars.REDIS_PORT,
+    // password: envVars.REDIS_PASSWORD,
   },
 
   jwt: {
