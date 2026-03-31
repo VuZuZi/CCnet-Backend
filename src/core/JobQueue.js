@@ -1,5 +1,5 @@
 import { Queue, Worker } from 'bullmq';
-import Redis from 'ioredis';
+import Redis from '../lib/redis.js';
 
 class JobQueue {
   constructor({ config }) {

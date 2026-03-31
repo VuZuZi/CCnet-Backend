@@ -1,4 +1,4 @@
-import Redis from 'ioredis';
+import Redis from '../lib/redis.js';
 
 class RedisClient {
   constructor({ config }) {
