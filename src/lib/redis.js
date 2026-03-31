@@ -1,53 +1,44 @@
 // src/lib/redis.js
 import Redis from 'ioredis';
-import { config } from '../config/index.js';
 
-class NoopCache {
+// Tạo fake Redis client nếu không có URL thật
+class NoopRedis {
     async get() { return null; }
     async set() { return true; }
     async del() { return true; }
     async publish() { return true; }
     async subscribe() { return true; }
+    on() { return this; }
+    quit() { return Promise.resolve(); }
 }
 
-let redisClient = null;
+// Kiểm tra URL có phải localhost không
+const redisUrl = process.env.REDIS_URL;
+const isLocalRedis = !redisUrl || redisUrl.includes('localhost') || redisUrl.includes('127.0.0.1');
 
-//  Kiểm tra URL từ env
-const redisUrl = process.env.REDIS_URL || config.redis?.url;
+let redisClient;
 
-if (redisUrl && redisUrl !== 'redis://localhost:6379') {
+if (!isLocalRedis && redisUrl) {
     try {
         redisClient = new Redis(redisUrl, {
             maxRetriesPerRequest: 1,
-            retryStrategy: (times) => {
-                // Không retry để tránh delay startup
-                return null;
-            },
-            enableOfflineQueue: false,
-            lazyConnect: true,  // Không kết nối ngay
-        });
-
-        redisClient.on('connect', () => {
-            console.log(' Redis connected');
+            retryStrategy: () => null,
+            lazyConnect: true,
         });
 
         redisClient.on('error', (err) => {
-            console.warn('⚠️ Redis error:', err.message);
-            redisClient = new NoopCache();
+            console.warn('⚠️ Redis error, using noop cache:', err.message);
+            redisClient = new NoopRedis();
         });
 
-        // Thử kết nối bất đồng bộ
-        redisClient.connect().catch((err) => {
-            console.warn('⚠️ Redis connection failed:', err.message);
-            redisClient = new NoopCache();
-        });
+        console.log('✅ Redis configured');
     } catch (err) {
-        console.warn('⚠️ Redis initialization failed:', err.message);
-        redisClient = new NoopCache();
+        console.warn('⚠️ Redis init failed:', err.message);
+        redisClient = new NoopRedis();
     }
 } else {
     console.log('ℹ️ Redis not configured, using noop cache');
-    redisClient = new NoopCache();
+    redisClient = new NoopRedis();
 }
 
 export default redisClient;
