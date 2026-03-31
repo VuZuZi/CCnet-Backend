@@ -12,7 +12,9 @@ class JobQueue {
       throw new Error('❌ REDIS_URL is required');
     }
 
-    this.queueConnection = new Redis(redisUrl);
+    this.queueConnection = new Redis(redisUrl, {
+      maxRetriesPerRequest: null
+    });
 
     this.queueConnection.on('connect', () => {
       console.log('[JobQueue] ✅ Redis connected');
@@ -35,18 +37,19 @@ class JobQueue {
   async addJob(queueName, jobName, data, customOptions = {}) {
     const queue = this.getQueue(queueName);
 
-    const defaultOptions = {
+    return await queue.add(jobName, data, {
       removeOnComplete: true,
       removeOnFail: { count: 1000, age: 24 * 3600 },
       attempts: 3,
-      backoff: { type: 'exponential', delay: 1000 }
-    };
-
-    return await queue.add(jobName, data, { ...defaultOptions, ...customOptions });
+      backoff: { type: 'exponential', delay: 1000 },
+      ...customOptions
+    });
   }
 
   registerWorker(queueName, processor, workerOptions = {}) {
-    const workerConnection = new Redis(process.env.REDIS_URL);
+    const workerConnection = new Redis(process.env.REDIS_URL, {
+      maxRetriesPerRequest: null
+    });
 
     workerConnection.on('error', (err) => {
       console.error(`[JobQueue - Worker ${queueName}] Redis lỗi:`, err.message);
