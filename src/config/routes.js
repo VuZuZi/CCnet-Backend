@@ -59,6 +59,4 @@ export const configureRoutes = (app) => {
   });
 };
 
-export const configureErrorHandling = (app, errorHandler) => {
-  app.use(errorHandler);
-};
+export default configureRoutes;
