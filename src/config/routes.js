@@ -85,3 +85,12 @@ export const configureRoutes = (app) => {
 export const configureErrorHandling = (app, errorHandler) => {
   app.use(errorHandler);
 };
+
+export default {
+  configureRoutes,
+  configureErrorHandling,
+  healthCheck,
+  apiInfo,
+  ROUTES,
+  API_PREFIX,
+};
