@@ -1,10 +1,15 @@
 import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import morgan from "morgan";
+import cookieParser from "cookie-parser";
+
+import { config } from "./config/index.js";
 import {
   configureMiddleware,
   configureSystemRoutes,
 } from "./config/express.js";
 import { configureRoutes } from "./config/routes.js";
-import errorHandler from "./middlewares/errorHandler.js";
 import { initializeContainer, registerModule } from "./container/index.js";
 
 import { initPostWorkers } from "./modules/communitypost/post.worker.js";
@@ -15,36 +20,65 @@ import { initVolunteerWorkers } from "./modules/volunteer/volunteer.worker.js";
 export const createApp = async () => {
   const app = express();
 
-  console.log("Initializing DI Container...");
   initializeContainer();
 
-  console.log("Configuring middleware...");
-  configureMiddleware(app);
+  app.use(helmet());
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        const allowedOrigins = config.cors?.origin || [];
+        const isAllowed = allowedOrigins.some(
+          (o) => o === origin || origin.includes("vercel.app"),
+        );
+        if (isAllowed) {
+          callback(null, true);
+        } else {
+          callback(new Error("CORS not allowed"));
+        }
+      },
+      credentials: config.cors?.credentials,
+      methods: config.cors?.methods,
+      allowedHeaders: config.cors?.allowedHeaders,
+    }),
+  );
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+  app.use(cookieParser());
+  app.use(morgan("dev"));
 
-  console.log("Registering modules...");
+  if (typeof configureMiddleware === "function") {
+    configureMiddleware(app);
+  }
+
   await registerModule("auth");
   await registerModule("user");
   await registerModule("communitypost");
-
   await registerModule("chat");
   await registerModule("follow");
   await registerModule("search");
-
   await registerModule("project");
-
   await registerModule("volunteer");
 
-  console.log("Starting Background Workers...");
   initPostWorkers();
   initFollowWorkers();
   initProjectWorkers();
-  initVolunteerWorkers(); //vudd6
-  configureSystemRoutes(app);
+  initVolunteerWorkers();
 
-  console.log("Configuring routes...");
+  if (typeof configureSystemRoutes === "function") {
+    configureSystemRoutes(app);
+  }
+
   configureRoutes(app);
 
-  console.log("Express application configured successfully");
+  app.use((err, req, res, next) => {
+    console.error("Error:", err.message);
+    res.status(err.status || 500).json({
+      success: false,
+      message: err.message || "Internal server error",
+    });
+  });
+
   return app;
 };
 
