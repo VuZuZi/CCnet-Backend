@@ -1,3 +1,4 @@
+// src/modules/auth/auth.service.js
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
@@ -11,20 +12,27 @@ class AuthService {
     this.userService = userService;
     this.tokenRepository = tokenRepository;
     this.mailProvider = mailProvider;
-    this.googleClient = new OAuth2Client(this.config.google.clientId);
+
+    // CreatePostPage Khởi tạo Google Client với fallback
+    try {
+      this.googleClient = new OAuth2Client(this.config.google.clientId);
+    } catch (error) {
+      console.warn('⚠️ Google Client init failed:', error.message);
+      this.googleClient = null;
+    }
   }
 
   generateAccessToken(user) {
     return jwt.sign(
-      {
-        userId: user._id,
-        email: user.email,
-        role: user.role,
-        fullName: user.fullName,
-        avatar: user.avatar
-      },
-      this.config.jwt.accessSecret,
-      { expiresIn: this.config.jwt.accessExpire }
+        {
+          userId: user._id,
+          email: user.email,
+          role: user.role,
+          fullName: user.fullName,
+          avatar: user.avatar
+        },
+        this.config.jwt.accessSecret,
+        { expiresIn: this.config.jwt.accessExpire }
     );
   }
 
@@ -45,7 +53,6 @@ class AuthService {
     expiresAt.setSeconds(expiresAt.getSeconds() + this.config.jwt.refreshExpireSeconds);
     return expiresAt;
   }
-
 
   async register(userData) {
     const { email, password, fullName } = userData;
@@ -80,7 +87,6 @@ class AuthService {
     const user = await this.userService.updateProfile(userId, { isEmailVerified: true });
     await this.redis.del(otpKey);
 
-    // Tự động tạo token để đăng nhập ngay lập tức sau khi verify thành công
     return this._generateAuthResponse(user);
   }
 
@@ -117,28 +123,52 @@ class AuthService {
     return this._generateAuthResponse(user);
   }
 
+  // CreatePostPage Cải thiện Google Login
   async loginWithGoogle(idToken) {
+    if (!this.googleClient) {
+      throw new AppError('Google authentication is not configured', 500);
+    }
+
+    if (!idToken) {
+      throw new AppError('Google ID Token is required', 400);
+    }
+
     try {
+      // Verify Google token
       const ticket = await this.googleClient.verifyIdToken({
         idToken: idToken,
         audience: this.config.google.clientId,
       });
-      const { email, name, sub: googleId, picture } = ticket.getPayload();
+
+      const payload = ticket.getPayload();
+      const { email, name, sub: googleId, picture, email_verified } = payload;
+
+      if (!email) {
+        throw new AppError('No email provided from Google', 400);
+      }
 
       let user = await this.userService.getUserByEmail(email);
 
       if (user) {
+        // Cập nhật googleId nếu chưa có
         if (!user.googleId) {
-          await this.userService.updateProfile(user._id, { googleId, avatar: user.avatar || picture });
+          user = await this.userService.updateProfile(user._id, {
+            googleId,
+            avatar: user.avatar || picture
+          });
         }
-        if (!user.isActive) throw new AppError('Account is deactivated', 403);
+
+        if (!user.isActive) {
+          throw new AppError('Account is deactivated', 403);
+        }
       } else {
+        // Tạo user mới
         user = await this.userService.createUser({
           email,
-          fullName: name,
+          fullName: name || email.split('@')[0],
           googleId,
-          avatar: picture,
-          isEmailVerified: true,
+          avatar: picture || null,
+          isEmailVerified: email_verified || true,
           password: null
         });
       }
@@ -146,7 +176,12 @@ class AuthService {
       return this._generateAuthResponse(user);
 
     } catch (error) {
-      console.error('Google Auth Error:', error); // Log internal
+      console.error('❌ Google Auth Error:', error.message);
+
+      if (error.message.includes('invalid_token') || error.message.includes('Token used too late')) {
+        throw new AppError('Invalid or expired Google token', 401);
+      }
+
       throw new AppError('Google authentication failed', 401);
     }
   }
@@ -184,6 +219,7 @@ class AuthService {
           }
         }
       } catch (ignored) {
+        // Bỏ qua lỗi khi không thể decode token
       }
     }
   }
