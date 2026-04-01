@@ -65,7 +65,7 @@ class AuthController {
         }
     };
 
-    // ✅ Cập nhật googleLogin để nhận credential (từ frontend)
+    //  Cập nhật googleLogin để nhận credential (từ frontend)
     googleLogin = async (req, res, next) => {
         try {
             // Frontend gửi credential (idToken) từ Google
@@ -91,7 +91,7 @@ class AuthController {
 
     refreshToken = async (req, res, next) => {
         try {
-            const refreshToken = req.cookies?.refreshToken;
+            const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
 
             if (!refreshToken) {
                 throw new AppError("Refresh token not found", 401);
@@ -136,10 +136,11 @@ class AuthController {
 
             await this.authService.logout(userId, accessToken, refreshToken);
 
+            const sameSite = this.config.env === "production" ? "none" : "lax";
             res.clearCookie("refreshToken", {
                 httpOnly: true,
                 secure: this.config.env === "production",
-                sameSite: "strict",
+                sameSite,
                 path: "/",
             });
 
@@ -170,10 +171,11 @@ class AuthController {
     _setRefreshTokenCookie(res, token) {
         if (!token) return;
 
+        const sameSite = this.config.env === "production" ? "none" : "lax";
         res.cookie("refreshToken", token, {
             httpOnly: true,
             secure: this.config.env === "production",
-            sameSite: "strict",
+            sameSite,
             maxAge: this.config.jwt.refreshExpireSeconds * 1000,
             path: "/",
         });
