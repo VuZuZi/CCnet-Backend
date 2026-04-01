@@ -1,92 +1,99 @@
-import { Server } from 'socket.io';
 import Redis from 'ioredis';
+import { Server } from 'socket.io';
+import { normalizeSocketUserId } from '../modules/chat/utils/participant.util.js';
 
-const CHAT_NEW_MESSAGE_CHANNEL = 'chat:message:new';
+const CHAT_CHANNELS = {
+  MESSAGE_NEW: 'chat:message:new',
+  MESSAGE_UPDATED: 'chat:message:updated',
+  MESSAGE_READ: 'chat:message:read',
+  CONVERSATION_UPDATED: 'chat:conversation:updated',
+};
 
 const SOCKET_EVENTS = {
   MESSAGE_NEW: 'chat:message:new',
+  MESSAGE_UPDATED: 'chat:message:updated',
+  MESSAGE_READ: 'chat:message:read',
+  CONVERSATION_UPDATED: 'chat:conversation:updated',
   NOTIFY: 'chat:notify',
   USER_JOIN: 'user:join',
   JOIN: 'join',
-  LEAVE: 'leave'
+  LEAVE: 'leave',
 };
+
+const CHANNEL_EVENT_MAP = {
+  [CHAT_CHANNELS.MESSAGE_NEW]: SOCKET_EVENTS.MESSAGE_NEW,
+  [CHAT_CHANNELS.MESSAGE_UPDATED]: SOCKET_EVENTS.MESSAGE_UPDATED,
+  [CHAT_CHANNELS.MESSAGE_READ]: SOCKET_EVENTS.MESSAGE_READ,
+  [CHAT_CHANNELS.CONVERSATION_UPDATED]: SOCKET_EVENTS.CONVERSATION_UPDATED,
+};
+
+function emitToUserRooms(io, participantIds, eventName, payload) {
+  if (!Array.isArray(participantIds) || !eventName) return;
+
+  for (const rawUserId of participantIds) {
+    const userId = normalizeSocketUserId(rawUserId);
+    if (!userId) continue;
+
+    io.to(`user:${userId}`).emit(eventName, payload);
+  }
+}
+
+function subscribeChatChannels(redisSubscriber) {
+  return redisSubscriber.subscribe(...Object.keys(CHANNEL_EVENT_MAP));
+}
 
 export function initSocket(server) {
   const io = new Server(server, {
-    cors: { origin: 'http://localhost:3000', credentials: true }
+    cors: {
+      origin: 'http://localhost:3000',
+      credentials: true,
+    },
   });
 
-  const sub = new Redis({
+  const subscriber = new Redis({
     host: process.env.REDIS_HOST || '127.0.0.1',
     port: Number(process.env.REDIS_PORT || 6379),
-    password: process.env.REDIS_PASSWORD || undefined
+    password: process.env.REDIS_PASSWORD || undefined,
   });
 
-  sub.on('error', (e) => console.error('[redis:sub] error', e));
-  sub.on('connect', () => console.log('[redis:sub] connected'));
-  sub.on('ready', () => console.log('[redis:sub] ready'));
+  subscribeChatChannels(subscriber);
 
-  sub.subscribe(CHAT_NEW_MESSAGE_CHANNEL, (err, count) => {
-    if (err) console.error('[redis:sub] subscribe failed', err);
-    else console.log('[redis:sub] subscribed:', CHAT_NEW_MESSAGE_CHANNEL, 'count=', count);
-  });
-
-  sub.on('message', (_channel, raw) => {
+  subscriber.on('message', (channel, rawMessage) => {
     try {
-      const parsed = JSON.parse(raw);
+      const payload = JSON.parse(rawMessage);
+      const eventName = CHANNEL_EVENT_MAP[channel];
 
-      const conversationId = parsed?.conversationId;
-      const message = parsed?.message;
-      const participantIds = parsed?.participantIds;
+      if (!eventName) return;
 
-      if (!conversationId || !message) {
-        console.warn('[redis:sub] invalid payload:', parsed);
-        return;
-      }
-
-      const cid = String(conversationId);
-      const payload = { conversationId: cid, message };
-
-      io.to(cid).emit(SOCKET_EVENTS.MESSAGE_NEW, payload);
-
-      if (Array.isArray(participantIds)) {
-        for (const uid of participantIds) {
-          io.to(`user:${String(uid)}`).emit(SOCKET_EVENTS.NOTIFY, payload);
-        }
-      }
-
-      console.log('[socket emit] cid=', cid, 'mid=', message?._id);
-    } catch (e) {
-      console.error('[redis:sub] parse error', e);
+      emitToUserRooms(io, payload?.participantIds, eventName, payload);
+    } catch (error) {
+      console.error('[socket redis message parse failed]', error);
     }
   });
 
   io.on('connection', (socket) => {
-    console.log('[socket] connected', socket.id);
-
     socket.on(SOCKET_EVENTS.USER_JOIN, (userId, ack) => {
-      if (!userId) return;
-      const room = `user:${String(userId)}`;
-      socket.join(room);
-      ack?.({ ok: true, room });
-      console.log('[socket] user join', room);
+      const normalizedUserId = normalizeSocketUserId(userId);
+
+      if (normalizedUserId) {
+        socket.join(`user:${normalizedUserId}`);
+      }
+
+      ack?.({ ok: true });
     });
 
     socket.on(SOCKET_EVENTS.JOIN, (conversationId, ack) => {
-      const room = String(conversationId);
-      socket.join(room);
-      ack?.({ ok: true, room });
-      console.log('[socket] join room', room);
+      if (conversationId) {
+        socket.join(`conversation:${conversationId}`);
+      }
+
+      ack?.({ ok: true });
     });
 
     socket.on(SOCKET_EVENTS.LEAVE, (conversationId) => {
-      const room = String(conversationId);
-      socket.leave(room);
-      console.log('[socket] leave room', room);
-    });
-
-    socket.on('disconnect', (reason) => {
-      console.log('[socket] disconnected', socket.id, reason);
+      if (conversationId) {
+        socket.leave(`conversation:${conversationId}`);
+      }
     });
   });
 
