@@ -17,7 +17,7 @@ class JobQueue {
     });
 
     this.queueConnection.on('connect', () => {
-      console.log('[JobQueue] ✅ Redis connected');
+      console.log('[JobQueue]  Redis connected');
     });
 
     this.queueConnection.on('error', (err) => {

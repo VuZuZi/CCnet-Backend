@@ -22,7 +22,7 @@ if (redisUrl && !redisUrl.includes('localhost') && !redisUrl.includes('127.0.0.1
         })
 
         redisClient.on('connect', () => {
-            console.log('✅ Redis connected')
+            console.log(' Redis connected')
         })
 
         redisClient.on('error', (err) => {
