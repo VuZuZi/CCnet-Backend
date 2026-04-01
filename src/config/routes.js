@@ -53,10 +53,29 @@ export const configureRoutes = (app) => {
     }
   });
 
+<<<<<<< feature/Dungshare
+  app.use(`${API_PREFIX}/auth`, authRoutes);
+  app.use(`${API_PREFIX}/posts`, postRoutes);
+  app.use(`${API_PREFIX}/admin`, adminRoutes);
+  app.use(`${API_PREFIX}/user`, userRoutes);
+  app.use(`${API_PREFIX}/media`, mediaRoutes);
+  app.use(`${API_PREFIX}/search`, searchRoutes);
+  app.use(`${API_PREFIX}/chat`, chatRoutes);
+  app.use(`${API_PREFIX}/follow`, followRoutes);
+  app.use(`${API_PREFIX}/project`, projectRoutes);
+  app.use(`${API_PREFIX}/volunteer`, volunteerRoutes);
+  app.use(`${API_PREFIX}/help-requests`, helpRequestRoutes);
+  app.use(`${API_PREFIX}/organizer-requests`, organizerRequestUserRouter);
+  app.use(
+    `${API_PREFIX}/admin/organizer-requests`,
+    organizerRequestAdminRouter,
+  );
+=======
   // Health check
   app.get("/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
+>>>>>>> dev
 
   // 404 handler
   app.use((req, res) => {
@@ -67,5 +86,9 @@ export const configureRoutes = (app) => {
   });
 };
 
+<<<<<<< feature/Dungshare
+export default configureRoutes;
+=======
 // CreatePostPage Export configureRoutes (không export routes trực tiếp)
 export default configureRoutes;
+>>>>>>> dev

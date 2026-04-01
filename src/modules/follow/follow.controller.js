@@ -1,4 +1,4 @@
-import ApiResponse from '../../core/Response.js';
+import ApiResponse from "../../core/Response.js";
 
 class FollowController {
   constructor({ followService }) {
@@ -7,8 +7,11 @@ class FollowController {
 
   followUser = async (req, res, next) => {
     try {
-      const data = await this.followService.followUser(req.user.userId, req.params.id);
-      return ApiResponse.success(res, data, 'Followed successfully');
+      const data = await this.followService.followUser(
+        req.user.userId,
+        req.params.id,
+      );
+      return ApiResponse.success(res, data, "Followed successfully");
     } catch (e) {
       next(e);
     }
@@ -16,8 +19,11 @@ class FollowController {
 
   unfollowUser = async (req, res, next) => {
     try {
-      const data = await this.followService.unfollowUser(req.user.userId, req.params.id);
-      return ApiResponse.success(res, data, 'Unfollowed successfully');
+      const data = await this.followService.unfollowUser(
+        req.user.userId,
+        req.params.id,
+      );
+      return ApiResponse.success(res, data, "Unfollowed successfully");
     } catch (e) {
       next(e);
     }
@@ -25,8 +31,11 @@ class FollowController {
 
   statusUser = async (req, res, next) => {
     try {
-      const data = await this.followService.statusUser(req.user.userId, req.params.id);
-      return ApiResponse.success(res, data, 'Status retrieved');
+      const data = await this.followService.statusUser(
+        req.user.userId,
+        req.params.id,
+      );
+      return ApiResponse.success(res, data, "Status retrieved");
     } catch (e) {
       next(e);
     }
@@ -35,7 +44,7 @@ class FollowController {
   statsUser = async (req, res, next) => {
     try {
       const data = await this.followService.statsUser(req.params.id);
-      return ApiResponse.success(res, data, 'Stats retrieved');
+      return ApiResponse.success(res, data, "Stats retrieved");
     } catch (e) {
       next(e);
     }
@@ -44,10 +53,28 @@ class FollowController {
   getMyFollowing = async (req, res, next) => {
     try {
       const { limit, cursor } = req.query;
-      const data = await this.followService.getMyFollowing(req.user.userId, limit, cursor);
-      return ApiResponse.success(res, data, 'Following list retrieved');
+      const data = await this.followService.getMyFollowing(
+        req.user.userId,
+        limit,
+        cursor,
+      );
+      return ApiResponse.success(res, data, "Following list retrieved");
     } catch (e) {
       next(e);
+    }
+  };
+  getMyFollowers = async (req, res, next) => {
+    try {
+      const limit = parseInt(req.query.limit, 10) || 50;
+      const userId = req.user.userId;
+      const followers = await this.followService.getFollowers({
+        userId,
+        limit,
+      });
+
+      return ApiResponse.success(res, followers);
+    } catch (error) {
+      next(error);
     }
   };
 }
