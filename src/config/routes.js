@@ -17,7 +17,7 @@ import {
 
 const API_PREFIX = "/api/v1";
 
-// CreatePostPage Danh sách routes để dễ quản lý
+// CreatePostPage Kiểm tra từng route trước khi dùng
 const ROUTES = [
   { path: "/auth", handler: authRoutes },
   { path: "/posts", handler: postRoutes },
@@ -34,63 +34,38 @@ const ROUTES = [
   { path: "/admin/organizer-requests", handler: organizerRequestAdminRouter },
 ];
 
-// CreatePostPage Health check route
-export const healthCheck = (req, res) => {
-  res.status(200).json({
-    status: "ok",
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    env: process.env.NODE_ENV,
-  });
-};
+// CreatePostPage Debug: Kiểm tra từng route
+ROUTES.forEach(({ path, handler }) => {
+  console.log(`🔍 Checking route ${path}:`, typeof handler);
+  if (typeof handler !== 'function') {
+    console.error(`❌ Route ${path} is not a function! It is:`, handler);
+  }
+});
 
-// CreatePostPage API info route
-export const apiInfo = (req, res) => {
-  res.status(200).json({
-    name: "CCNet API",
-    version: "1.0.0",
-    environment: process.env.NODE_ENV,
-    endpoints: ROUTES.map(route => `${API_PREFIX}${route.path}`),
-  });
-};
-
-// CreatePostPage Cấu hình routes
 export const configureRoutes = (app) => {
-  // Register all routes
+  // CreatePostPage Chỉ đăng ký các route hợp lệ
   ROUTES.forEach(({ path, handler }) => {
-    app.use(`${API_PREFIX}${path}`, handler);
-    console.log(` Route registered: ${API_PREFIX}${path}`);
+    if (typeof handler === 'function') {
+      app.use(`${API_PREFIX}${path}`, handler);
+      console.log(`CreatePostPage Route registered: ${API_PREFIX}${path}`);
+    } else {
+      console.error(`❌ Skipping route ${path}: handler is not a function`);
+    }
   });
 
-  // Health check endpoints
-  app.get("/health", healthCheck);
-  app.get("/api", apiInfo);
+  // Health check
+  app.get("/health", (req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
 
   // 404 handler
   app.use((req, res) => {
     res.status(404).json({
-      status: "error",
+      success: false,
       message: `Route ${req.method} ${req.path} not found`,
-      availableRoutes: [
-        "/health",
-        "/api",
-        ...ROUTES.map(route => `${API_PREFIX}${route.path}/*`),
-      ],
     });
   });
 };
 
-// CreatePostPage Cấu hình error handling
-export const configureErrorHandling = (app, errorHandler) => {
-  app.use(errorHandler);
-};
-
-export default {
-  configureRoutes,
-  configureErrorHandling,
-  healthCheck,
-  apiInfo,
-  ROUTES,
-  API_PREFIX,
-};
+// CreatePostPage Export configureRoutes (không export routes trực tiếp)
+export default configureRoutes;
