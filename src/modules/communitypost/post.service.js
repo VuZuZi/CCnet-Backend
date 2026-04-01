@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import AppError from "../../core/AppError.js";
+import Follow from "../follow/follow.model.js"; // Nên chuyển logic này vào FollowRepository
 
 class PostService {
   constructor({ postRepository, mediaService, userRepository, redis }) {
@@ -12,7 +13,6 @@ class PostService {
     this.TTL = { FEED: 60, POST: 300 };
   }
 
-  // --- PRIVATE HELPERS ---
   _extractHashtags(content) {
     if (!content) return [];
     const matches = content.match(/#[a-z0-9_]+/gi) || [];
@@ -25,28 +25,31 @@ class PostService {
     return `feed:public:${limit}:${cursor || "start"}`;
   }
 
-  _formatImage(m) {
+  _formatImage = (m) => ({
+    url: m.url,
+    publicId: m.publicId,
+    blurHash: m.blurHash,
+    width: m.width,
+    height: m.height,
+    aspectRatio: m.height ? m.width / m.height : 1,
+  });
+
+  _formatUserMini(user) {
     return {
-      url: m.url,
-      publicId: m.publicId,
-      blurHash: m.blurHash,
-      width: m.width,
-      height: m.height,
-      aspectRatio: m.height ? m.width / m.height : 1,
+      _id: user.userId || user._id,
+      fullName: user.fullName,
+      avatar: user.avatar,
+      username: user.username,
     };
   }
 
   async _invalidateCache(postId) {
-    try {
-      if (postId) await this.redis.del(`post:${postId}`);
-      await this._invalidateFeedCacheBackground();
-    } catch (e) {
-      console.error("[Cache] Invalidate failed", e);
-    }
+    const promises = [this._invalidateFeedCacheBackground()];
+    if (postId) promises.push(this.redis.del(`post:${postId}`));
+    await Promise.allSettled(promises);
   }
 
-  // --- MAIN METHODS ---
-  async createPost({ user, content, files, privacy }) {
+  async createPost({ user, content, files, privacy, type, sharedEntity }) {
     let images = [];
     if (files?.length) {
       const uploaded = await this.mediaService.uploadMultiple(
@@ -58,24 +61,23 @@ class PostService {
     }
 
     const cleanContent = content?.trim();
-    if (!cleanContent && !images.length)
-      throw new AppError("Post content or image required", 400);
+    if (!cleanContent && !images.length && !sharedEntity) {
+      throw new AppError("Nội dung bài viết không được để trống", 400);
+    }
 
     const newPost = await this.postRepository.create({
-      author: {
-        _id: user.userId,
-        fullName: user.fullName,
-        avatar: user.avatar,
-        username: user.username,
-      },
+      author: this._formatUserMini(user),
       content: cleanContent,
       hashtags: this._extractHashtags(cleanContent),
       images,
       privacy: privacy || "public",
+      type: type || "normal",
+      sharedEntity: sharedEntity || null,
       stats: { likes: 0, comments: 0, shares: 0, views: 0 },
     });
 
-    await this.redis.del(this._getFeedKey(null, 10)); // Xóa nhanh trang đầu
+    // Invalidate trang đầu của feed public
+    this.redis.del(this._getFeedKey(null, 10)).catch(() => null);
     return newPost;
   }
 
@@ -91,13 +93,19 @@ class PostService {
       postId,
       userId,
     );
-    if (!post) throw new AppError("Post not found or permission denied", 404);
+    if (!post)
+      throw new AppError(
+        "Không tìm thấy bài viết hoặc bạn không có quyền",
+        404,
+      );
 
     let images = post.images.filter(
       (img) => !removeFiles?.includes(img.publicId),
     );
-    if (removeFiles?.length)
+
+    if (removeFiles?.length) {
       this.mediaService.deleteMultiple(removeFiles).catch(console.error);
+    }
 
     if (newFiles?.length) {
       const uploaded = await this.mediaService.uploadMultiple(
@@ -123,150 +131,144 @@ class PostService {
       userId,
       updateData,
     );
-    await this._invalidateCache(postId);
+    this._invalidateCache(postId);
     return updated;
   }
 
   async addComment({ postId, user, content }) {
-    const session = await mongoose.startSession();
-    try {
-      let newComment;
-      await session.withTransaction(async () => {
-        newComment = await this.postRepository.createComment(
-          { postId, author: user.userId, content },
-          session,
-        );
-        await this.postRepository.pushLatestCommentToPost(
-          postId,
-          {
-            _id: newComment._id,
-            content,
-            createdAt: new Date(),
-            author: {
-              _id: user.userId,
-              fullName: user.fullName,
-              avatar: user.avatar,
-              username: user.username,
-            },
-          },
-          session,
-        );
-      });
-      await this.redis.del(`post:${postId}`);
+    return mongoose.connection.transaction(async (session) => {
+      const newComment = await this.postRepository.createComment(
+        { postId, author: user.userId, content },
+        session,
+      );
+
+      await this.postRepository.pushLatestCommentToPost(
+        postId,
+        {
+          _id: newComment._id,
+          content,
+          createdAt: new Date(),
+          author: this._formatUserMini(user),
+        },
+        session,
+      );
+
+      this.redis.del(`post:${postId}`).catch(() => null);
       return newComment;
-    } finally {
-      await session.endSession();
-    }
+    });
   }
 
   async toggleReaction({ postId, userId, type }) {
-    const session = await mongoose.startSession();
-    try {
-      const result = { action: "", type };
-      await session.withTransaction(async () => {
-        const existing = await this.postRepository.upsertReaction(
-          { userId, postId, type },
+    return mongoose.connection.transaction(async (session) => {
+      const existing = await this.postRepository.upsertReaction(
+        { userId, postId, type },
+        session,
+      );
+      const isUpdate = existing?.lastErrorObject?.updatedExisting;
+      const result = { action: "created", type };
+
+      if (!isUpdate) {
+        await this.postRepository.incrementPostStats(
+          postId,
+          "likes",
+          1,
           session,
         );
-        const isUpdate = existing?.lastErrorObject?.updatedExisting;
+      } else if (existing.value?.type === type) {
+        await this.postRepository.deleteReaction({ userId, postId }, session);
+        await this.postRepository.incrementPostStats(
+          postId,
+          "likes",
+          -1,
+          session,
+        );
+        result.action = "removed";
+        result.type = null;
+      } else {
+        result.action = "switched";
+      }
 
-        if (!isUpdate) {
-          await this.postRepository.incrementPostStats(
-            postId,
-            "likes",
-            1,
-            session,
-          );
-          result.action = "created";
-        } else if (existing.value?.type === type) {
-          await this.postRepository.deleteReaction({ userId, postId }, session);
-          await this.postRepository.incrementPostStats(
-            postId,
-            "likes",
-            -1,
-            session,
-          );
-          result.action = "removed";
-          result.type = null;
-        } else {
-          result.action = "switched";
-        }
-      });
-      await this.redis.del(`post:${postId}`);
+      this.redis.del(`post:${postId}`).catch(() => null);
       return result;
-    } finally {
-      await session.endSession();
-    }
+    });
   }
 
-  async getNewsFeed({ cursor, limit = 10, userId }) {
-    const cacheKey = this._getFeedKey(cursor, limit);
-    let posts = await this.redis
-      .get(cacheKey)
-      .then((d) => (d ? JSON.parse(d) : null))
-      .catch(() => null);
+  async getNewsFeed({ cursor, limit = 10, userId, type }) {
+    let filter = { status: "active" };
+    let isPublicFeed = type !== "following";
+
+    if (type === "following") {
+      if (!userId) throw new AppError("Vui lòng đăng nhập", 401);
+      const followingDocs = await Follow.find({ followerId: userId })
+        .select("followingId")
+        .lean();
+      const followingIds = followingDocs.map((d) => d.followingId);
+
+      if (!followingIds.length)
+        return { data: [], paging: { nextCursor: null, hasMore: false } };
+      filter["author._id"] = { $in: followingIds };
+    } else {
+      filter.privacy = "public";
+    }
+
+    const cacheKey = isPublicFeed ? this._getFeedKey(cursor, limit) : null;
+    let posts = isPublicFeed ? await this._getCachedData(cacheKey) : null;
 
     if (!posts) {
       posts = await this.postRepository.getPosts({
-        filter: { status: "active", privacy: "public" },
+        filter,
         limit,
         lastId: cursor,
       });
-      if (posts.length)
+      if (isPublicFeed && posts.length) {
         this.redis
           .set(cacheKey, JSON.stringify(posts), "EX", this.TTL.FEED)
-          .catch(console.error);
+          .catch(() => null);
+      }
     }
 
     if (!posts?.length)
       return { data: [], paging: { nextCursor: null, hasMore: false } };
 
-    const reactionsMap = new Map();
-    if (userId) {
-      const reactions = await this.postRepository.getReactionsByUserAndTargets(
-        userId,
-        posts.map((p) => p._id),
-      );
-      reactions.forEach((r) => reactionsMap.set(r.targetId.toString(), r.type));
-    }
+    // Attach user reaction
+    const data = await this._attachUserReactions(posts, userId);
 
-    const data = posts.map((p) => ({
-      ...p,
-      userReaction: reactionsMap.get(p._id.toString()) || null,
-    }));
     return {
       data,
       paging: {
-        nextCursor: data[data.length - 1]._id,
+        nextCursor: data.length ? data[data.length - 1]._id : null,
         hasMore: data.length === limit,
       },
     };
   }
 
-  async getPostById(id) {
-    const cached = await this.redis
-      .get(`post:${id}`)
-      .then((d) => (d ? JSON.parse(d) : null))
-      .catch(() => null);
-    if (cached) return cached;
-
-    const post = await this.postRepository.findById(id);
-    if (post)
-      this.redis
-        .set(`post:${id}`, JSON.stringify(post), "EX", this.TTL.POST)
-        .catch(console.error);
-    return post;
+  async _getCachedData(key) {
+    try {
+      const data = await this.redis.get(key);
+      return data ? JSON.parse(data) : null;
+    } catch {
+      return null;
+    }
   }
 
-  async deletePost({ postId, userId }) {
-    const deleted = await this.postRepository.softDeletePost(postId, userId);
-    if (!deleted) throw new AppError("Post not found", 404);
-    await this._invalidateCache(postId);
-    return { message: "Deleted" };
+  async _attachUserReactions(posts, userId) {
+    if (!userId) return posts;
+    const reactions = await this.postRepository.getReactionsByUserAndTargets(
+      userId,
+      posts.map((p) => p._id),
+    );
+    const reactionsMap = new Map(
+      reactions.map((r) => [r.targetId.toString(), r.type]),
+    );
+    return posts.map((p) => ({
+      ...p,
+      userReaction: reactionsMap.get(p._id.toString()) || null,
+    }));
   }
 
   async _invalidateFeedCacheBackground() {
     let cursor = "0";
+    const deleteMethod = this.redis.unlink ? "unlink" : "del";
     do {
       const [next, keys] = await this.redis.scan(
         cursor,
@@ -276,11 +278,34 @@ class PostService {
         100,
       );
       cursor = next;
-      if (keys.length)
-        await (this.redis.unlink
-          ? this.redis.unlink(keys)
-          : this.redis.del(keys));
+      if (keys.length) await this.redis[deleteMethod](keys);
     } while (cursor !== "0");
+  }
+  async getPostById(id) {
+    const cacheKey = `post:${id}`;
+    let post = await this._getCachedData(cacheKey);
+
+    if (!post) {
+      post = await this.postRepository.findById(id);
+      if (post) {
+        this.redis
+          .set(cacheKey, JSON.stringify(post), "EX", this.TTL.POST)
+          .catch(() => null);
+      }
+    }
+    return post;
+  }
+
+  async deletePost({ postId, userId }) {
+    const deleted = await this.postRepository.softDeletePost(postId, userId);
+    if (!deleted)
+      throw new AppError(
+        "Không tìm thấy bài viết hoặc bạn không có quyền xóa",
+        404,
+      );
+
+    this._invalidateCache(postId); // Đã bọc Promise.allSettled ở hàm helper nên chạy mượt hơn
+    return { message: "Deleted" };
   }
 }
 

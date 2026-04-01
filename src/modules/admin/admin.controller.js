@@ -72,6 +72,19 @@ class AdminController {
     }
   };
 
+  updateProjectStatus = async (req, res, next) => {
+    try {
+      const { status } = req.body || {};
+      const updated = await this.adminService.updateProjectStatus(
+        req.params.id,
+        status,
+      );
+      res.json({ status: "success", data: updated });
+    } catch (e) {
+      next(e);
+    }
+  };
+
   deleteProject = async (req, res, next) => {
     try {
       await this.adminService.deleteProject(req.params.id);

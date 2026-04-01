@@ -1,94 +1,69 @@
+// src/server.js
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import morgan from 'morgan';
+import cookieParser from 'cookie-parser';
 import { config } from './config/index.js';
 import { connectDatabase } from './config/database.js';
-import { getContainer } from './container/index.js';
-import createApp from './app.js';
+import configureRoutes from './config/routes.js';  // CreatePostPage Import configureRoutes
 
-let server;
-const initializeConnections = async () => {
-  try {
-    console.log(' Connecting to external services...');
-    await connectDatabase();
-    const container = getContainer();
-    const redis = container.resolve('redis');
-    await redis.set('health:check', '1', 'EX', 10);
-    
-    console.log(' All external connections established');
-  } catch (error) {
-    console.error(' Failed to initialize connections:', error);
-    throw error;
-  }
-};
+const app = express();
 
+// Middleware
+app.use(helmet());
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    const allowedOrigins = config.cors.origin;
+    const isAllowed = allowedOrigins.some(o => o === origin || origin.includes('vercel.app'));
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS not allowed'));
+    }
+  },
+  credentials: config.cors.credentials,
+  methods: config.cors.methods,
+  allowedHeaders: config.cors.allowedHeaders,
+}));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+app.use(morgan('dev'));
+
+// CreatePostPage Sử dụng configureRoutes
+configureRoutes(app);
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('❌ Error:', err.message);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Internal server error',
+  });
+});
+
+// Khởi động server
 const startServer = async () => {
-  try {
-    const app = await createApp();
-    
-    await initializeConnections();
-    server = app.listen(config.port, () => {
-      console.log('Server is running!');
-      console.log(`Environment: ${config.env}`);
-      console.log(`Port: ${config.port}`);
-      console.log('');
-    });
-    
-  } catch (error) {
-    console.error('Failed to start server:', error);
+  await connectDatabase();
+
+  const server = app.listen(config.port, () => {
+    console.log(`\n╔══════════════════════════════════════════════════════════╗`);
+    console.log(`║  🚀 CCNet Server Started                                 ║`);
+    console.log(`╠══════════════════════════════════════════════════════════╣`);
+    console.log(`║  Port: ${config.port.toString().padEnd(44)}║`);
+    console.log(`║  Environment: ${config.env.padEnd(42)}║`);
+    console.log(`║  API: http://localhost:${config.port}/api/v1${' '.padEnd(24)}║`);
+    console.log(`╚══════════════════════════════════════════════════════════╝\n`);
+  });
+
+  server.on('error', (error) => {
+    console.error('❌ Server error:', error);
     process.exit(1);
-  }
+  });
 };
-
-const gracefulShutdown = async (signal) => {
-  console.log(`\n  ${signal} received. Starting graceful shutdown...`);
-  
-  if (server) {
-    server.close(async () => {
-      console.log(' HTTP server closed');
-      
-      try {
-        const container = getContainer();
-
-        const jobQueue = container.resolve('jobQueue');
-        if (jobQueue && jobQueue.close) {
-            console.log('Closing Job Queues & Workers...');
-            await jobQueue.close(); 
-        }
-
-        const redis = container.resolve('redis');
-        await redis.getClient().quit();
-        console.log('Redis connection closed');
-        
-        const mongoose = await import('mongoose');
-        await mongoose.default.connection.close();
-        console.log('MongoDB connection closed');
-        
-        console.log(' Graceful shutdown completed');
-        process.exit(0);
-      } catch (error) {
-        console.error(' Error during shutdown:', error);
-        process.exit(1);
-      }
-    });
-    
-    setTimeout(() => {
-      console.error('  Forced shutdown after timeout');
-      process.exit(1);
-    }, 10000);
-  } else {
-    process.exit(0);
-  }
-};
-
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-process.on('uncaughtException', (error) => {
-  console.error(' Uncaught Exception:', error);
-  gracefulShutdown('uncaughtException');
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  gracefulShutdown('unhandledRejection');
-});
 
 startServer();
+
+export default app;
