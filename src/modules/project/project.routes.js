@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getContainer } from '../../container/index.js';
 import { authenticate, authorize } from '../../middlewares/auth.middleware.js';
+import { maybeAuthenticate } from '../../middlewares/maybeAuth.middleware.js';
 import { createDraftSchema, updateDraftSchema } from './project.validation.js';
 import { validateBody } from '../../middlewares/validate.middleware.js';
 import { uploadFiles, validateMagicBytes } from '../../middlewares/upload.middleware.js';
@@ -48,6 +49,13 @@ router.get(
     authorize('Organizer'),
     execute('getWorkspaceProjects')
 );
+
+router.get('/:id/feed/posts', maybeAuthenticate, execute('getFeedPosts'));
+router.post('/:id/feed/posts', authenticate, execute('createFeedPost'));
+router.get('/:id/feed/posts/:postId/comments', maybeAuthenticate, execute('listFeedComments'));
+router.post('/:id/feed/posts/:postId/comments', authenticate, execute('createFeedComment'));
+router.post('/:id/feed/posts/:postId/like', authenticate, execute('toggleFeedPostLike'));
+router.post('/:id/feed/comments/:commentId/like', authenticate, execute('toggleFeedCommentLike'));
 
 router.get('/:id', execute('getDetail'));
 

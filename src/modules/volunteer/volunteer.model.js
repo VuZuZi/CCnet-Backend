@@ -68,7 +68,7 @@ const volunteerSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// ✅ Partial Unique Index - chỉ áp dụng cho status KHÔNG phải CANCELLED
+//  Partial Unique Index - chỉ áp dụng cho status KHÔNG phải CANCELLED
 volunteerSchema.index(
   { volunteerId: 1, opportunityId: 1 },
   {

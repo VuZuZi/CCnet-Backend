@@ -1,3 +1,4 @@
+// src/modules/auth/auth.service.js
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
@@ -11,20 +12,27 @@ class AuthService {
     this.userService = userService;
     this.tokenRepository = tokenRepository;
     this.mailProvider = mailProvider;
-    this.googleClient = new OAuth2Client(this.config.google.clientId);
+
+    // CreatePostPage Khởi tạo Google Client với fallback
+    try {
+      this.googleClient = new OAuth2Client(this.config.google.clientId);
+    } catch (error) {
+      console.warn('⚠️ Google Client init failed:', error.message);
+      this.googleClient = null;
+    }
   }
 
   generateAccessToken(user) {
     return jwt.sign(
-      {
-        userId: user._id,
-        email: user.email,
-        role: user.role,
-        fullName: user.fullName,
-        avatar: user.avatar
-      },
-      this.config.jwt.accessSecret,
-      { expiresIn: this.config.jwt.accessExpire }
+        {
+          userId: user._id,
+          email: user.email,
+          role: user.role,
+          fullName: user.fullName,
+          avatar: user.avatar
+        },
+        this.config.jwt.accessSecret,
+        { expiresIn: this.config.jwt.accessExpire }
     );
   }
 
@@ -46,7 +54,6 @@ class AuthService {
     return expiresAt;
   }
 
-
   async register(userData) {
     const { email, password, fullName } = userData;
 
@@ -57,7 +64,7 @@ class AuthService {
 
     const user = await this.userService.createUser({
       email,
-      password, 
+      password,
       fullName,
       isEmailVerified: false
     });
@@ -77,10 +84,10 @@ class AuthService {
     if (!storedOTP) throw new AppError('OTP expired or invalid', 400);
     if (storedOTP !== parseInt(otp)) throw new AppError('Invalid OTP', 400);
 
-    await this.userService.updateProfile(userId, { isEmailVerified: true });
-    await this.redis.del(otpKey); 
+    const user = await this.userService.updateProfile(userId, { isEmailVerified: true });
+    await this.redis.del(otpKey);
 
-    return { verified: true };
+    return this._generateAuthResponse(user);
   }
 
   async resendOTP(email) {
@@ -92,7 +99,7 @@ class AuthService {
     if (user.isEmailVerified) {
       throw new AppError('Account is already verified', 400);
     }
-    
+
     await this._sendOTPToUser(user);
 
     return { sent: true };
@@ -100,11 +107,11 @@ class AuthService {
 
   async login(email, password) {
     const user = await this.userService.getUserByEmail(email);
-    
+
     if (!user) throw new AppError('Invalid email or password', 401);
 
     if (!user.password) {
-        throw new AppError('This email is linked to a Google account. Please login with Google.', 400);
+      throw new AppError('This email is linked to a Google account. Please login with Google.', 400);
     }
 
     const isPasswordValid = await user.comparePassword(password);
@@ -116,36 +123,65 @@ class AuthService {
     return this._generateAuthResponse(user);
   }
 
+  // CreatePostPage Cải thiện Google Login
   async loginWithGoogle(idToken) {
+    if (!this.googleClient) {
+      throw new AppError('Google authentication is not configured', 500);
+    }
+
+    if (!idToken) {
+      throw new AppError('Google ID Token is required', 400);
+    }
+
     try {
+      // Verify Google token
       const ticket = await this.googleClient.verifyIdToken({
         idToken: idToken,
         audience: this.config.google.clientId,
       });
-      const { email, name, sub: googleId, picture } = ticket.getPayload();
+
+      const payload = ticket.getPayload();
+      const { email, name, sub: googleId, picture, email_verified } = payload;
+
+      if (!email) {
+        throw new AppError('No email provided from Google', 400);
+      }
 
       let user = await this.userService.getUserByEmail(email);
 
       if (user) {
+        // Cập nhật googleId nếu chưa có
         if (!user.googleId) {
-           await this.userService.updateProfile(user._id, { googleId, avatar: user.avatar || picture });
+          user = await this.userService.updateProfile(user._id, {
+            googleId,
+            avatar: user.avatar || picture
+          });
         }
-        if (!user.isActive) throw new AppError('Account is deactivated', 403);
+
+        if (!user.isActive) {
+          throw new AppError('Account is deactivated', 403);
+        }
       } else {
+        // Tạo user mới
         user = await this.userService.createUser({
           email,
-          fullName: name,
+          fullName: name || email.split('@')[0],
           googleId,
-          avatar: picture,
-          isEmailVerified: true, 
-          password: null 
+          avatar: picture || null,
+          isEmailVerified: email_verified || true,
+          password: null
         });
       }
 
       return this._generateAuthResponse(user);
 
     } catch (error) {
-      console.error('Google Auth Error:', error); // Log internal
+      console.error('❌ Google Auth Error:', error.message);
+
+      if (error.message.includes('invalid_token') || error.message.includes('Token used too late')) {
+        throw new AppError('Invalid or expired Google token', 401);
+      }
+
       throw new AppError('Google authentication failed', 401);
     }
   }
@@ -157,7 +193,7 @@ class AuthService {
     await this.tokenRepository.deleteToken(oldRefreshToken);
 
     if (tokenDoc.expiresAt < new Date()) {
-        throw new AppError('Refresh token expired, please login again', 401);
+      throw new AppError('Refresh token expired, please login again', 401);
     }
 
     const user = await this.userService.getUserById(tokenDoc.userId);
@@ -168,7 +204,7 @@ class AuthService {
 
   async logout(userId, accessToken, refreshToken) {
     if (refreshToken) {
-        await this.tokenRepository.deleteToken(refreshToken);
+      await this.tokenRepository.deleteToken(refreshToken);
     }
 
     if (accessToken) {
@@ -177,12 +213,13 @@ class AuthService {
         if (decoded && decoded.exp) {
           const now = Math.floor(Date.now() / 1000);
           const ttl = decoded.exp - now;
-          
+
           if (ttl > 0) {
             await this.redis.set(`bl:${accessToken}`, 'revoked', 'EX', ttl);
           }
         }
       } catch (ignored) {
+        // Bỏ qua lỗi khi không thể decode token
       }
     }
   }
@@ -194,35 +231,36 @@ class AuthService {
   async _sendOTPToUser(user) {
     const otp = crypto.randomInt(100000, 999999).toString();
     await this.redis.set(`otp:${user._id}`, otp, 'EX', 300);
-    
+
     try {
-        await this.mailProvider.sendEmail(user.email, 'Verify your account', 'OTP', { otp });
+      await this.mailProvider.sendEmail(user.email, 'Verify your account', 'OTP', { otp });
     } catch (err) {
-        console.error('Failed to send OTP email:', err);
+      console.error('Failed to send OTP email:', err);
     }
 
     if (this.config.env === 'development') {
-        console.log(`[DEV ONLY] OTP for ${user.email}: ${otp}`);
+      console.log(`[DEV ONLY] OTP for ${user.email}: ${otp}`);
     }
   }
 
   async _generateAuthResponse(user) {
+    const userId = user._id || user.id;
     const accessToken = this.generateAccessToken(user);
     const refreshToken = this.generateRefreshToken();
     const expiresAt = this.getRefreshTokenExpiry();
 
-    await this.tokenRepository.saveToken(refreshToken, user._id, expiresAt);
+    await this.tokenRepository.saveToken(refreshToken, userId, expiresAt);
 
     return {
       user: {
-        id: user._id,
+        id: userId,
         email: user.email,
         fullName: user.fullName,
         role: user.role,
         avatar: user.avatar
       },
       accessToken,
-      refreshToken 
+      refreshToken
     };
   }
 }

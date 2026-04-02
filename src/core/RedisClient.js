@@ -3,18 +3,11 @@ import Redis from 'ioredis';
 class RedisClient {
   constructor({ config }) {
     this.config = config.redis;
+    const redisUrl = process.env.REDIS_URL;
 
-    this.client = new Redis({
-      host: this.config.host,
-      port: this.config.port,
-      password: this.config.password,
-      db: this.config.db,
-      keyPrefix: this.config.keyPrefix,
-      retryStrategy: (times) => {
-        const delay = Math.min(times * 50, 2000);
-        return delay;
-      },
-      maxRetriesPerRequest: 3,
+    this.client = new Redis(redisUrl, {
+      maxRetriesPerRequest: null,
+      retryStrategy: (times) => Math.min(times * 50, 2000),
     });
 
     this.client.on('connect', () => console.log('Redis connected'));
