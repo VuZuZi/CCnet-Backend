@@ -1,227 +1,229 @@
-import mongoose from "mongoose";
 import AppError from "../../core/AppError.js";
+import SearchPostView from "./searchPostView.model.js";
+import { normalizeSearchParams } from "./helpers/search-params.helper.js";
+import { fuzzyScore, pickModel } from "./helpers/search-core.helper.js";
+import {
+  buildEmptySearchResponse,
+  buildResponseByType,
+} from "./helpers/search-response.helper.js";
+import {
+  buildCommunityPostQuery,
+  rankCommunityPostCandidates,
+  sortCommunityPosts,
+  escapeRegex,
+  getObjectId,
+} from "./helpers/search-communitypost.helper.js";
+import {
+  mapUserResult,
+  mapProjectResult,
+  mapNeedHelpResult,
+  mapCommunityPostResult,
+} from "./helpers/search-result.mapper.js";
+import { buildRankedResults } from "./helpers/search-ranking.helper.js";
 
-const SEARCH_PRIORITY = ["organizer", "project", "needhelp", "communitypost"];
-const NAVBAR_PRIORITY = [
-  "user",
-  "organizer",
-  "project",
-  "needhelp",
-  "communitypost",
-];
+const RANKING_POOL_LIMIT = 200;
+const TYPE_KEYS = ["organizer", "project", "needhelp", "communitypost", "user"];
 
-function normalizeText(input) {
-  return String(input || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
+function createEmptySourceResult() {
+  return { items: [], total: 0 };
 }
 
-function fuzzyScore(query, target) {
-  const q = normalizeText(query);
-  const t = normalizeText(target);
-
-  if (!q || !t) return 0;
-
-  if (t.startsWith(q)) return 1000 + q.length;
-  if (t.includes(q)) return 700 + q.length;
-
-  let qi = 0;
-  let score = 0;
-  let streak = 0;
-
-  for (let i = 0; i < t.length && qi < q.length; i += 1) {
-    if (t[i] === q[qi]) {
-      qi += 1;
-      streak += 1;
-      score += 10 + streak * 2;
-    } else {
-      streak = 0;
-      score -= 1;
-    }
-  }
-
-  if (qi !== q.length) return 0;
-  return 300 + score;
-}
-
-function escapeRegex(input) {
-  return String(input || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function getObjectId(value) {
-  return mongoose.Types.ObjectId.isValid(String(value))
-    ? new mongoose.Types.ObjectId(String(value))
-    : value;
-}
-
-function pickModel(names = []) {
-  for (const name of names) {
-    if (mongoose.models[name]) return mongoose.models[name];
-  }
-
-  for (const name of names) {
-    try {
-      return mongoose.model(name);
-    } catch {
-      // ignore
-    }
-  }
-
-  return null;
-}
-
-function toArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function buildFlatResults(groups = {}, priority = SEARCH_PRIORITY) {
-  return priority.flatMap((key) => toArray(groups[key] || []));
-}
-
-function trimText(text, max = 120) {
-  const value = String(text || "").trim();
-  if (!value) return "";
-  if (value.length <= max) return value;
-  return `${value.slice(0, max).trim()}...`;
+function stripScore(items = []) {
+  return items.map(({ score, ...rest }) => rest);
 }
 
 class SearchService {
   async globalSearch(userId, paramsOrQuery, legacyLimit = 8) {
-    if (!userId) throw new AppError("Unauthorized", 401);
+    if (!userId) {
+      throw new AppError("Unauthorized", 401);
+    }
 
-    const params =
-      typeof paramsOrQuery === "object" && paramsOrQuery !== null
-        ? paramsOrQuery
-        : {
-            q: paramsOrQuery,
-            limit: legacyLimit,
-            type: "all",
-            page: 1,
-          };
-
-    const query = String(params.q || "").trim();
-    const limit = Number(params.limit || 8);
-    const type = String(params.type || "all").toLowerCase();
-    const page = Number(params.page || 1);
+    const { query, limit, offset, type, filters, includeCounts } =
+      normalizeSearchParams(paramsOrQuery, legacyLimit);
 
     if (!query) {
-      return {
+      return buildEmptySearchResponse({
         query: "",
         type,
-        page,
         limit,
-        counts: {
-          all: 0,
-          organizer: 0,
-          project: 0,
-          needhelp: 0,
-          communitypost: 0,
-          user: 0,
-        },
-        groups: {
-          organizer: [],
-          project: [],
-          needhelp: [],
-          communitypost: [],
-          user: [],
-        },
-        results: [],
-        users: [],
-        projects: [],
-        orgs: [],
-      };
+        offset,
+        filters,
+        includeCounts,
+      });
     }
 
     const rx = new RegExp(escapeRegex(query), "i");
     const excludeUserId = getObjectId(userId);
+    const outputLimit = this.getOutputLimitByType(type, limit);
 
-    // Luôn query đủ tất cả nhóm để sidebar counts luôn đúng ở mọi filter
-    const [
-      organizerResults,
-      projectResults,
-      needHelpResults,
-      communityPostResults,
-      userResults,
-    ] = await Promise.all([
-      this.searchOrganizers({ query, rx, limit, excludeUserId }),
-      this.searchProjects({ query, rx, limit }),
-      this.searchNeedHelps({ query, rx, limit }),
-      this.searchCommunityPosts({ query, rx, limit }),
-      this.searchUsers({ query, rx, limit, excludeUserId }),
-    ]);
+    const { groups, totals } = await this.runSearchSources({
+      userId,
+      query,
+      rx,
+      outputLimit,
+      excludeUserId,
+      filters,
+      type,
+      includeCounts,
+    });
 
-    const allGroups = {
-      organizer: organizerResults,
-      project: projectResults,
-      needhelp: needHelpResults,
-      communitypost: communityPostResults,
-      user: userResults,
-    };
-
-    const counts = {
-      all:
-        organizerResults.length +
-        projectResults.length +
-        needHelpResults.length +
-        communityPostResults.length +
-        userResults.length,
-      organizer: organizerResults.length,
-      project: projectResults.length,
-      needhelp: needHelpResults.length,
-      communitypost: communityPostResults.length,
-      user: userResults.length,
-    };
-
-    let groups = {};
-    let results = [];
-
-    if (type === "navbar") {
-      groups = {
-        user: userResults,
-        organizer: organizerResults,
-        project: projectResults,
-        needhelp: needHelpResults,
-        communitypost: communityPostResults,
-      };
-
-      results = buildFlatResults(groups, NAVBAR_PRIORITY);
-    } else if (type === "all") {
-      groups = {
-        organizer: organizerResults,
-        project: projectResults,
-        needhelp: needHelpResults,
-        communitypost: communityPostResults,
-      };
-
-      // Trang all không render user trong list
-      results = buildFlatResults(groups, SEARCH_PRIORITY);
-    } else {
-      groups = {
-        [type]: toArray(allGroups[type]),
-      };
-
-      results = toArray(allGroups[type]);
-    }
-
-    return {
+    return buildResponseByType({
       query,
       type,
-      page,
       limit,
-      counts,
-      groups,
-      results,
-      users: userResults,
-      projects: projectResults,
-      orgs: organizerResults,
+      offset,
+      filters,
+      allGroups: groups,
+      totalByType: totals,
+      includeCounts,
+    });
+  }
+
+  getOutputLimitByType(type, limit) {
+    return type === "navbar" ? limit : RANKING_POOL_LIMIT;
+  }
+
+  getRequestedKeys({ type, includeCounts }) {
+    if (type === "navbar" || type === "all") {
+      return TYPE_KEYS;
+    }
+
+    if (includeCounts) {
+      return TYPE_KEYS;
+    }
+
+    return TYPE_KEYS.includes(type) ? [type] : [];
+  }
+
+  async runSearchSources({
+    userId,
+    query,
+    rx,
+    outputLimit,
+    excludeUserId,
+    filters,
+    type,
+    includeCounts,
+  }) {
+    const requestedKeys = this.getRequestedKeys({ type, includeCounts });
+
+    const tasks = {
+      organizer: requestedKeys.includes("organizer")
+        ? this.searchOrganizers({
+            query,
+            rx,
+            outputLimit,
+            excludeUserId,
+          })
+        : Promise.resolve(createEmptySourceResult()),
+      project: requestedKeys.includes("project")
+        ? this.searchProjects({
+            query,
+            rx,
+            outputLimit,
+          })
+        : Promise.resolve(createEmptySourceResult()),
+      needhelp: requestedKeys.includes("needhelp")
+        ? this.searchNeedHelps({
+            query,
+            rx,
+            outputLimit,
+          })
+        : Promise.resolve(createEmptySourceResult()),
+      communitypost: requestedKeys.includes("communitypost")
+        ? this.searchCommunityPosts({
+            userId,
+            query,
+            rx,
+            outputLimit,
+            filters,
+          })
+        : Promise.resolve(createEmptySourceResult()),
+      user: requestedKeys.includes("user")
+        ? this.searchUsers({
+            query,
+            rx,
+            outputLimit,
+            excludeUserId,
+          })
+        : Promise.resolve(createEmptySourceResult()),
+    };
+
+    const [organizer, project, needhelp, communitypost, user] =
+      await Promise.all([
+        tasks.organizer,
+        tasks.project,
+        tasks.needhelp,
+        tasks.communitypost,
+        tasks.user,
+      ]);
+
+    return {
+      groups: {
+        organizer: organizer.items,
+        project: project.items,
+        needhelp: needhelp.items,
+        communitypost: communitypost.items,
+        user: user.items,
+      },
+      totals: {
+        organizer: organizer.total,
+        project: project.total,
+        needhelp: needhelp.total,
+        communitypost: communitypost.total,
+        user: user.total,
+      },
     };
   }
 
-  async searchUsers({ query, rx, limit, excludeUserId }) {
+  async markCommunityPostViewed(userId, postId) {
+    const Post = pickModel(["Post"]);
+    if (!Post) {
+      throw new AppError("Post model not found", 500);
+    }
+
+    const postObjectId = getObjectId(postId);
+    const userObjectId = getObjectId(userId);
+
+    const post = await Post.findOne({
+      _id: postObjectId,
+      isDeleted: false,
+      status: "active",
+      privacy: "public",
+    })
+      .select("_id")
+      .lean();
+
+    if (!post) {
+      throw new AppError("Post not found", 404);
+    }
+
+    await SearchPostView.findOneAndUpdate(
+      {
+        userId: userObjectId,
+        postId: postObjectId,
+      },
+      {
+        $set: {
+          viewedAt: new Date(),
+        },
+      },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true,
+      }
+    );
+
+    return {
+      viewed: true,
+      postId: String(postObjectId),
+    };
+  }
+
+  async searchUsers({ query, rx, outputLimit, excludeUserId }) {
     const User = pickModel(["User"]);
-    if (!User) return [];
+    if (!User) return createEmptySourceResult();
 
     const candidates = await User.find(
       {
@@ -255,47 +257,30 @@ class SearchService {
         headline: 1,
       }
     )
-      .limit(60)
+      .limit(RANKING_POOL_LIMIT)
       .lean();
 
-    return (candidates || [])
-      .map((u) => {
-        const score = Math.max(
-          fuzzyScore(query, u.fullName),
-          fuzzyScore(query, u.email),
-          fuzzyScore(query, u.location),
-          fuzzyScore(query, u.headline)
-        );
+    const ranked = buildRankedResults(
+      candidates,
+      (item) =>
+        Math.max(
+          fuzzyScore(query, item.fullName),
+          fuzzyScore(query, item.email),
+          fuzzyScore(query, item.location),
+          fuzzyScore(query, item.headline)
+        ),
+      (item, score) => mapUserResult(item, score, "user")
+    );
 
-        if (score <= 0) return null;
-
-        return {
-          id: String(u._id),
-          kind: "user",
-          title: u.fullName || u.email || "Unknown user",
-          subtitle: u.headline || u.location || u.email || "",
-          avatar: u.avatar || "",
-          role: u.role || "user",
-          link: `/users/${String(u._id)}`,
-          payload: {
-            id: String(u._id),
-            fullName: u.fullName || "",
-            email: u.email || "",
-            avatar: u.avatar || "",
-            role: u.role || "user",
-          },
-          score,
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
-      .map(({ score, ...rest }) => rest);
+    return {
+      items: stripScore(ranked.slice(0, outputLimit)),
+      total: ranked.length,
+    };
   }
 
-  async searchOrganizers({ query, rx, limit, excludeUserId }) {
+  async searchOrganizers({ query, rx, outputLimit, excludeUserId }) {
     const User = pickModel(["User"]);
-    if (!User) return [];
+    if (!User) return createEmptySourceResult();
 
     const candidates = await User.find(
       {
@@ -316,47 +301,33 @@ class SearchService {
         avatar: 1,
         location: 1,
         headline: 1,
+        role: 1,
       }
     )
-      .limit(60)
+      .limit(RANKING_POOL_LIMIT)
       .lean();
 
-    return (candidates || [])
-      .map((u) => {
-        const score = Math.max(
-          fuzzyScore(query, u.fullName),
-          fuzzyScore(query, u.email),
-          fuzzyScore(query, u.location),
-          fuzzyScore(query, u.headline)
-        );
+    const ranked = buildRankedResults(
+      candidates,
+      (item) =>
+        Math.max(
+          fuzzyScore(query, item.fullName),
+          fuzzyScore(query, item.email),
+          fuzzyScore(query, item.location),
+          fuzzyScore(query, item.headline)
+        ),
+      (item, score) => mapUserResult(item, score, "organizer")
+    );
 
-        if (score <= 0) return null;
-
-        return {
-          id: String(u._id),
-          kind: "organizer",
-          title: u.fullName || u.email || "Organizer",
-          subtitle: u.headline || u.location || u.email || "Organizer",
-          avatar: u.avatar || "",
-          link: `/users/${String(u._id)}`,
-          payload: {
-            id: String(u._id),
-            fullName: u.fullName || "",
-            email: u.email || "",
-            avatar: u.avatar || "",
-          },
-          score,
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
-      .map(({ score, ...rest }) => rest);
+    return {
+      items: stripScore(ranked.slice(0, outputLimit)),
+      total: ranked.length,
+    };
   }
 
-  async searchProjects({ query, rx, limit }) {
+  async searchProjects({ query, rx, outputLimit }) {
     const Project = pickModel(["Project"]);
-    if (!Project) return [];
+    if (!Project) return createEmptySourceResult();
 
     const candidates = await Project.find(
       {
@@ -373,46 +344,29 @@ class SearchService {
         coverMedia: 1,
       }
     )
-      .limit(60)
+      .limit(RANKING_POOL_LIMIT)
       .lean();
 
-    return (candidates || [])
-      .map((p) => {
-        const score = Math.max(
-          fuzzyScore(query, p.title),
-          fuzzyScore(query, p.description),
-          fuzzyScore(query, p.location?.address)
-        );
+    const ranked = buildRankedResults(
+      candidates,
+      (item) =>
+        Math.max(
+          fuzzyScore(query, item.title),
+          fuzzyScore(query, item.description),
+          fuzzyScore(query, item.location?.address)
+        ),
+      (item, score) => mapProjectResult(item, score)
+    );
 
-        if (score <= 0) return null;
-
-        return {
-          id: String(p._id),
-          kind: "project",
-          title: p.title || "Project",
-          subtitle: p.location?.address || p.category || p.status || "",
-          avatar: p.coverMedia?.url || "",
-          link: `/projects/${String(p._id)}`,
-          payload: {
-            id: String(p._id),
-            name: p.title || "",
-            description: p.description || "",
-            category: p.category || "",
-            status: p.status || "",
-            address: p.location?.address || "",
-          },
-          score,
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
-      .map(({ score, ...rest }) => rest);
+    return {
+      items: stripScore(ranked.slice(0, outputLimit)),
+      total: ranked.length,
+    };
   }
 
-  async searchNeedHelps({ query, rx, limit }) {
+  async searchNeedHelps({ query, rx, outputLimit }) {
     const HelpRequest = pickModel(["HelpRequest", "NeedHelp", "Needhelp"]);
-    if (!HelpRequest) return [];
+    if (!HelpRequest) return createEmptySourceResult();
 
     const candidates = await HelpRequest.find(
       {
@@ -429,63 +383,49 @@ class SearchService {
         evidences: 1,
       }
     )
-      .limit(60)
+      .limit(RANKING_POOL_LIMIT)
       .lean();
 
-    return (candidates || [])
-      .map((item) => {
-        const score = Math.max(
+    const ranked = buildRankedResults(
+      candidates,
+      (item) =>
+        Math.max(
           fuzzyScore(query, item.title),
           fuzzyScore(query, item.story),
           fuzzyScore(query, item.location?.address)
-        );
+        ),
+      (item, score) => mapNeedHelpResult(item, score)
+    );
 
-        if (score <= 0) return null;
-
-        const firstEvidence = Array.isArray(item.evidences)
-          ? item.evidences[0]
-          : null;
-
-        return {
-          id: String(item._id),
-          kind: "needhelp",
-          title: item.title || "Need help",
-          subtitle:
-            item.location?.address ||
-            item.urgencyLevel ||
-            trimText(item.story, 110) ||
-            "",
-          avatar:
-            firstEvidence?.mediaType === "image" ? firstEvidence.url || "" : "",
-          link: `/need-help/${String(item._id)}`,
-          payload: {
-            id: String(item._id),
-            title: item.title || "",
-            story: item.story || "",
-            urgencyLevel: item.urgencyLevel || "",
-            status: item.status || "",
-            address: item.location?.address || "",
-          },
-          score,
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
-      .map(({ score, ...rest }) => rest);
+    return {
+      items: stripScore(ranked.slice(0, outputLimit)),
+      total: ranked.length,
+    };
   }
 
-  async searchCommunityPosts({ query, rx, limit }) {
+  async searchCommunityPosts({ userId, query, rx, outputLimit, filters }) {
     const Post = pickModel(["Post"]);
-    if (!Post) return [];
+    if (!Post) return createEmptySourceResult();
+
+    let viewedPostIds = [];
+    if (filters?.viewedOnly) {
+      viewedPostIds = await SearchPostView.distinct("postId", {
+        userId: getObjectId(userId),
+      });
+    }
+
+    const mongoQuery = buildCommunityPostQuery({
+      rx,
+      filters,
+      viewedPostIds,
+    });
+
+    if (!mongoQuery) {
+      return createEmptySourceResult();
+    }
 
     const candidates = await Post.find(
-      {
-        isDeleted: false,
-        status: "active",
-        privacy: "public",
-        $or: [{ content: rx }, { hashtags: rx }, { "author.fullName": rx }],
-      },
+      mongoQuery,
       {
         _id: 1,
         content: 1,
@@ -496,68 +436,28 @@ class SearchService {
         createdAt: 1,
         latestComments: 1,
         privacy: 1,
+        taggedLocation: 1,
+        location: 1,
+        address: 1,
       }
     )
-      .limit(60)
+      .limit(RANKING_POOL_LIMIT)
       .lean();
 
-    return (candidates || [])
-      .map((post) => {
-        const hashtagsText = Array.isArray(post.hashtags)
-          ? post.hashtags.join(" ")
-          : "";
+    const ranked = sortCommunityPosts(
+      rankCommunityPostCandidates(
+        candidates,
+        query,
+        fuzzyScore,
+        mapCommunityPostResult
+      ),
+      filters?.dateOrder
+    );
 
-        const score = Math.max(
-          fuzzyScore(query, post.content),
-          fuzzyScore(query, hashtagsText),
-          fuzzyScore(query, post.author?.fullName)
-        );
-
-        if (score <= 0) return null;
-
-        return {
-          id: String(post._id),
-          kind: "communitypost",
-          title:
-            trimText(post.content, 80) ||
-            (post.author?.fullName
-              ? `Post by ${post.author.fullName}`
-              : "Community post"),
-          subtitle: post.author?.fullName
-            ? `By ${post.author.fullName}`
-            : trimText(hashtagsText, 80),
-          avatar: post.author?.avatar || "",
-          link: `/community/${String(post._id)}`,
-          payload: {
-            _id: String(post._id),
-            content: post.content || "",
-            images: Array.isArray(post.images) ? post.images : [],
-            author: {
-              _id: post.author?._id || null,
-              fullName: post.author?.fullName || "",
-              avatar: post.author?.avatar || "",
-              username: post.author?.username || "",
-            },
-            privacy: post.privacy || "public",
-            createdAt: post.createdAt || null,
-            latestComments: Array.isArray(post.latestComments)
-              ? post.latestComments
-              : [],
-            stats: post.stats || {
-              likes: 0,
-              comments: 0,
-              shares: 0,
-              views: 0,
-            },
-            userReaction: null,
-          },
-          score,
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit)
-      .map(({ score, ...rest }) => rest);
+    return {
+      items: stripScore(ranked.slice(0, outputLimit)),
+      total: ranked.length,
+    };
   }
 }
 
