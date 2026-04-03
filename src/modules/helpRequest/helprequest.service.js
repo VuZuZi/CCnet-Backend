@@ -108,12 +108,16 @@ export default class HelpRequestService {
     transactionManager,
     userRepository,
     notificationRepository,
+    mailProvider,
+    config,
   }) {
     this.helpRequestRepository = helprequestRepository;
     this.cloudinaryProvider = cloudinaryProvider;
     this.transactionManager = transactionManager;
     this.userRepository = userRepository;
     this.notificationRepository = notificationRepository;
+    this.mailProvider = mailProvider;
+    this.config = config;
   }
 
   async createHelpRequest(userId, data) {
@@ -366,6 +370,41 @@ export default class HelpRequestService {
       metadata: { helpRequestId: helpRequest._id.toString(), action: 'assigned' },
     });
     console.log(`[ASSIGN] Notification created for organizer`);
+
+    try {
+      if (this.mailProvider && this.config) {
+        console.log(`[ASSIGN] Sending email to organizer ${organizer.email}`);
+        const frontendUrl = Array.isArray(this.config?.cors?.origin) 
+          ? this.config.cors.origin[0] 
+          : (this.config?.cors?.origin || 'http://localhost:5173');
+          
+        const categoryMapping = {
+          'Y_TE': 'Y Tế',
+          'GIAO_DUC': 'Giáo Dục',
+          'THIEN_TAI': 'Thiên Tai',
+          'XAY_DUNG': 'Xây Dựng',
+          'MOI_TRUONG': 'Môi Trường',
+          'KHAC': 'Khác'
+        };
+        const displayCategory = categoryMapping[helpRequest.category] || helpRequest.category || 'Khác';
+
+        await this.mailProvider.sendEmail(
+          organizer.email,
+          'New NeedHelp Assignment - CCNet',
+          'HELP_REQUEST_ASSIGNED',
+          {
+            organizerName: organizer.fullName || 'Organizer',
+            requestTitle: helpRequest.title,
+            requestCategory: displayCategory,
+            requestLocation: helpRequest.location?.address || 'Not specified',
+            link: `${frontendUrl}/need-help/${helpRequest._id}`
+          }
+        );
+        console.log(`[ASSIGN] Email sent to organizer`);
+      }
+    } catch (err) {
+      console.error(`[ASSIGN] Failed to send email to organizer:`, err);
+    }
 
     if (helpRequest.requesterId) {
       console.log(`[ASSIGN] Creating notification for requester ${helpRequest.requesterId}`);
