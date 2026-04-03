@@ -1,145 +1,286 @@
 import path from 'path';
-import ApiResponse from '../../core/Response.js';
-import AppError from '../../core/AppError.js';
-
+import { validateRequest } from './utils/validate.util.js';
 import {
   createConversationSchema,
+  getAssetsSchema,
   getMessagesSchema,
   sendMessageSchema,
+  reactMessageSchema,
+  unsendMessageSchema,
   markAsReadSchema,
   downloadFileSchema,
+  updateConversationSchema,
+  manageMembersSchema,
+  leaveConversationSchema,
 } from './chat.validation.js';
+import { CHAT_RESPONSE_MESSAGES } from './chat.messages.js';
+import {
+  mapCreateConversationRequest,
+  mapUpdateConversationRequest,
+  mapAddMembersRequest,
+  mapRemoveMemberRequest,
+  mapLeaveConversationRequest,
+  mapGetAssetsRequest,
+  mapGetMessagesRequest,
+  extractUploadedMessageFiles,
+  mapSendMessageValidationRequest,
+  mapSendMessageServicePayload,
+  mapReactMessageRequest,
+  mapUnsendMessageRequest,
+  mapMarkAsReadRequest,
+  mapDownloadFileRequest,
+} from './mappers/request.mapper.js';
+import { mapUploadedAttachments } from './mappers/attachment.mapper.js';
 
-class ChatController {
-  constructor({ chatService }) {
-    this.chatService = chatService;
-  }
 
-  getConversations = async (req, res, next) => {
-    try {
-      const userId = req.user?.userId;
-      if (!userId) throw new AppError('Unauthorized', 401);
-
-      const data = await this.chatService.getUserConversations(userId);
-      return ApiResponse.success(res, data, 'Fetched conversations successfully');
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  createConversation = async (req, res, next) => {
-    try {
-      const { error, value } = createConversationSchema.validate(req.body);
-      if (error) throw new AppError(error.details[0].message, 400);
-
-      const userId = req.user?.userId;
-      if (!userId) throw new AppError('Unauthorized', 401);
-
-      const convo = await this.chatService.createOrGetConversation(
-        userId,
-        value.participantId
-      );
-
-      return ApiResponse.success(res, convo, 'Conversation ready');
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  getMessages = async (req, res, next) => {
-    try {
-      const { error, value } = getMessagesSchema.validate(req.params);
-      if (error) throw new AppError(error.details[0].message, 400);
-
-      const userId = req.user?.userId;
-      if (!userId) throw new AppError('Unauthorized', 401);
-
-      const data = await this.chatService.getConversationMessages(value.id, userId, 50);
-      return ApiResponse.success(res, data, 'Fetched messages successfully');
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  sendMessage = async (req, res, next) => {
-    try {
-      console.log('[chat/sendMessage] body =', req.body);
-      console.log('[chat/sendMessage] files =', req.files);
-
-      const userId = req.user?.userId;
-      if (!userId) throw new AppError('Unauthorized', 401);
-
-      const files = Array.isArray(req.files) ? req.files : [];
-      const attachments = files.map((file) => ({
-        originalName: file.originalname,
-        mimetype: file.mimetype,
-        size: file.size,
-        filename: file.filename,
-      }));
-
-      const payload = {
-        conversationId: req.body?.conversationId,
-        text: req.body?.text ?? '',
-        attachmentsCount: attachments.length,
-      };
-
-      console.log('[chat/sendMessage] payload =', payload);
-
-      const { error, value } = sendMessageSchema.validate(payload, {
-        abortEarly: true,
-        stripUnknown: true,
-      });
-
-      if (error) {
-        console.error('[chat/sendMessage] validation error =', error.details);
-        throw new AppError(error.details[0].message, 400);
-      }
-
-      const hostBaseUrl = `${req.protocol}://${req.get('host')}`;
-
-      const message = await this.chatService.sendMessage(
-        value.conversationId,
-        userId,
-        value.text,
-        attachments,
-        hostBaseUrl
-      );
-
-      return ApiResponse.success(res, message, 'Message sent successfully');
-    } catch (error) {
-      console.error('[chat/sendMessage] failed =', error);
-      next(error);
-    }
-  };
-
-  markAsRead = async (req, res, next) => {
-    try {
-      const { error, value } = markAsReadSchema.validate(req.params);
-      if (error) throw new AppError(error.details[0].message, 400);
-
-      const userId = req.user?.userId;
-      if (!userId) throw new AppError('Unauthorized', 401);
-
-      const data = await this.chatService.markAsRead(value.id, userId);
-      return ApiResponse.success(res, data, 'Conversation marked as read');
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  downloadFile = async (req, res, next) => {
-    try {
-      const { error, value } = downloadFileSchema.validate(req.params);
-      if (error) throw new AppError(error.details[0].message, 400);
-
-      const safeName = path.basename(value.filename);
-      const filePath = path.resolve(process.cwd(), 'uploads', safeName);
-
-      return res.sendFile(filePath);
-    } catch (error) {
-      next(error);
-    }
-  };
+function ok(res, data, message) {
+  return res.status(200).json({
+    success: true,
+    message,
+    data,
+  });
 }
 
-export default ChatController;
+function created(res, data, message) {
+  return res.status(201).json({
+    success: true,
+    message,
+    data,
+  });
+}
+
+export default class ChatController {
+  constructor({
+    conversationService,
+    messageService,
+    readService,
+    fileService,
+  }) {
+    this.conversationService = conversationService;
+    this.messageService = messageService;
+    this.readService = readService;
+    this.fileService = fileService;
+  }
+
+  getCurrentUserId(req) {
+    return String(req.user?.userId || '');
+  }
+
+  withCurrentUser(req, payload = {}) {
+    return {
+      ...payload,
+      currentUserId: this.getCurrentUserId(req),
+    };
+  }
+
+  getReader(req) {
+    const userId = this.getCurrentUserId(req);
+
+    return {
+      _id: userId,
+      id: userId,
+      userId,
+      fullName: req.user?.fullName || req.user?.name || '',
+      avatar: req.user?.avatar || '',
+      email: req.user?.email || '',
+    };
+  }
+
+  async getConversations(req, res, next) {
+    try {
+      const data = await this.conversationService.findUserConversations(
+        this.getCurrentUserId(req)
+      );
+
+      return ok(res, data);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async createConversation(req, res, next) {
+    try {
+      const mapped = mapCreateConversationRequest(req);
+      const validated = validateRequest(createConversationSchema, mapped);
+
+      const payload = this.withCurrentUser(req, {
+        ...validated,
+        groupAvatarFile: req.file || null,
+      });
+
+      const data = await this.conversationService.createConversation(payload);
+      return created(res, data, CHAT_RESPONSE_MESSAGES.CONVERSATION_CREATED);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async updateConversation(req, res, next) {
+    try {
+      const mapped = mapUpdateConversationRequest(req);
+      const validated = validateRequest(updateConversationSchema, mapped);
+
+      const payload = this.withCurrentUser(req, {
+        ...validated,
+        groupAvatarFile: req.file || null,
+      });
+
+      const data = await this.conversationService.updateConversation(payload);
+      return ok(res, data, CHAT_RESPONSE_MESSAGES.CONVERSATION_UPDATED);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async addMembers(req, res, next) {
+    try {
+      const mapped = mapAddMembersRequest(req);
+      const validated = validateRequest(manageMembersSchema, mapped);
+
+      const payload = this.withCurrentUser(req, validated);
+
+      const data = await this.conversationService.addMembers(payload);
+      return ok(res, data, CHAT_RESPONSE_MESSAGES.MEMBERS_ADDED);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async removeMember(req, res, next) {
+    try {
+      const mapped = mapRemoveMemberRequest(req);
+      const validated = validateRequest(manageMembersSchema, mapped);
+
+      const payload = this.withCurrentUser(req, validated);
+
+      const data = await this.conversationService.removeMember(payload);
+      return ok(res, data, CHAT_RESPONSE_MESSAGES.MEMBER_REMOVED);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async leaveConversation(req, res, next) {
+    try {
+      const mapped = mapLeaveConversationRequest(req);
+      const validated = validateRequest(leaveConversationSchema, mapped);
+
+      const payload = this.withCurrentUser(req, validated);
+
+      const data = await this.conversationService.leaveConversation(payload);
+      return ok(res, data, CHAT_RESPONSE_MESSAGES.LEFT_CONVERSATION);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getAssets(req, res, next) {
+    try {
+      const mapped = mapGetAssetsRequest(req);
+      const validated = validateRequest(getAssetsSchema, mapped);
+
+      const payload = this.withCurrentUser(req, validated);
+
+      const data = await this.messageService.getAssets(payload);
+      return ok(res, data);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getMessages(req, res, next) {
+    try {
+      const mapped = mapGetMessagesRequest(req);
+      const validated = validateRequest(getMessagesSchema, mapped);
+
+      const payload = this.withCurrentUser(req, validated);
+
+      const data = await this.messageService.getMessages(payload);
+      return ok(res, data);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async sendMessage(req, res, next) {
+    try {
+      const uploadedFiles = extractUploadedMessageFiles(req);
+      const validationInput = mapSendMessageValidationRequest(req, uploadedFiles);
+      const validated = validateRequest(sendMessageSchema, validationInput);
+
+      const attachments = mapUploadedAttachments(uploadedFiles);
+      const payload = mapSendMessageServicePayload(
+        validated,
+        attachments,
+        this.getCurrentUserId(req)
+      );
+
+      const data = await this.messageService.sendMessage(payload);
+      return created(res, data, CHAT_RESPONSE_MESSAGES.MESSAGE_SENT);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async reactMessage(req, res, next) {
+    try {
+      const mapped = mapReactMessageRequest(req);
+      const validated = validateRequest(reactMessageSchema, mapped);
+
+      const payload = this.withCurrentUser(req, validated);
+
+      const data = await this.messageService.reactMessage(payload);
+      return ok(res, data, CHAT_RESPONSE_MESSAGES.REACTED_TO_MESSAGE);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async unsendMessage(req, res, next) {
+    try {
+      const mapped = mapUnsendMessageRequest(req);
+      const validated = validateRequest(unsendMessageSchema, mapped);
+
+      const payload = this.withCurrentUser(req, validated);
+
+      const data = await this.messageService.unsendMessage(payload);
+      return ok(res, data, CHAT_RESPONSE_MESSAGES.MESSAGE_UNSENT);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async markAsRead(req, res, next) {
+  try {
+    const mapped = mapMarkAsReadRequest(req);
+    const validated = validateRequest(markAsReadSchema, mapped);
+
+    const data = await this.readService.markAsRead({
+      conversationId: validated.id,
+      currentUserId: this.getCurrentUserId(req),
+      reader: this.getReader(req),
+    });
+
+    return ok(res, data, CHAT_RESPONSE_MESSAGES.MARKED_AS_READ);
+  } catch (error) {
+    next(error);
+  }
+}
+
+  async downloadFile(req, res, next) {
+    try {
+      const mapped = mapDownloadFileRequest(req);
+      const validated = validateRequest(downloadFileSchema, mapped);
+
+      const filePath = this.fileService.getDownloadPath(validated.filename);
+
+      return res.download(filePath, path.basename(filePath), (err) => {
+        if (err && !res.headersSent) {
+          next(err);
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+}

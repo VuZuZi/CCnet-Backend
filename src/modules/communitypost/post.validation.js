@@ -7,18 +7,47 @@ const objectId = z
     message: "Invalid ID format",
   });
 
+const jsonStringHelper = (schema) =>
+  z.string().transform((val, ctx) => {
+    try {
+      return schema.parse(JSON.parse(val));
+    } catch (e) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Invalid JSON string format",
+      });
+      return z.NEVER;
+    }
+  });
+
+const commonFields = {
+  content: z.string().max(5000, "Content exceeds 5000 characters"),
+  privacy: z.enum(["public", "friends", "private"]),
+};
+
+const sharedEntitySchema = z.object({
+  entityId: objectId,
+  entityModel: z.enum(["Project", "NeedHelp"]),
+  title: z.string(),
+  thumbnail: z.string().optional(),
+  description: z.string().optional(),
+});
+
 export const PostValidation = {
   createPost: z.object({
     body: z
       .object({
-        content: z
-          .string()
-          .max(5000, "Content exceeds 5000 characters")
+        content: commonFields.content.optional(),
+        privacy: commonFields.privacy.default("public"),
+        type: z
+          .enum(["normal", "share_project", "need_help"])
+          .default("normal"),
+        sharedEntity: z
+          .union([sharedEntitySchema, jsonStringHelper(sharedEntitySchema)])
           .optional(),
-        privacy: z.enum(["public", "friends", "private"]).default("public"),
       })
-      .refine((data) => data.content !== undefined, {
-        message: "Post must have content",
+      .refine((data) => !!data.content?.trim() || !!data.sharedEntity, {
+        message: "Post must have content or a shared item",
         path: ["content"],
       }),
   }),
@@ -26,18 +55,13 @@ export const PostValidation = {
   updatePost: z.object({
     params: z.object({ id: objectId }),
     body: z.object({
-      content: z
-        .string()
-        .max(5000, "Content exceeds 5000 characters")
-        .optional(),
-      privacy: z.enum(["public", "friends", "private"]).optional(),
+      content: commonFields.content.optional(),
+      privacy: commonFields.privacy.optional(),
       removeFiles: z
         .union([z.string(), z.array(z.string())])
+        .transform((val) => (Array.isArray(val) ? val : [val]))
         .optional()
-        .transform((val) => {
-          if (!val) return [];
-          return Array.isArray(val) ? val : [val];
-        }),
+        .default([]),
     }),
   }),
 
@@ -60,15 +84,17 @@ export const PostValidation = {
 
   pagination: z.object({
     query: z.object({
-      limit: z.string().regex(/^\d+$/).transform(Number).optional(),
+      limit: z.coerce.number().positive().optional(),
+      page: z.coerce.number().positive().optional(),
       cursor: objectId.optional(),
-      page: z.string().regex(/^\d+$/).transform(Number).optional(),
+      type: z.enum(["for-you", "following"]).optional(),
     }),
   }),
 
   paramsId: z.object({
     params: z.object({ id: objectId }),
   }),
+
   reportPost: z.object({
     params: z.object({ id: objectId }),
     body: z.object({
