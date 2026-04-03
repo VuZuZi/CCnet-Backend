@@ -12,6 +12,9 @@ import {
   verifyHelpRequestSchema,
   assignOrganizerSchema,
   getNearbyRequestsSchema,
+  getOrganizerSuggestionsSchema,
+  getOrganizerAssignedRequestsSchema,
+  organizerRespondAssignmentSchema,
 } from './helprequest.validation.js';
 
 const router = Router();
@@ -59,6 +62,14 @@ router.get(
   authenticate,
   validate(getHelpRequestsSchema),
   execute('getMyHelpRequests')
+);
+
+// Organizer's assigned requests (must be before generic /:id)
+router.get(
+  '/organizer/assigned',
+  authenticate,
+  validate(getOrganizerAssignedRequestsSchema),
+  execute('getAssignedRequestsForOrganizer')
 );
 
 // Get help request formatted as project data (must be before generic /:id)
@@ -133,6 +144,21 @@ router.patch(
   adminMiddleware,
   validate(assignOrganizerSchema),
   execute('assignOrganizer')
+);
+
+router.get(
+  '/:id/organizer-suggestions',
+  authenticate,
+  adminMiddleware,
+  validate(getOrganizerSuggestionsSchema),
+  execute('getOrganizerSuggestions')
+);
+
+router.patch(
+  '/:id/assignment-response',
+  authenticate,
+  validate(organizerRespondAssignmentSchema),
+  execute('respondToAssignment')
 );
 
 export default router;
