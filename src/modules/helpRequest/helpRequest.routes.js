@@ -64,6 +64,13 @@ router.get(
   execute('getMyHelpRequests')
 );
 
+// Get help request formatted as project data (must be before generic /:id)
+router.get(
+  '/:id/as-project',
+  validate(getHelpRequestByIdSchema),
+  execute('getAsProjectData')
+);
+
 // Public list route
 router.get(
   '/',

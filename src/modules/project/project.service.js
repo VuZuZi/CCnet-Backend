@@ -12,6 +12,7 @@ class ProjectService {
     transactionManager,
     redis,
     followRepository,
+    helprequestRepository,
   }) {
     this.projectRepository = projectRepository;
     this.mediaRepository = mediaRepository;
@@ -20,6 +21,7 @@ class ProjectService {
     this.transactionManager = transactionManager;
     this.redis = redis;
     this.followRepository = followRepository;
+    this.helpRequestRepository = helprequestRepository;
   }
 
   async _processMediaPayload(mediaArray, organizerId, context) {
@@ -185,8 +187,14 @@ class ProjectService {
         "Bắt buộc phải có Ngày bắt đầu và Ngày kết thúc.",
         400,
       );
-    if (!project.documents || project.documents.length === 0)
-      throw new AppError("Bắt buộc phải có tài liệu chứng minh.", 400);
+
+    const isFromHelpRequest =
+      project.fromHelpRequestId &&
+      project.fromHelpRequestId.toString().length > 0;
+    if (!isFromHelpRequest && (!project.documents || project.documents.length === 0)) {
+      throw new AppError('Bắt buộc phải có tài liệu chứng minh.', 400);
+    }
+
     if (project.targetAmount > 0) {
       if (!project.milestones || project.milestones.length === 0)
         throw new AppError(
@@ -468,7 +476,22 @@ class ProjectService {
             currentAmount: 0,
           };
 
-          return await this.projectRepository.create(newProjectData, session);
+          const createdProject = await this.projectRepository.create(newProjectData, session);
+
+          // Link to help request if fromHelpRequestId is provided
+          if (projectData.fromHelpRequestId && this.helpRequestRepository) {
+            try {
+              await this.helpRequestRepository.updateById(
+                projectData.fromHelpRequestId,
+                { linkedProjectId: createdProject._id }
+              );
+            } catch (err) {
+              console.error('[Project Creation] Failed to link help request:', err.message);
+              // Don't fail the project creation if linking fails
+            }
+          }
+
+          return createdProject;
         },
       );
 

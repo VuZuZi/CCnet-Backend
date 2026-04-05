@@ -38,6 +38,12 @@ const volunteerRoleSchema = new mongoose.Schema(
 
 const projectSchema = new mongoose.Schema(
   {
+    projectId: {
+      type: String,
+      default: uuidv4,
+      unique: true,
+      index: true,
+    },
     organizerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
