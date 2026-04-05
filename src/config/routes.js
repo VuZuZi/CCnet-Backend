@@ -53,7 +53,6 @@ export const configureRoutes = (app) => {
     }
   });
 
-<<<<<<< feature/Dungshare
   app.use(`${API_PREFIX}/auth`, authRoutes);
   app.use(`${API_PREFIX}/posts`, postRoutes);
   app.use(`${API_PREFIX}/admin`, adminRoutes);
@@ -70,12 +69,10 @@ export const configureRoutes = (app) => {
     `${API_PREFIX}/admin/organizer-requests`,
     organizerRequestAdminRouter,
   );
-=======
   // Health check
   app.get("/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
->>>>>>> dev
 
   // 404 handler
   app.use((req, res) => {
@@ -86,9 +83,4 @@ export const configureRoutes = (app) => {
   });
 };
 
-<<<<<<< feature/Dungshare
 export default configureRoutes;
-=======
-// CreatePostPage Export configureRoutes (không export routes trực tiếp)
-export default configureRoutes;
->>>>>>> dev

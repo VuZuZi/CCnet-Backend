@@ -26,6 +26,27 @@ class UserRepository {
       .lean()
       .exec();
   }
+
+  async findOrganizers({ search = "" } = {}) {
+    const query = {
+      role: { $in: ["organizer", "Organizer"] },
+      isActive: true,
+    };
+
+    if (search) {
+      query.$or = [
+        { fullName: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+        { location: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    return await User.find(query)
+      .select("_id fullName email avatar role location headline about skills phone followersCount followingCount level title createdAt")
+      .lean()
+      .exec();
+  }
+
   async create(userData) {
     return await User.create(userData);
   }

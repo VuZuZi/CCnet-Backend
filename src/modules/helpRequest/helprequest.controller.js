@@ -147,12 +147,116 @@ export default class HelpRequestController {
   assignOrganizer = async (req, res, next) => {
     try {
       const { organizerId } = req.body;
+      console.log(`[CONTROLLER] Assign organizer:`, {
+        requestId: req.params.id,
+        organizerId: organizerId,
+        adminId: req.user.userId,
+      });
+
       const helpRequest = await this.helpRequestService.assignOrganizer(
         req.params.id,
         req.user.userId,
         organizerId
       );
+
+      console.log(`[CONTROLLER] Assignment successful:`, {
+        requestId: helpRequest._id,
+        assignedOrganizerId: helpRequest.assignedOrganizerId,
+        status: helpRequest.status,
+      });
+
       return Response.success(res, helpRequest, 'Organizer assigned successfully');
+    } catch (error) {
+      console.error(`[CONTROLLER] Error in assignOrganizer:`, error.message);
+      next(error);
+    }
+  };
+
+  getOrganizerSuggestions = async (req, res, next) => {
+    try {
+      const { search, limit = 20 } = req.query;
+      const result = await this.helpRequestService.getOrganizerSuggestions(req.params.id, {
+        search,
+        limit: parseInt(limit, 10),
+      });
+
+      return Response.success(res, result);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  getAssignedRequestsForOrganizer = async (req, res, next) => {
+    try {
+      const {
+        page = 1,
+        limit = 10,
+        status,
+        category,
+        urgencyLevel,
+        search,
+        sortBy = 'assignedAt',
+        sortOrder = 'desc',
+      } = req.query;
+
+      console.log(`[CONTROLLER] GET assigned requests for organizer:`, {
+        organizerId: req.user.userId,
+        page,
+        limit,
+        status,
+        category,
+        urgencyLevel,
+        search,
+      });
+
+      const filters = {};
+      if (status) filters.status = status;
+      if (category) filters.category = category;
+      if (urgencyLevel) filters.urgencyLevel = urgencyLevel;
+      if (search) filters.search = search;
+
+      const options = {
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
+        sort: { [sortBy]: sortOrder === 'desc' ? -1 : 1 },
+      };
+
+      console.log(`[CONTROLLER] Calling service with:`, { filters, options });
+
+      const result = await this.helpRequestService.getAssignedRequestsForOrganizer(
+        req.user.userId,
+        filters,
+        options
+      );
+
+      console.log(`[CONTROLLER] Result from service:`, {
+        total: result.total,
+        count: result.data?.length || result.items?.length || result.length || 0,
+      });
+
+      return Response.success(res, result);
+    } catch (error) {
+      console.error(`[CONTROLLER] Error in getAssignedRequestsForOrganizer:`, error.message);
+      next(error);
+    }
+  };
+
+  respondToAssignment = async (req, res, next) => {
+    try {
+      const { action } = req.body;
+      const helpRequest = await this.helpRequestService.respondToAssignment(
+        req.params.id,
+        req.user.userId,
+        action
+      );
+
+      return Response.success(
+        res,
+        helpRequest,
+        action === 'accept'
+          ? 'Assignment accepted successfully'
+          : 'Assignment rejected successfully'
+      );
     } catch (error) {
       next(error);
     }

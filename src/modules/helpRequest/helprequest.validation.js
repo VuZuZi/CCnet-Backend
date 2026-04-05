@@ -32,10 +32,10 @@ export const createHelpRequestSchema = z.object({
     }),
     location: locationSchema.optional(),
     urgencyLevel: z.enum(URGENCY_LEVELS).optional().default('MEDIUM'),
-    amountNeeded: z.coerce.number().min(0).optional().default(0),
+    amountNeeded: z.number().min(0).optional().default(0),
     evidences: z.array(evidenceSchema).max(10).optional().default([]),
     contactPhone: z.string().max(20).optional(),
-    contactEmail: z.string().email().optional().or(z.literal('')),
+    contactEmail: z.string().email().optional(),
   }),
 });
 
@@ -81,6 +81,22 @@ export const getHelpRequestsSchema = z.object({
   }),
 });
 
+export const getOrganizerAssignedRequestsSchema = z.object({
+  query: z.object({
+    page: z.string().regex(/^\d+$/).optional().default('1'),
+    limit: z.string().regex(/^\d+$/).optional().default('10'),
+    status: z.enum(STATUSES).optional(),
+    category: z.enum(CATEGORIES).optional(),
+    urgencyLevel: z.enum(URGENCY_LEVELS).optional(),
+    search: z.string().max(100).optional(),
+    sortBy: z
+      .enum(['assignedAt', 'createdAt', 'urgencyLevel', 'amountNeeded'])
+      .optional()
+      .default('assignedAt'),
+    sortOrder: z.enum(['asc', 'desc']).optional().default('desc'),
+  }),
+});
+
 export const getHelpRequestByIdSchema = z.object({
   params: z.object({
     id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid help request ID'),
@@ -109,6 +125,25 @@ export const assignOrganizerSchema = z.object({
   }),
   params: z.object({
     id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid help request ID'),
+  }),
+});
+
+export const getOrganizerSuggestionsSchema = z.object({
+  params: z.object({
+    id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid help request ID'),
+  }),
+  query: z.object({
+    search: z.string().max(100).optional(),
+    limit: z.string().regex(/^\d+$/).optional().default('20'),
+  }),
+});
+
+export const organizerRespondAssignmentSchema = z.object({
+  params: z.object({
+    id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid help request ID'),
+  }),
+  body: z.object({
+    action: z.enum(['accept', 'reject']),
   }),
 });
 

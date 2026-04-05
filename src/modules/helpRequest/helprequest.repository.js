@@ -47,6 +47,7 @@ export default class HelpRequestRepository {
       populate = [],
       select,
     } = options;
+    console.log(`[REPO-FIND] Query filter:`, filter);
 
     const skip = (page - 1) * limit;
     const query = HelpRequest.find(filter);
@@ -68,6 +69,7 @@ export default class HelpRequestRepository {
       query.exec(),
       HelpRequest.countDocuments(filter),
     ]);
+    console.log(`[REPO-FIND] Query result:`, { total, returned: data.length });
 
     return {
       data,
@@ -88,10 +90,20 @@ export default class HelpRequestRepository {
   }
 
   async updateById(id, updateData) {
-    return HelpRequest.findByIdAndUpdate(id, updateData, {
+    console.log(`[REPO] Updating HelpRequest:`, { id: id.toString(), updateData });
+
+    const updated = await HelpRequest.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
     });
+
+    console.log(`[REPO] Update result:`, {
+      id: updated?._id?.toString(),
+      assignedOrganizerId: updated?.assignedOrganizerId?.toString(),
+      status: updated?.status,
+    });
+
+    return updated;
   }
 
   async softDelete(id) {
