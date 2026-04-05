@@ -41,5 +41,13 @@ router.get(
 );
 
 router.get("/users/:id/stats", validate(idParamSchema), execute("statsUser"));
+
 router.get("/followers", authenticate, execute("getMyFollowers"));
+
+router.post(
+  "/project/:projectId",
+  authenticate,
+  execute("toggleProjectFollow"),
+);
+
 export default router;

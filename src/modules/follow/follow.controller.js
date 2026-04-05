@@ -63,6 +63,7 @@ class FollowController {
       next(e);
     }
   };
+
   getMyFollowers = async (req, res, next) => {
     try {
       const limit = parseInt(req.query.limit, 10) || 50;
@@ -75,6 +76,21 @@ class FollowController {
       return ApiResponse.success(res, followers);
     } catch (error) {
       next(error);
+    }
+  };
+
+  toggleProjectFollow = async (req, res, next) => {
+    try {
+      const data = await this.followService.toggleProjectFollow(
+        req.user.userId,
+        req.params.projectId,
+      );
+      const message = data.isFollowing
+        ? "Followed project successfully"
+        : "Unfollowed project successfully";
+      return ApiResponse.success(res, data, message);
+    } catch (e) {
+      next(e);
     }
   };
 }
