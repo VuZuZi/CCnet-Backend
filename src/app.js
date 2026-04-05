@@ -72,11 +72,26 @@ export const createApp = async () => {
   configureRoutes(app);
 
   app.use((err, req, res, next) => {
-    console.error("Error:", err.message);
-    res.status(err.status || 500).json({
-      success: false,
-      message: err.message || "Internal server error",
-    });
+    console.error(`[Global Error] ${err.name}:`, err.message);
+
+    const statusCode = err.statusCode || 500;
+
+    const status = err.status || "error";
+    let message = err.message;
+    if (!err.isOperational && statusCode === 500) {
+      message = "Internal server error";
+    }
+
+    const errorResponse = {
+      status,
+      message,
+    };
+
+    if (err.errors) {
+      errorResponse.errors = err.errors;
+    }
+
+    res.status(statusCode).json(errorResponse);
   });
 
   return app;
