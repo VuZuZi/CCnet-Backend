@@ -1,3 +1,4 @@
+// src/config/index.js
 import dotenv from 'dotenv';
 import Joi from 'joi';
 
@@ -22,9 +23,9 @@ const envSchema = Joi.object({
   REDIS_PASSWORD: Joi.string().allow('').optional(),
 
   // Cloudinary
-  CLOUDINARY_CLOUD_NAME: Joi.string().required(),
-  CLOUDINARY_API_KEY: Joi.string().required(),
-  CLOUDINARY_API_SECRET: Joi.string().required(),
+  CLOUDINARY_CLOUD_NAME: Joi.string().optional(),
+  CLOUDINARY_API_KEY: Joi.string().optional(),
+  CLOUDINARY_API_SECRET: Joi.string().optional(),
 
   // Google
   GOOGLE_CLIENT_ID: Joi.string().required(),
@@ -43,6 +44,14 @@ if (error) {
   throw new Error(`Config validation error: ${error.message}`);
 }
 
+const parseCorsOrigins = () => {
+  const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:3000';
+  if (corsOrigin.includes(',')) {
+    return corsOrigin.split(',').map(origin => origin.trim());
+  }
+  return [corsOrigin];
+};
+
 export const config = {
   env: envVars.NODE_ENV,
   port: envVars.PORT,
@@ -59,9 +68,7 @@ export const config = {
   },
 
   redis: {
-    host: envVars.REDIS_HOST,
-    port: envVars.REDIS_PORT,
-    password: envVars.REDIS_PASSWORD,
+    url: process.env.REDIS_URL || null,
   },
 
   jwt: {
@@ -72,9 +79,9 @@ export const config = {
   },
 
   cloudinary: {
-    cloudName: envVars.CLOUDINARY_CLOUD_NAME,
-    apiKey: envVars.CLOUDINARY_API_KEY,
-    apiSecret: envVars.CLOUDINARY_API_SECRET,
+    cloudName: envVars.CLOUDINARY_CLOUD_NAME || '',
+    apiKey: envVars.CLOUDINARY_API_KEY || '',
+    apiSecret: envVars.CLOUDINARY_API_SECRET || '',
   },
 
   google: {
@@ -91,6 +98,9 @@ export const config = {
   },
 
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    origin: parseCorsOrigins(),
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   }
 };

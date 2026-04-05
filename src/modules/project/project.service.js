@@ -62,7 +62,7 @@ class ProjectService {
             originalName: item.originalName || "unknown_file",
             url: item.url,
             publicId: item.publicId,
-            mimetype: item.mimetype || "application/octet-stream",
+            mimetype: item.mimetype || (item.mediaType === 'video' ? 'video/mp4' : 'image/jpeg'),
             size: item.size || 0,
             width: item.width || 0,
             height: item.height || 0,
@@ -457,8 +457,9 @@ class ProjectService {
             }
           }
 
+          const { coverMedia: _, documents: __, ...otherProjectData } = projectData;
           const newProjectData = {
-            ...projectData,
+            ...otherProjectData,
             stats: { targetVolunteers, currentVolunteers: 0 },
             organizerId,
             coverMedia: finalCoverMediaData || undefined,
@@ -498,7 +499,7 @@ class ProjectService {
     if (existingProject.status !== PROJECT_STATUS.DRAFT)
       throw new AppError(`Chỉ có thể chỉnh sửa dự án Nháp.`, 400);
 
-    let { deletedDocumentIds, ...finalUpdateData } = updateData;
+    let { deletedDocumentIds, coverMedia: _, documents: __, ...finalUpdateData } = updateData;
     if (!Array.isArray(deletedDocumentIds))
       deletedDocumentIds = deletedDocumentIds ? [deletedDocumentIds] : [];
 
@@ -593,6 +594,15 @@ class ProjectService {
 
           if (finalCoverMediaData) {
             finalUpdateData.coverMedia = finalCoverMediaData;
+          } else if (validCoverIds.length > 0) {
+            const existingCover = await this.mediaRepository.findById(validCoverIds[0]);
+            if (existingCover) {
+                finalUpdateData.coverMedia = {
+                    url: existingCover.url,
+                    publicId: existingCover.publicId,
+                    mediaType: existingCover.mimetype.startsWith('video') ? 'video' : 'image'
+                };
+            }
           }
 
           if (deletedDocumentIds.length > 0) {

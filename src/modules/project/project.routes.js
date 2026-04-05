@@ -5,6 +5,7 @@ import {
   authorize,
   optionalAuthenticate,
 } from "../../middlewares/auth.middleware.js";
+import { maybeAuthenticate } from '../../middlewares/maybeAuth.middleware.js';
 import { createDraftSchema, updateDraftSchema } from "./project.validation.js";
 import { validateBody } from "../../middlewares/validate.middleware.js";
 import {
@@ -17,6 +18,7 @@ import { parseJsonFields } from "../../middlewares/parseFormData.middleware.js";
 
 const router = Router();
 router.use(scopePerRequest);
+
 const execute = (action) => (req, res, next) => {
   try {
     if (!req.scope) {
@@ -60,7 +62,15 @@ router.get(
   execute("getWorkspaceProjects"),
 );
 
+router.get('/:id/feed/posts', maybeAuthenticate, execute('getFeedPosts'));
+router.post('/:id/feed/posts', authenticate, execute('createFeedPost'));
+router.get('/:id/feed/posts/:postId/comments', maybeAuthenticate, execute('listFeedComments'));
+router.post('/:id/feed/posts/:postId/comments', authenticate, execute('createFeedComment'));
+router.post('/:id/feed/posts/:postId/like', authenticate, execute('toggleFeedPostLike'));
+router.post('/:id/feed/comments/:commentId/like', authenticate, execute('toggleFeedCommentLike'));
+
 router.get("/:id", optionalAuthenticate, execute("getDetail"));
+
 
 // router.post(
 //     '/',
@@ -90,7 +100,7 @@ router.post(
   "/",
   authenticate,
   authorize("Organizer"),
-  validateBody(createDraftSchema), // Zod sẽ tự lo phần Validate JSON chuẩn xác
+  validateBody(createDraftSchema),
   execute("createDraft"),
 );
 
