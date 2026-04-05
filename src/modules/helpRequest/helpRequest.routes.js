@@ -1,5 +1,3 @@
-// src/modules/helpRequest/helpRequest.routes.js
-
 import { Router } from 'express';
 import { authenticate } from '../../middlewares/auth.middleware.js';
 import { adminMiddleware } from '../../middlewares/admin.middleware.js';
@@ -18,7 +16,6 @@ import {
   getOrganizerAssignedRequestsSchema,
   organizerRespondAssignmentSchema,
 } from './helprequest.validation.js';
-
 
 const router = Router();
 router.use(scopePerRequest);
@@ -39,7 +36,6 @@ const execute = (action) => (req, res, next) => {
   }
 };
 
-// Public routes - specific paths first
 router.get(
   '/urgent',
   execute('getUrgentRequests')
@@ -51,7 +47,6 @@ router.get(
   execute('getNearbyRequests')
 );
 
-// Admin stats route (must be before /:id)
 router.get(
   '/admin/stats',
   authenticate,
@@ -59,7 +54,6 @@ router.get(
   execute('getStats')
 );
 
-// User's own requests (must be before /:id)
 router.get(
   '/user/my-requests',
   authenticate,
@@ -67,7 +61,6 @@ router.get(
   execute('getMyHelpRequests')
 );
 
-// Organizer's assigned requests (must be before generic /:id)
 router.get(
   '/organizer/assigned',
   authenticate,
@@ -75,21 +68,18 @@ router.get(
   execute('getAssignedRequestsForOrganizer')
 );
 
-// Get help request formatted as project data (must be before generic /:id)
 router.get(
   '/:id/as-project',
   validate(getHelpRequestByIdSchema),
   execute('getAsProjectData')
 );
 
-// Public list route
 router.get(
   '/',
   validate(getHelpRequestsSchema),
   execute('getHelpRequests')
 );
 
-// Create help request
 router.post(
   '/',
   authenticate,
@@ -97,7 +87,6 @@ router.post(
   execute('createHelpRequest')
 );
 
-// Single help request by ID - placed after specific routes
 router.get(
   '/:id',
   validate(getHelpRequestByIdSchema),
@@ -132,7 +121,6 @@ router.patch(
   execute('completeHelpRequest')
 );
 
-// Admin routes for specific help request
 router.patch(
   '/:id/verify',
   authenticate,
