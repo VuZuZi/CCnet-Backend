@@ -1,8 +1,9 @@
 import User from "./user.model.js";
 
 class UserRepository {
+  
   async findByEmailWithPassword(email) {
-    return await User.findOne({ email }).select("+password").exec();
+    return await User.findOne({ email }).select("+password +googleId").exec();
   }
 
   async findByEmail(email) {

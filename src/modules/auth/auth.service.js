@@ -123,7 +123,6 @@ class AuthService {
     return this._generateAuthResponse(user);
   }
 
-  // CreatePostPage Cải thiện Google Login
   async loginWithGoogle(idToken) {
     if (!this.googleClient) {
       throw new AppError('Google authentication is not configured', 500);
@@ -134,7 +133,6 @@ class AuthService {
     }
 
     try {
-      // Verify Google token
       const ticket = await this.googleClient.verifyIdToken({
         idToken: idToken,
         audience: this.config.google.clientId,
@@ -150,19 +148,20 @@ class AuthService {
       let user = await this.userService.getUserByEmail(email);
 
       if (user) {
-        // Cập nhật googleId nếu chưa có
-        if (!user.googleId) {
-          user = await this.userService.updateProfile(user._id, {
-            googleId,
-            avatar: user.avatar || picture
-          });
-        }
-
         if (!user.isActive) {
           throw new AppError('Account is deactivated', 403);
         }
+
+        if (!user.googleId) {
+          await this.userService.updateProfile(user._id, {
+            googleId,
+            avatar: user.avatar || picture
+          });
+          
+          user.googleId = googleId;
+          if (!user.avatar && picture) user.avatar = picture;
+        }
       } else {
-        // Tạo user mới
         user = await this.userService.createUser({
           email,
           fullName: name || email.split('@')[0],
@@ -178,13 +177,23 @@ class AuthService {
     } catch (error) {
       console.error('❌ Google Auth Error:', error.message);
 
-      if (error.message.includes('invalid_token') || error.message.includes('Token used too late')) {
+      if (error instanceof AppError) {
+        throw error;
+      }
+
+      const isInvalidToken = 
+        error.message.includes('invalid_token') || 
+        error.message.includes('Token used too late') ||
+        error.message.includes('Wrong number of segments');
+
+      if (isInvalidToken) {
         throw new AppError('Invalid or expired Google token', 401);
       }
 
       throw new AppError('Google authentication failed', 401);
     }
   }
+
 
   async refreshAccessToken(oldRefreshToken) {
     const tokenDoc = await this.tokenRepository.findToken(oldRefreshToken);
