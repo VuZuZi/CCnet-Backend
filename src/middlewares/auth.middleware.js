@@ -10,7 +10,7 @@ export const authenticate = async (req, res, next) => {
 
     const token = authHeader.split(" ")[1];
     if (!token) {
-        throw new AppError("Unauthorized: Token missing", 401);
+      throw new AppError("Unauthorized: Token missing", 401);
     }
 
     const container = getContainer();
@@ -23,9 +23,15 @@ export const authenticate = async (req, res, next) => {
         throw new AppError("Session expired or revoked", 401);
       }
     } catch (redisError) {
-      if (redisError instanceof AppError) throw redisError; 
-      console.error("[Auth Middleware] Redis connection failed:", redisError.message);
-      throw new AppError("Authentication service is temporarily unavailable", 503);
+      if (redisError instanceof AppError) throw redisError;
+      console.error(
+        "[Auth Middleware] Redis connection failed:",
+        redisError.message,
+      );
+      throw new AppError(
+        "Authentication service is temporarily unavailable",
+        503,
+      );
     }
 
     const decoded = authService.verifyAccessToken(token);
@@ -36,7 +42,7 @@ export const authenticate = async (req, res, next) => {
       role: decoded.role,
       fullName: decoded.fullName,
       avatar: decoded.avatar,
-      username: decoded.username || decoded.email.split('@')[0] 
+      username: decoded.username || decoded.email.split("@")[0],
     };
 
     next();
@@ -48,6 +54,44 @@ export const authenticate = async (req, res, next) => {
       return next(new AppError("Invalid token", 401));
     }
     next(error);
+  }
+};
+
+export const optionalAuthenticate = async (req, res, next) => {
+  try {
+    const authHeader = req.headers?.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return next();
+    }
+
+    const token = authHeader.split(" ")[1];
+    if (!token) return next();
+
+    const container = getContainer();
+    const redis = container.resolve("redis");
+    const authService = container.resolve("authService");
+
+    try {
+      const isBlacklisted = await redis.get(`bl:${token}`);
+      if (isBlacklisted) return next();
+    } catch (redisError) {
+      return next();
+    }
+
+    const decoded = authService.verifyAccessToken(token);
+
+    req.user = {
+      userId: decoded.userId,
+      email: decoded.email,
+      role: decoded.role,
+      fullName: decoded.fullName,
+      avatar: decoded.avatar,
+      username: decoded.username || decoded.email.split("@")[0],
+    };
+
+    next();
+  } catch (error) {
+    next();
   }
 };
 

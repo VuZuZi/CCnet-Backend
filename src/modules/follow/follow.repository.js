@@ -21,6 +21,7 @@ class FollowRepository {
   async countFollowing(userId) {
     return await Follow.countDocuments({ followerId: userId });
   }
+
   async findFollowingIds(followerId) {
     const follows = await Follow.find({ followerId })
       .select("followingId")
@@ -28,6 +29,7 @@ class FollowRepository {
       .exec();
     return follows.map((f) => f.followingId);
   }
+
   async findFollowingUsers(followerId, limit = 50, cursor = null) {
     const query = { followerId };
 
@@ -41,6 +43,19 @@ class FollowRepository {
       .populate({ path: "followingId", select: "_id fullName email avatar" })
       .lean()
       .exec();
+  }
+
+  async existsProjectFollow(userId, projectId) {
+    const result = await Follow.exists({ followerId: userId, projectId });
+    return !!result;
+  }
+
+  async createProjectFollow(userId, projectId) {
+    return await Follow.create({ followerId: userId, projectId });
+  }
+
+  async deleteProjectFollow(userId, projectId) {
+    return await Follow.deleteOne({ followerId: userId, projectId });
   }
 }
 

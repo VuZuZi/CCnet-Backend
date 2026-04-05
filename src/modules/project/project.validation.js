@@ -9,7 +9,8 @@ const mediaPayloadSchema = z.object({
   publicId: z.string().min(1, "publicId không được rỗng").optional(),
   originalName: z.string().optional(),
   mimetype: z.string().optional(),
-  size: z.number().nonnegative().optional()
+  size: z.number().nonnegative().optional(),
+  mediaType: z.string().optional()
 }).strict().refine(data => data._id || (data.url && data.publicId), {
   message: "Media bắt buộc phải có _id (đã lưu) hoặc cặp (url + publicId) (mới upload)",
   path: ["media"]

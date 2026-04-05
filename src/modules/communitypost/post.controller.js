@@ -12,10 +12,15 @@ class PostController {
       const cursor = req.query.cursor || null;
       const currentUserId = req.user?.userId || null;
 
+      // 1. LẤY BIẾN TYPE TỪ URL (Frontend đã gửi lên rồi)
+      const type = req.query.type || "for-you";
+      console.log("🚀 [Controller] Frontend yêu cầu bảng tin loại:", type);
+
       const result = await this.postService.getNewsFeed({
         cursor,
         limit,
         userId: currentUserId,
+        type, // 2. TRUYỀN NÓ XUỐNG SERVICE CHỖ NÀY
       });
 
       return ApiResponse.success(res, result.data, result.paging);
@@ -38,14 +43,24 @@ class PostController {
 
   createPost = async (req, res, next) => {
     try {
-      const { content, privacy } = req.body;
+      const { content, privacy, type } = req.body;
+      let { sharedEntity } = req.body;
       const files = req.files || [];
+      if (sharedEntity && typeof sharedEntity === "string") {
+        try {
+          sharedEntity = JSON.parse(sharedEntity);
+        } catch (error) {
+          console.error("Lỗi parse sharedEntity tại Controller:", error);
+        }
+      }
 
       const post = await this.postService.createPost({
         content,
         files,
         user: req.user,
         privacy,
+        type: type || "normal",
+        sharedEntity: sharedEntity || null,
       });
 
       return ApiResponse.created(res, post);
