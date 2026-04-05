@@ -1,15 +1,30 @@
 import AppError from "../../core/AppError.js";
 
 class FollowService {
-  constructor({ followRepository, userRepository, jobQueue }) {
-    Object.assign(this, { followRepository, userRepository, jobQueue });
+  constructor({
+    followRepository,
+    userRepository,
+    projectRepository,
+    jobQueue,
+  }) {
+    Object.assign(this, {
+      followRepository,
+      userRepository,
+      projectRepository,
+      jobQueue,
+    });
   }
 
-  // --- PRIVATE HELPERS ---
   async _ensureUserExists(userId) {
     const user = await this.userRepository.findById(userId);
     if (!user) throw new AppError("User not found", 404);
     return user;
+  }
+
+  async _ensureProjectExists(projectId) {
+    const project = await this.projectRepository.findById(projectId);
+    if (!project) throw new AppError("Project not found", 404);
+    return project;
   }
 
   _checkSelfAction(id1, id2, actionName) {
@@ -45,7 +60,24 @@ class FollowService {
     }
   }
 
-  // --- MAIN METHODS ---
+  async _enqueueProjectCounterUpdate(action, followerId, projectId) {
+    try {
+      const jobName =
+        action === "follow"
+          ? "increment-project-follower"
+          : "decrement-project-follower";
+      await this.jobQueue.addJob("project-maintenance", jobName, {
+        followerId,
+        projectId,
+        action,
+      });
+    } catch (error) {
+      console.error(
+        `[CRITICAL][FollowService] Failed to enqueue project ${action} update: ${error.message}`,
+      );
+    }
+  }
+
   async followUser(followerId, followingId) {
     this._checkSelfAction(followerId, followingId, "follow");
     await this._ensureUserExists(followingId);
@@ -114,6 +146,25 @@ class FollowService {
       .filter(Boolean);
 
     return { users };
+  }
+
+  async toggleProjectFollow(userId, projectId) {
+    await this._ensureProjectExists(projectId);
+
+    const isFollowing = await this.followRepository.existsProjectFollow(
+      userId,
+      projectId,
+    );
+
+    if (isFollowing) {
+      await this.followRepository.deleteProjectFollow(userId, projectId);
+      this._enqueueProjectCounterUpdate("unfollow", userId, projectId);
+      return { isFollowing: false };
+    }
+
+    await this.followRepository.createProjectFollow(userId, projectId);
+    this._enqueueProjectCounterUpdate("follow", userId, projectId);
+    return { isFollowing: true };
   }
 }
 

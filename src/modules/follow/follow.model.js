@@ -1,24 +1,35 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
 const followSchema = new mongoose.Schema(
   {
     followerId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       required: true,
     },
     followingId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-      index: true, 
+      ref: "User",
+      index: true,
+    },
+    projectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Project",
+      index: true,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
-followSchema.index({ followerId: 1, followingId: 1 }, { unique: true });
+followSchema.index(
+  { followerId: 1, followingId: 1 },
+  { unique: true, sparse: true },
+);
+followSchema.index(
+  { followerId: 1, projectId: 1 },
+  { unique: true, sparse: true },
+);
 
-const Follow = mongoose.models.Follow || mongoose.model('Follow', followSchema);
+const Follow = mongoose.models.Follow || mongoose.model("Follow", followSchema);
 
 export default Follow;
