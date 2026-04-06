@@ -1,42 +1,46 @@
-import fs from 'fs';
-import multer from 'multer';
-import path from 'path';
+import multer from "multer";
+import AppError from "../../core/AppError.js";
+import {
+  CHAT_UPLOAD_LIMITS,
+  isAllowedChatUploadFile,
+  isImageMimeType,
+} from "./chat.upload.constants.js";
 
-const uploadDir = path.resolve(process.cwd(), 'uploads');
+const storage = multer.memoryStorage();
 
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+function fileFilter(req, file, cb) {
+  if (file.fieldname === "groupAvatar") {
+    if (!isImageMimeType(file?.mimetype)) {
+      return cb(new AppError("Group avatar must be an image", 400));
+    }
+
+    return cb(null, true);
+  }
+
+  if (!isAllowedChatUploadFile(file)) {
+    return cb(
+      new AppError(
+        `File "${file?.originalname || "unknown"}" is not a supported format`,
+        400
+      )
+    );
+  }
+
+  return cb(null, true);
 }
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname || '');
-    const baseName = path
-      .basename(file.originalname || 'file', ext)
-      .replace(/[^a-zA-Z0-9-_]/g, '_')
-      .slice(0, 60);
-
-    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    cb(null, `${baseName}-${unique}${ext}`);
-  },
-});
 
 const upload = multer({
   storage,
+  fileFilter,
   limits: {
-    files: 20,
-    fileSize: 15 * 1024 * 1024,
+    files: CHAT_UPLOAD_LIMITS.maxFiles,
+    fileSize: CHAT_UPLOAD_LIMITS.maxFileSizeBytes,
   },
 });
 
-export const groupAvatarUpload = upload.single('groupAvatar');
+export const groupAvatarUpload = upload.single("groupAvatar");
 
 export const messageUpload = upload.fields([
-  { name: 'attachments', maxCount: 20 },
-  { name: 'files', maxCount: 20 },
+  { name: "attachments", maxCount: CHAT_UPLOAD_LIMITS.maxFiles },
+  { name: "files", maxCount: CHAT_UPLOAD_LIMITS.maxFiles },
 ]);
-
-export { uploadDir };

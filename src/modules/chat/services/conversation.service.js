@@ -1,28 +1,29 @@
-import AppError from '../../../core/AppError.js';
-import { uniqueIds } from '../utils/id.util.js';
+import AppError from "../../../core/AppError.js";
+import { uniqueIds } from "../utils/id.util.js";
 import {
   normalizeParticipantIds,
   pickRandomAdminCandidate,
-} from '../utils/participant.util.js';
-import { getDisplayName } from '../utils/user.util.js';
+} from "../utils/participant.util.js";
+import { getDisplayName } from "../utils/user.util.js";
 import {
   buildUnreadCounts,
   getConversationUnreadCountsMap,
   saveConversationDocument,
-} from '../utils/conversation.util.js';
-import ChatGroupEventService from './group-event.service.js';
-import { CHAT_GROUP_ACTIONS } from '../chat.constants.js';
+} from "../utils/conversation.util.js";
+import ChatGroupEventService from "./group-event.service.js";
+import { CHAT_GROUP_ACTIONS } from "../chat.constants.js";
 import {
   requireConversationParticipant,
   requireGroupAdmin,
   requireGroupConversation,
-} from './helpers/conversation-access.helper.js';
+} from "./helpers/conversation-access.helper.js";
+import { CHAT_CLOUDINARY_FOLDERS } from "../chat.upload.constants.js";
 
 function buildParticipantLookup(participants = []) {
   const map = new Map();
 
   (Array.isArray(participants) ? participants : []).forEach((item) => {
-    const id = String(item?._id || item?.id || item || '');
+    const id = String(item?._id || item?.id || item || "");
     if (!id) return;
     map.set(id, item);
   });
@@ -35,10 +36,12 @@ export default class ConversationService {
     conversationRepository,
     messageRepository,
     publishService,
+    cloudinaryProvider,
   }) {
     this.conversationRepository = conversationRepository;
     this.messageRepository = messageRepository;
     this.publishService = publishService;
+    this.cloudinaryProvider = cloudinaryProvider;
 
     this.groupEventService = new ChatGroupEventService({
       conversationRepository,
@@ -53,6 +56,17 @@ export default class ConversationService {
 
   async emitSystemMessage(payload) {
     return this.groupEventService.emitSystemMessage(payload);
+  }
+
+  async uploadGroupAvatar(groupAvatarFile) {
+    if (!groupAvatarFile) return "";
+
+    const result = await this.cloudinaryProvider.uploadImage(
+      groupAvatarFile.buffer,
+      CHAT_CLOUDINARY_FOLDERS.groupAvatars
+    );
+
+    return result?.secure_url || result?.url || "";
   }
 
   transferAdminIfNeeded(conversation) {
@@ -107,24 +121,24 @@ export default class ConversationService {
 
   async createConversation(payload) {
     const {
-      type = 'direct',
+      type = "direct",
       participantId,
       participantIds = [],
-      groupName = '',
+      groupName = "",
       projectId = null,
       currentUserId,
       groupAvatarFile = null,
     } = payload;
 
-    if (type === 'direct') {
+    if (type === "direct") {
       if (!participantId) {
-        throw new AppError('participantId is required', 400);
+        throw new AppError("participantId is required", 400);
       }
 
       const directParticipants = uniqueIds([currentUserId, participantId]);
 
       if (directParticipants.length !== 2) {
-        throw new AppError('Invalid direct conversation participants', 400);
+        throw new AppError("Invalid direct conversation participants", 400);
       }
 
       const existing =
@@ -135,7 +149,7 @@ export default class ConversationService {
       if (existing) return existing;
 
       const created = await this.conversationRepository.create({
-        type: 'direct',
+        type: "direct",
         participants: directParticipants,
         createdBy: currentUserId,
         unreadCounts: buildUnreadCounts(directParticipants),
@@ -147,15 +161,15 @@ export default class ConversationService {
     const normalizedParticipants = uniqueIds([currentUserId, ...(participantIds || [])]);
 
     if (normalizedParticipants.length < 2) {
-      throw new AppError('A group conversation must have at least 2 participants', 400);
+      throw new AppError("A group conversation must have at least 2 participants", 400);
     }
 
-    const groupAvatar = groupAvatarFile ? `/uploads/${groupAvatarFile.filename}` : '';
+    const groupAvatar = await this.uploadGroupAvatar(groupAvatarFile);
 
     const created = await this.conversationRepository.create({
-      type: 'group',
+      type: "group",
       projectId: projectId || null,
-      groupName: String(groupName || '').trim(),
+      groupName: String(groupName || "").trim(),
       groupAvatar,
       participants: normalizedParticipants,
       groupAdmins: [currentUserId],
@@ -167,12 +181,7 @@ export default class ConversationService {
   }
 
   async updateConversation(payload) {
-    const {
-      id,
-      groupName,
-      currentUserId,
-      groupAvatarFile = null,
-    } = payload;
+    const { id, groupName, currentUserId, groupAvatarFile = null } = payload;
 
     const conversation = await requireConversationParticipant(
       this.conversationRepository,
@@ -183,11 +192,9 @@ export default class ConversationService {
     requireGroupConversation(conversation);
     requireGroupAdmin(conversation, currentUserId);
 
-    const previousGroupName = String(conversation.groupName || '').trim();
+    const previousGroupName = String(conversation.groupName || "").trim();
     const nextGroupName =
-      groupName !== undefined
-        ? String(groupName || '').trim()
-        : previousGroupName;
+      groupName !== undefined ? String(groupName || "").trim() : previousGroupName;
 
     const hasGroupNameChanged =
       groupName !== undefined && nextGroupName !== previousGroupName;
@@ -203,7 +210,7 @@ export default class ConversationService {
     }
 
     if (groupAvatarFile) {
-      conversation.groupAvatar = `/uploads/${groupAvatarFile.filename}`;
+      conversation.groupAvatar = await this.uploadGroupAvatar(groupAvatarFile);
     }
 
     await saveConversationDocument(this.conversationRepository, conversation, {
@@ -218,8 +225,8 @@ export default class ConversationService {
           (item) => String(item?._id || item) === String(currentUserId)
         ) || null;
 
-      const actorName = actor ? getDisplayName(actor) : 'Thành viên';
-      const safeGroupName = nextGroupName || 'Nhóm chat';
+      const actorName = actor ? getDisplayName(actor) : "Thành viên";
+      const safeGroupName = nextGroupName || "Nhóm chat";
 
       await this.emitSystemMessage({
         conversation,
@@ -279,13 +286,13 @@ export default class ConversationService {
       actuallyAdded.includes(String(participant?._id || participant))
     );
 
-    const addedNames = addedUsers.map((user) => getDisplayName(user)).join(', ');
+    const addedNames = addedUsers.map((user) => getDisplayName(user)).join(", ");
 
     await this.emitSystemMessage({
       conversation,
       text: addedNames
         ? `${addedNames} đã được thêm vào nhóm`
-        : 'Thành viên đã được thêm vào nhóm',
+        : "Thành viên đã được thêm vào nhóm",
       action: CHAT_GROUP_ACTIONS.MEMBER_ADDED,
       actorId: currentUserId,
       targetUserIds: actuallyAdded,
@@ -297,10 +304,10 @@ export default class ConversationService {
 
   async removeMember(payload) {
     const { id, participantIds = [], currentUserId } = payload;
-    const targetUserId = String(participantIds?.[0] || '');
+    const targetUserId = String(participantIds?.[0] || "");
 
     if (!targetUserId) {
-      throw new AppError('participantId is required', 400);
+      throw new AppError("participantId is required", 400);
     }
 
     const conversation = await requireConversationParticipant(
@@ -314,11 +321,14 @@ export default class ConversationService {
 
     const existingIds = normalizeParticipantIds(conversation.participants || []);
     if (!existingIds.includes(targetUserId)) {
-      throw new AppError('Participant is not in this conversation', 400);
+      throw new AppError("Participant is not in this conversation", 400);
     }
 
     if (existingIds.length <= 2) {
-      throw new AppError('Cannot remove member from a group with only 2 participants left', 400);
+      throw new AppError(
+        "Cannot remove member from a group with only 2 participants left",
+        400
+      );
     }
 
     const populatedBefore = await this.reloadConversation(conversation._id);
@@ -344,7 +354,7 @@ export default class ConversationService {
       conversation,
       text: removedUser
         ? `${getDisplayName(removedUser)} đã bị xóa khỏi nhóm`
-        : 'Một thành viên đã bị xóa khỏi nhóm',
+        : "Một thành viên đã bị xóa khỏi nhóm",
       action: CHAT_GROUP_ACTIONS.MEMBER_REMOVED,
       actorId: currentUserId,
       targetUserIds: [targetUserId],
@@ -374,11 +384,11 @@ export default class ConversationService {
 
     const existingIds = normalizeParticipantIds(conversation.participants || []);
     if (!existingIds.includes(String(currentUserId))) {
-      throw new AppError('You are not a participant of this conversation', 403);
+      throw new AppError("You are not a participant of this conversation", 403);
     }
 
     if (existingIds.length <= 2) {
-      throw new AppError('Cannot leave a group with only 2 participants left', 400);
+      throw new AppError("Cannot leave a group with only 2 participants left", 400);
     }
 
     const populatedBefore = await this.reloadConversation(conversation._id);
@@ -406,7 +416,7 @@ export default class ConversationService {
       conversation,
       text: leavingUser
         ? `${getDisplayName(leavingUser)} đã rời nhóm`
-        : 'Một thành viên đã rời nhóm',
+        : "Một thành viên đã rời nhóm",
       action: CHAT_GROUP_ACTIONS.MEMBER_LEFT,
       actorId: currentUserId,
       targetUserIds: [currentUserId],

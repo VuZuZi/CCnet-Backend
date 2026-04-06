@@ -1,17 +1,17 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 import {
   CHAT_GROUP_ACTIONS,
   CHAT_GROUP_EVENT_KIND,
   CHAT_MESSAGE_STATUS,
   CHAT_MESSAGE_TYPES,
-} from '../chat.constants.js';
+} from "../chat.constants.js";
 
 const linkSchema = new mongoose.Schema(
   {
     url: { type: String, required: true, trim: true },
-    title: { type: String, default: '', trim: true },
-    description: { type: String, default: '', trim: true },
-    thumbnail: { type: String, default: '' },
+    title: { type: String, default: "", trim: true },
+    description: { type: String, default: "", trim: true },
+    thumbnail: { type: String, default: "" },
   },
   { _id: false }
 );
@@ -19,10 +19,15 @@ const linkSchema = new mongoose.Schema(
 const attachmentSchema = new mongoose.Schema(
   {
     url: { type: String, required: true },
-    filename: { type: String, default: '' },
-    mimetype: { type: String, default: '' },
-    originalName: { type: String, default: '' },
+    publicId: { type: String, default: "" },
+    resourceType: { type: String, default: "" },
+    format: { type: String, default: "" },
+    filename: { type: String, default: "" },
+    mimetype: { type: String, default: "" },
+    originalName: { type: String, default: "" },
     size: { type: Number, default: 0 },
+    width: { type: Number, default: null },
+    height: { type: Number, default: null },
   },
   { _id: false }
 );
@@ -31,7 +36,7 @@ const seenBySchema = new mongoose.Schema(
   {
     userId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       required: true,
     },
     seenAt: {
@@ -46,7 +51,7 @@ const reactionSchema = new mongoose.Schema(
   {
     userId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       required: true,
     },
     emoji: {
@@ -76,14 +81,14 @@ const systemMetaSchema = new mongoose.Schema(
     },
     actorId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       default: null,
     },
     targetUserIds: {
       type: [
         {
           type: mongoose.Schema.Types.ObjectId,
-          ref: 'User',
+          ref: "User",
         },
       ],
       default: [],
@@ -96,12 +101,12 @@ const messageSchema = new mongoose.Schema(
   {
     conversationId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Conversation',
+      ref: "Conversation",
       required: true,
     },
     senderId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       default: null,
     },
     messageType: {
@@ -111,7 +116,7 @@ const messageSchema = new mongoose.Schema(
     },
     text: {
       type: String,
-      default: '',
+      default: "",
       trim: true,
     },
     attachments: {
@@ -124,7 +129,7 @@ const messageSchema = new mongoose.Schema(
     },
     replyTo: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Message',
+      ref: "Message",
       default: null,
     },
     reactions: {
@@ -158,6 +163,6 @@ const messageSchema = new mongoose.Schema(
 
 messageSchema.index({ conversationId: 1, createdAt: 1 });
 
-const Message = mongoose.model('Message', messageSchema);
+const Message = mongoose.model("Message", messageSchema);
 
 export default Message;

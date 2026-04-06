@@ -29,25 +29,22 @@ export const submitOrganizerRequestSchema = z
       .optional()
       .or(z.literal("")),
     locationSnapshot: z.string().max(150).optional().default(""),
-
     organizationName: z.string().min(2).max(200),
     organizationType: z.enum(Object.values(ORGANIZATION_TYPE)),
     organizationWebsite: z
       .union([z.string().url("Website không hợp lệ"), z.literal("")])
       .optional()
       .default(""),
-
     idCardFront: documentPayloadSchema,
     idCardBack: documentPayloadSchema,
     businessLicense: z.preprocess(
-  (v) => (v === null ? undefined : v),
-  documentPayloadSchema.optional()
-),
-bankProof: z.preprocess(
-  (v) => (v === null ? undefined : v),
-  documentPayloadSchema.optional()
-),
-
+      (value) => (value === null ? undefined : value),
+      documentPayloadSchema.optional()
+    ),
+    bankProof: z.preprocess(
+      (value) => (value === null ? undefined : value),
+      documentPayloadSchema.optional()
+    ),
     bankName: z.string().min(2).max(200),
     bankAccountNumber: z
       .string()
@@ -55,7 +52,6 @@ bankProof: z.preprocess(
     bankAccountName: z
       .string()
       .regex(ACCOUNT_NAME_REGEX, "Tên chủ tài khoản không hợp lệ"),
-
     notes: z.string().max(1000).optional().default(""),
   })
   .strict();

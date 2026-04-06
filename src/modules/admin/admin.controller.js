@@ -21,7 +21,6 @@ class AdminController {
     }
   };
 
-
   banUser = async (req, res, next) => {
     try {
       const user = await this.adminService.toggleUserBan(req.params.id);
@@ -78,6 +77,7 @@ class AdminController {
       const updated = await this.adminService.updateProjectStatus(
         req.params.id,
         status,
+        req.user?.userId,
       );
       res.json({ status: "success", data: updated });
     } catch (e) {

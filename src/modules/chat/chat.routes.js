@@ -50,6 +50,5 @@ router.patch('/messages/:id/react', authenticate, execute('reactMessage'));
 router.patch('/messages/:id/unsend', authenticate, execute('unsendMessage'));
 
 router.patch('/read/:id', authenticate, execute('markAsRead'));
-router.get('/files/:filename', authenticate, execute('downloadFile'));
 
 export default router;

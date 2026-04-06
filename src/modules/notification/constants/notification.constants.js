@@ -1,0 +1,40 @@
+export const NOTIFICATION_TYPES = Object.freeze({
+  FOLLOW_CREATED: 'follow_created',
+  PROJECT_UPDATED: 'project_updated',
+  ORGANIZER_REQUEST_SUBMITTED: 'organizer_request_submitted',
+  ORGANIZER_REQUEST_UPDATED: 'organizer_request_updated',
+  SYSTEM_ANNOUNCEMENT: 'system_announcement',
+});
+
+export const NOTIFICATION_CHANNELS = Object.freeze({
+  IN_APP: 'in_app',
+});
+
+export const NOTIFICATION_SSE_EVENTS = Object.freeze({
+  CONNECTED: 'notification.connected',
+  CREATED: 'notification.created',
+  READ: 'notification.read',
+  READ_ALL: 'notification.read_all',
+  DELETED: 'notification.deleted',
+  UNREAD_COUNT: 'notification.unread_count',
+  HEARTBEAT: 'notification.heartbeat',
+});
+
+export const NOTIFICATION_DEFAULTS = Object.freeze({
+  PAGE: 1,
+  LIMIT: 20,
+  MAX_LIMIT: 50,
+  SSE_RETRY_MS: 10000,
+  SSE_HEARTBEAT_MS: 25000,
+  SSE_SESSION_TTL_MS: 60 * 1000,
+  SSE_COOKIE_NAME: 'notification_stream',
+  SSE_COOKIE_PATH: '/api/v1/notifications/stream/events',
+  BROADCAST_BATCH_SIZE: 50,
+});
+
+export const DEFAULT_NOTIFICATION_SETTINGS = Object.freeze({
+  systemEnabled: true,
+  followEnabled: true,
+  projectEnabled: true,
+  organizerRequestEnabled: true,
+});

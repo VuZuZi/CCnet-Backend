@@ -3,6 +3,7 @@ import {
   CHAT_ASSET_TYPES,
   CHAT_CONVERSATION_TYPES,
 } from './chat.constants.js';
+import { CHAT_UPLOAD_LIMITS } from './chat.upload.constants.js';
 
 const objectId = Joi.string().length(24).hex();
 
@@ -42,7 +43,11 @@ export const sendMessageSchema = Joi.object({
   conversationId: objectId.required(),
   text: Joi.string().allow('').optional(),
   replyTo: objectId.allow(null, '').optional(),
-  attachmentsCount: Joi.number().integer().min(0).default(0),
+  attachmentsCount: Joi.number()
+    .integer()
+    .min(0)
+    .max(CHAT_UPLOAD_LIMITS.maxFiles)
+    .default(0),
 })
   .custom((value, helpers) => {
     const hasText = !!String(value.text || '').trim();
@@ -69,10 +74,6 @@ export const unsendMessageSchema = Joi.object({
 
 export const markAsReadSchema = Joi.object({
   id: objectId.required(),
-});
-
-export const downloadFileSchema = Joi.object({
-  filename: Joi.string().required(),
 });
 
 export const updateConversationSchema = Joi.object({

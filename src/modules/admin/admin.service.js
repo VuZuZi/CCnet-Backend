@@ -1,14 +1,14 @@
 import Post from "../communitypost/post.model.js";
 import Report from "../report/report.model.js";
 import User from "../user/user.model.js";
-import Notification from "../notification/notification.model.js";
 import Project from "../project/project.model.js";
 import { PROJECT_STATUS } from "../project/project.constant.js";
+import { eventBus, DOMAIN_EVENTS } from "../../config/notification.js";
 
 class AdminService {
-  constructor({ adminRepository, notificationRepository }) {
+  constructor({ adminRepository }) {
     this.adminRepository = adminRepository;
-    this.notificationRepository = notificationRepository;
+    this.notificationEventBus = eventBus;
   }
 
   getDashboardStats = async () => {
@@ -22,7 +22,6 @@ class AdminService {
   getProjects = async () => {
     return await Project.aggregate([
       {
-        // 1. Join với bảng users để lấy thông tin organizer
         $lookup: {
           from: "users",
           localField: "organizerId",
@@ -32,7 +31,6 @@ class AdminService {
       },
       { $unwind: "$organizer" },
       {
-        // 2. Join ngược lại với bảng projects để đếm số lượng dự án của organizer đó
         $lookup: {
           from: "projects",
           localField: "organizerId",
@@ -55,7 +53,51 @@ class AdminService {
     ]);
   };
 
-  updateProjectStatus = async (projectId, status) => {
+  _buildProjectStatusNotificationMessage(projectTitle, status) {
+    if (status === PROJECT_STATUS.ACTIVE) {
+      return {
+        title: "Project approved",
+        message: `Your project "${projectTitle}" has been approved by admin.`,
+      };
+    }
+
+    if (status === PROJECT_STATUS.CANCELLED) {
+      return {
+        title: "Project rejected",
+        message: `Your project "${projectTitle}" has been rejected by admin.`,
+      };
+    }
+
+    return {
+      title: "Project status updated",
+      message: `Your project "${projectTitle}" status has been updated to ${status}.`,
+    };
+  }
+
+  _emitProjectStatusUpdated = async ({ project, actorId }) => {
+    if (!project?.organizerId) return;
+    if (!this.notificationEventBus || typeof this.notificationEventBus.emit !== "function") {
+      return;
+    }
+
+    const { title, message } = this._buildProjectStatusNotificationMessage(
+      project.title,
+      project.status,
+    );
+
+    await this.notificationEventBus.emit(DOMAIN_EVENTS.PROJECT_STATUS_UPDATED, {
+      recipientIds: [String(project.organizerId)],
+      actorId,
+      projectId: project._id,
+      projectName: project.title,
+      status: project.status,
+      title,
+      message,
+      actionUrl: `/projects/${project._id}`,
+    });
+  };
+
+  updateProjectStatus = async (projectId, status, adminId = null) => {
     if (!status) throw new Error("Status is required");
 
     const normalized = String(status).trim().toUpperCase();
@@ -77,6 +119,12 @@ class AdminService {
       .exec();
 
     if (!project) throw new Error("Project not found");
+
+    await this._emitProjectStatusUpdated({
+      project,
+      actorId: adminId,
+    });
+
     return project;
   };
 
@@ -126,24 +174,6 @@ class AdminService {
 
     await report.save();
     return report;
-  };
-  createSystemNotification = async (notificationData) => {
-    const { title, message, recipient } = notificationData;
-
-    if (!title || !message) {
-      throw new Error("Title and message are required to send a notification.");
-    }
-
-    const notification = new Notification({
-      title,
-      message,
-      recipient: recipient || "all",
-      sender: "system",
-    });
-
-    await notification.save();
-
-    return notification;
   };
 }
 

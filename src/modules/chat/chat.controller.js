@@ -1,4 +1,3 @@
-import path from 'path';
 import { validateRequest } from './utils/validate.util.js';
 import {
   createConversationSchema,
@@ -8,7 +7,6 @@ import {
   reactMessageSchema,
   unsendMessageSchema,
   markAsReadSchema,
-  downloadFileSchema,
   updateConversationSchema,
   manageMembersSchema,
   leaveConversationSchema,
@@ -28,10 +26,11 @@ import {
   mapReactMessageRequest,
   mapUnsendMessageRequest,
   mapMarkAsReadRequest,
-  mapDownloadFileRequest,
 } from './mappers/request.mapper.js';
-import { mapUploadedAttachments } from './mappers/attachment.mapper.js';
-
+import {
+  assertValidChatUploadFiles,
+  assertValidGroupAvatarFile,
+} from './chat.upload.constants.js';
 
 function ok(res, data, message) {
   return res.status(200).json({
@@ -54,12 +53,10 @@ export default class ChatController {
     conversationService,
     messageService,
     readService,
-    fileService,
   }) {
     this.conversationService = conversationService;
     this.messageService = messageService;
     this.readService = readService;
-    this.fileService = fileService;
   }
 
   getCurrentUserId(req) {
@@ -100,6 +97,8 @@ export default class ChatController {
 
   async createConversation(req, res, next) {
     try {
+      assertValidGroupAvatarFile(req.file || null);
+
       const mapped = mapCreateConversationRequest(req);
       const validated = validateRequest(createConversationSchema, mapped);
 
@@ -117,6 +116,8 @@ export default class ChatController {
 
   async updateConversation(req, res, next) {
     try {
+      assertValidGroupAvatarFile(req.file || null);
+
       const mapped = mapUpdateConversationRequest(req);
       const validated = validateRequest(updateConversationSchema, mapped);
 
@@ -205,13 +206,14 @@ export default class ChatController {
   async sendMessage(req, res, next) {
     try {
       const uploadedFiles = extractUploadedMessageFiles(req);
+      assertValidChatUploadFiles(uploadedFiles);
+
       const validationInput = mapSendMessageValidationRequest(req, uploadedFiles);
       const validated = validateRequest(sendMessageSchema, validationInput);
 
-      const attachments = mapUploadedAttachments(uploadedFiles);
       const payload = mapSendMessageServicePayload(
         validated,
-        attachments,
+        uploadedFiles,
         this.getCurrentUserId(req)
       );
 
@@ -251,34 +253,17 @@ export default class ChatController {
   }
 
   async markAsRead(req, res, next) {
-  try {
-    const mapped = mapMarkAsReadRequest(req);
-    const validated = validateRequest(markAsReadSchema, mapped);
-
-    const data = await this.readService.markAsRead({
-      conversationId: validated.id,
-      currentUserId: this.getCurrentUserId(req),
-      reader: this.getReader(req),
-    });
-
-    return ok(res, data, CHAT_RESPONSE_MESSAGES.MARKED_AS_READ);
-  } catch (error) {
-    next(error);
-  }
-}
-
-  async downloadFile(req, res, next) {
     try {
-      const mapped = mapDownloadFileRequest(req);
-      const validated = validateRequest(downloadFileSchema, mapped);
+      const mapped = mapMarkAsReadRequest(req);
+      const validated = validateRequest(markAsReadSchema, mapped);
 
-      const filePath = this.fileService.getDownloadPath(validated.filename);
-
-      return res.download(filePath, path.basename(filePath), (err) => {
-        if (err && !res.headersSent) {
-          next(err);
-        }
+      const data = await this.readService.markAsRead({
+        conversationId: validated.id,
+        currentUserId: this.getCurrentUserId(req),
+        reader: this.getReader(req),
       });
+
+      return ok(res, data, CHAT_RESPONSE_MESSAGES.MARKED_AS_READ);
     } catch (error) {
       next(error);
     }
