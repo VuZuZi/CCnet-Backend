@@ -1,6 +1,6 @@
 import { NotificationModel } from '../models/notification.model.js';
 
-export class NotificationRepository {
+class NotificationRepository {
   async create(payload) {
     return NotificationModel.create(payload);
   }
@@ -58,3 +58,6 @@ export class NotificationRepository {
     return NotificationModel.findOneAndDelete({ _id: id, recipientId }).lean();
   }
 }
+
+export { NotificationRepository };
+export default NotificationRepository;
