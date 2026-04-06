@@ -8,7 +8,10 @@ class OrganizerRequestController {
 
   submitMyRequest = async (req, res, next) => {
     try {
-      const request = await this.organizerRequestService.submitMyRequest(req.user.userId, req.body);
+      const request = await this.organizerRequestService.submitMyRequest(
+        req.user.userId,
+        req.body
+      );
       return ApiResponse.created(res, { request }, 'Gửi đơn đăng ký Organizer thành công');
     } catch (error) {
       next(error);
@@ -44,7 +47,10 @@ class OrganizerRequestController {
 
   approveRequest = async (req, res, next) => {
     try {
-      const request = await this.organizerRequestService.approveRequest(req.params.id, req.user.userId);
+      const request = await this.organizerRequestService.approveRequest(
+        req.params.id,
+        req.user.userId
+      );
       return ApiResponse.success(res, { request }, 'Duyệt hồ sơ Organizer thành công');
     } catch (error) {
       next(error);

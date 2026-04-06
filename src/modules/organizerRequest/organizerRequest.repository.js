@@ -9,7 +9,9 @@ class OrganizerRequestRepository {
     return OrganizerRequest.findOne({
       userId,
       status: 'PENDING',
-    }).lean().exec();
+    })
+      .lean()
+      .exec();
   }
 
   async findLatestByUserId(userId) {

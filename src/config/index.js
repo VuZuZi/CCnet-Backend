@@ -1,4 +1,3 @@
-// src/config/index.js
 import dotenv from 'dotenv';
 import Joi from 'joi';
 
@@ -8,34 +7,34 @@ const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   PORT: Joi.number().default(5000),
 
-  // MongoDB
   MONGODB_URI: Joi.string().required().description('Mongo DB URL'),
 
-  // JWT
   JWT_ACCESS_SECRET: Joi.string().required(),
   JWT_REFRESH_SECRET: Joi.string().required(),
   JWT_ACCESS_EXPIRE: Joi.string().default('5m'),
   JWT_REFRESH_EXPIRE_DAYS: Joi.number().default(7),
 
-  // Redis
   REDIS_HOST: Joi.string().default('localhost'),
   REDIS_PORT: Joi.number().default(6379),
   REDIS_PASSWORD: Joi.string().allow('').optional(),
 
-  // Cloudinary
   CLOUDINARY_CLOUD_NAME: Joi.string().optional(),
   CLOUDINARY_API_KEY: Joi.string().optional(),
   CLOUDINARY_API_SECRET: Joi.string().optional(),
 
-  // Google
   GOOGLE_CLIENT_ID: Joi.string().required(),
 
-  // Email
   EMAIL_HOST: Joi.string().default('smtp.gmail.com'),
   EMAIL_PORT: Joi.number().default(587),
   EMAIL_USER: Joi.string().required(),
   EMAIL_PASSWORD: Joi.string().required(),
   EMAIL_FROM: Joi.string().optional(),
+
+  CORS_ORIGIN: Joi.string().optional(),
+  REDIS_URL: Joi.string().allow('', null).optional(),
+  EMAIL_SECURE: Joi.string().valid('true', 'false').optional(),
+
+  NOTIFICATION_STREAM_CROSS_SITE: Joi.string().valid('true', 'false').default('false'),
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -45,9 +44,9 @@ if (error) {
 }
 
 const parseCorsOrigins = () => {
-  const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:3000';
+  const corsOrigin = envVars.CORS_ORIGIN || 'http://localhost:3000';
   if (corsOrigin.includes(',')) {
-    return corsOrigin.split(',').map(origin => origin.trim());
+    return corsOrigin.split(',').map((origin) => origin.trim());
   }
   return [corsOrigin];
 };
@@ -63,12 +62,15 @@ export const config = {
       minPoolSize: 20,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
-      family: 4
-    }
+      family: 4,
+    },
   },
 
   redis: {
-    url: process.env.REDIS_URL || null,
+    url: envVars.REDIS_URL || null,
+    host: envVars.REDIS_HOST,
+    port: envVars.REDIS_PORT,
+    password: envVars.REDIS_PASSWORD || '',
   },
 
   jwt: {
@@ -94,7 +96,7 @@ export const config = {
     user: envVars.EMAIL_USER,
     password: envVars.EMAIL_PASSWORD,
     from: envVars.EMAIL_FROM || envVars.EMAIL_USER,
-    secure: process.env.EMAIL_SECURE === 'true',
+    secure: envVars.EMAIL_SECURE === 'true',
   },
 
   cors: {
@@ -102,5 +104,9 @@ export const config = {
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  }
+  },
+
+  notification: {
+    streamCrossSite: envVars.NOTIFICATION_STREAM_CROSS_SITE === 'true',
+  },
 };

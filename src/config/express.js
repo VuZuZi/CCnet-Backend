@@ -3,10 +3,11 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
-import path from 'path';
 import { config } from './index.js';
 
 export const configureMiddleware = (app) => {
+  app.set('trust proxy', 1);
+
   app.use(
     helmet({
       contentSecurityPolicy: false,
@@ -18,26 +19,41 @@ export const configureMiddleware = (app) => {
 
   app.use(
     cors({
-      origin: config.cors.origin,
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+
+        const allowedOrigins = config.cors?.origin || [];
+        const isAllowed = allowedOrigins.some(
+          (allowedOrigin) =>
+            allowedOrigin === origin || origin.includes('vercel.app')
+        );
+
+        if (isAllowed) {
+          return callback(null, true);
+        }
+
+        return callback(new Error('CORS not allowed'));
+      },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     })
   );
 
+  app.use((req, res, next) => {
+    res.setHeader('X-Accel-Buffering', 'no');
+    next();
+  });
+
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
   app.use(cookieParser());
-
-  app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
 
   if (config.env === 'development') {
     app.use(morgan('dev'));
   } else {
     app.use(morgan('combined'));
   }
-
-  app.set('trust proxy', 1);
 };
 
 export const configureSystemRoutes = (app) => {

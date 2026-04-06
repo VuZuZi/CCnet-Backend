@@ -3,42 +3,68 @@ import Follow from "./follow.model.js";
 class FollowRepository {
   async exists(followerId, followingId) {
     const result = await Follow.exists({ followerId, followingId });
-    return !!result;
+    return Boolean(result);
   }
 
   async create(followerId, followingId) {
-    return await Follow.create({ followerId, followingId });
+    return Follow.create({ followerId, followingId });
   }
 
   async delete(followerId, followingId) {
-    return await Follow.deleteOne({ followerId, followingId });
+    return Follow.deleteOne({ followerId, followingId });
   }
 
   async countFollowers(userId) {
-    return await Follow.countDocuments({ followingId: userId });
+    return Follow.countDocuments({ followingId: userId });
   }
 
   async countFollowing(userId) {
-    return await Follow.countDocuments({ followerId: userId });
+    return Follow.countDocuments({ followerId: userId });
   }
+
   async findFollowingIds(followerId) {
     const follows = await Follow.find({ followerId })
       .select("followingId")
       .lean()
       .exec();
-    return follows.map((f) => f.followingId);
+
+    return follows.map((item) => item.followingId);
   }
+
   async findFollowingUsers(followerId, limit = 50, cursor = null) {
+    const normalizedLimit = Number(limit) > 0 ? Number(limit) : 50;
     const query = { followerId };
 
     if (cursor) {
       query._id = { $lt: cursor };
     }
 
-    return await Follow.find(query)
+    return Follow.find(query)
       .sort({ _id: -1 })
-      .limit(limit)
-      .populate({ path: "followingId", select: "_id fullName email avatar" })
+      .limit(normalizedLimit)
+      .populate({
+        path: "followingId",
+        select: "_id fullName email avatar username",
+      })
+      .lean()
+      .exec();
+  }
+
+  async findFollowers(userId, limit = 50, cursor = null) {
+    const normalizedLimit = Number(limit) > 0 ? Number(limit) : 50;
+    const query = { followingId: userId };
+
+    if (cursor) {
+      query._id = { $lt: cursor };
+    }
+
+    return Follow.find(query)
+      .sort({ _id: -1 })
+      .limit(normalizedLimit)
+      .populate({
+        path: "followerId",
+        select: "_id fullName email avatar username",
+      })
       .lean()
       .exec();
   }

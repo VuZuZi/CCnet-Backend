@@ -10,8 +10,12 @@ import {
 } from './organizerRequest.validation.js';
 
 const organizerRequestRepository = new OrganizerRequestRepository();
-const organizerRequestService = new OrganizerRequestService({ organizerRequestRepository });
-const organizerRequestController = new OrganizerRequestController({ organizerRequestService });
+const organizerRequestService = new OrganizerRequestService({
+  organizerRequestRepository,
+});
+const organizerRequestController = new OrganizerRequestController({
+  organizerRequestService,
+});
 
 const execute = (action) => (req, res, next) => {
   return organizerRequestController[action](req, res, next);
@@ -20,12 +24,7 @@ const execute = (action) => (req, res, next) => {
 export const organizerRequestUserRouter = Router();
 export const organizerRequestAdminRouter = Router();
 
-
-organizerRequestUserRouter.get(
-  '/me',
-  authenticate,
-  execute('getMyLatestRequest')
-);
+organizerRequestUserRouter.get('/me', authenticate, execute('getMyLatestRequest'));
 
 organizerRequestUserRouter.post(
   '/',

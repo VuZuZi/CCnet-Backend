@@ -88,12 +88,12 @@ export function mapSendMessageValidationRequest(req, uploadedFiles = []) {
   };
 }
 
-export function mapSendMessageServicePayload(validatedPayload, attachments, currentUserId) {
+export function mapSendMessageServicePayload(validatedPayload, uploadedFiles, currentUserId) {
   return {
     conversationId: validatedPayload.conversationId,
     text: validatedPayload.text,
     replyTo: validatedPayload.replyTo || null,
-    attachments,
+    uploadedFiles: Array.isArray(uploadedFiles) ? uploadedFiles : [],
     currentUserId,
   };
 }
@@ -114,11 +114,5 @@ export function mapUnsendMessageRequest(req) {
 export function mapMarkAsReadRequest(req) {
   return {
     id: req.params?.id,
-  };
-}
-
-export function mapDownloadFileRequest(req) {
-  return {
-    filename: req.params?.filename,
   };
 }

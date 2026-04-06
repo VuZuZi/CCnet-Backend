@@ -2,23 +2,26 @@ import AppError from '../../core/AppError.js';
 import { PROJECT_STATUS, MILESTONE_STATUS } from './project.constant.js';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
+import User from '../user/user.model.js';
+import { eventBus, DOMAIN_EVENTS } from '../../config/notification.js';
 
 class ProjectService {
     constructor({
-        projectRepository,
-        mediaRepository,
-        cloudinaryProvider,
-        jobQueue,
-        transactionManager,
-        redis
-    }) {
-        this.projectRepository = projectRepository;
-        this.mediaRepository = mediaRepository;
-        this.cloudinaryProvider = cloudinaryProvider;
-        this.jobQueue = jobQueue;
-        this.transactionManager = transactionManager;
-        this.redis = redis;
-    }
+    projectRepository,
+    mediaRepository,
+    cloudinaryProvider,
+    jobQueue,
+    transactionManager,
+    redis
+}) {
+    this.projectRepository = projectRepository;
+    this.mediaRepository = mediaRepository;
+    this.cloudinaryProvider = cloudinaryProvider;
+    this.jobQueue = jobQueue;
+    this.transactionManager = transactionManager;
+    this.redis = redis;
+    this.notificationEventBus = eventBus;
+}
 
 
     async _processMediaPayload(mediaArray, organizerId, context) {
@@ -72,96 +75,31 @@ class ProjectService {
         };
     }
 
-    // _calculateVolunteerStats(projectData) {
-    //     const stats = projectData.stats || {};
-    //     let targetVolunteers = 0;
-    //     let isVolunteerFull = false;
-    //     let volunteerRoles = projectData.volunteerRoles || [];
+    async _emitProjectSubmittedForApproval(project, organizerId) {
+        if (!project?._id) return;
+        if (!this.notificationEventBus || typeof this.notificationEventBus.emit !== 'function') {
+            return;
+        }
 
-    //     if (projectData.needsVolunteers && volunteerRoles.length > 0) {
-    //         targetVolunteers = volunteerRoles.reduce((acc, curr) => acc + (Number(curr.quantity) || 0), 0);
-    //         isVolunteerFull = (stats.currentVolunteers || 0) >= targetVolunteers;
-    //     } else {
-    //         volunteerRoles = [];
-    //         projectData.needsVolunteers = false;
-    //     }
+        const adminUsers = await User.find({ role: { $regex: /^admin$/i } })
+            .select('_id')
+            .lean()
+            .exec();
 
-    //     return { targetVolunteers, isVolunteerFull, volunteerRoles };
-    // }
+        const recipientIds = adminUsers.map((user) => String(user._id)).filter(Boolean);
+        if (!recipientIds.length) return;
 
-    // async createDraftProject(organizerId, projectData) {
-    //         let coverMediaData = null;
-    //         const documentMediaIds = [];
-
-    //         try {
-    //             const coverMediaList = Array.isArray(projectData.coverMedia) ? projectData.coverMedia : [];
-    //             const documentsList = Array.isArray(projectData.documents) ? projectData.documents : [];
-
-    //             const volunteerLogic = this._calculateVolunteerStats(projectData);
-
-    //             const result = await this.transactionManager.runInTransaction(async (session) => {
-    //                 const mediaDocsToInsert = [];
-
-    //                 if (coverMediaList.length > 0) {
-    //                     const cover = coverMediaList[0];
-    //                     mediaDocsToInsert.push({
-    //                         originalName: cover.originalName || 'cover_image',
-    //                         url: cover.url,
-    //                         publicId: cover.publicId,
-    //                         mimetype: cover.mimetype || 'image/jpeg',
-    //                         size: cover.size || 0,
-    //                         width: cover.width || 0,
-    //                         height: cover.height || 0,
-    //                         uploadedBy: organizerId,
-    //                         context: 'project_cover'
-    //                     });
-    //                 }
-
-    //                 documentsList.forEach(doc => {
-    //                     mediaDocsToInsert.push({
-    //                         originalName: doc.originalName || 'document',
-    //                         url: doc.url,
-    //                         publicId: doc.publicId,
-    //                         mimetype: doc.mimetype || 'application/pdf',
-    //                         size: doc.size || 0,
-    //                         width: doc.width || 0,
-    //                         height: doc.height || 0,
-    //                         uploadedBy: organizerId,
-    //                         context: 'project_document'
-    //                     });
-    //                 });
-
-    //                 if (mediaDocsToInsert.length > 0) {
-    //                     const insertedMedia = await this.mediaRepository.createMany(mediaDocsToInsert, session);
-    //                     insertedMedia.forEach((media) => {
-    //                         if (media.context === 'project_cover') {
-    //                             coverMediaData = { url: media.url, publicId: media.publicId, mediaType: media.mimetype.startsWith('video') ? 'video' : 'image' };
-    //                         } else {
-    //                             documentMediaIds.push(media._id);
-    //                         }
-    //                     });
-    //                 }
-
-    //                 const newProjectData = {
-    //                     ...projectData,
-    //                     ...volunteerLogic,
-    //                     stats: { ...projectData.stats, targetVolunteers: volunteerLogic.targetVolunteers },
-    //                     organizerId,
-    //                     coverMedia: coverMediaData || undefined,
-    //                     documents: documentMediaIds,
-    //                     status: PROJECT_STATUS.DRAFT,
-    //                     currentAmount: 0
-    //                 };
-
-    //                 return await this.projectRepository.create(newProjectData, session);
-    //             });
-
-    //             return result;
-
-    //         } catch (error) {
-    //             throw new AppError(`Tạo dự án thất bại: ${error.message}`, 400);
-    //         }
-    //     }
+        await this.notificationEventBus.emit(DOMAIN_EVENTS.PROJECT_SUBMITTED_FOR_APPROVAL, {
+    recipientIds,
+    actorId: organizerId,
+    projectId: project._id,
+    projectName: project.title,
+    status: project.status,
+    title: 'New project approval request',
+    message: `Project "${project.title}" has been submitted for admin review.`,
+    actionUrl: `/admin/projects/${project._id}?highlight=1`,
+});
+    }
 
     async submitForApproval(projectId, organizerId) {
         const project = await this.projectRepository.findById(projectId);
@@ -196,6 +134,8 @@ class ProjectService {
             title: updatedProject.title,
             description: updatedProject.description
         }).catch(err => console.error(`[Queue Error] Project ${projectId}:`, err));
+
+        await this._emitProjectSubmittedForApproval(updatedProject, organizerId);
 
         return updatedProject;
     }

@@ -1,16 +1,12 @@
 import express from "express";
-import cors from "cors";
-import helmet from "helmet";
-import morgan from "morgan";
-import cookieParser from "cookie-parser";
 
-import { config } from "./config/index.js";
 import {
   configureMiddleware,
   configureSystemRoutes,
 } from "./config/express.js";
 import { configureRoutes } from "./config/routes.js";
 import { initializeContainer, registerModule } from "./container/index.js";
+import { createConfiguredNotificationModule } from "./config/notification.js";
 
 import { initPostWorkers } from "./modules/communitypost/post.worker.js";
 import { initFollowWorkers } from "./modules/follow/follow.worker.js";
@@ -22,30 +18,7 @@ export const createApp = async () => {
 
   initializeContainer();
 
-  app.use(helmet());
-  app.use(
-    cors({
-      origin: (origin, callback) => {
-        if (!origin) return callback(null, true);
-        const allowedOrigins = config.cors?.origin || [];
-        const isAllowed = allowedOrigins.some(
-          (o) => o === origin || origin.includes("vercel.app"),
-        );
-        if (isAllowed) {
-          callback(null, true);
-        } else {
-          callback(new Error("CORS not allowed"));
-        }
-      },
-      credentials: config.cors?.credentials,
-      methods: config.cors?.methods,
-      allowedHeaders: config.cors?.allowedHeaders,
-    }),
-  );
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
-  app.use(cookieParser());
-  app.use(morgan("dev"));
+  const notificationModule = await createConfiguredNotificationModule();
 
   if (typeof configureMiddleware === "function") {
     configureMiddleware(app);
@@ -69,11 +42,19 @@ export const createApp = async () => {
     configureSystemRoutes(app);
   }
 
-  configureRoutes(app);
+  configureRoutes(app, { notificationModule });
 
   app.use((err, req, res, next) => {
     console.error("Error:", err.message);
-    res.status(err.status || 500).json({
+
+    const statusCode =
+      Number.isInteger(err?.statusCode)
+        ? err.statusCode
+        : Number.isInteger(err?.status)
+          ? err.status
+          : 500;
+
+    res.status(statusCode).json({
       success: false,
       message: err.message || "Internal server error",
     });

@@ -1,17 +1,21 @@
-import AppError from '../../../core/AppError.js';
-import { normalizeParticipantIds } from '../utils/participant.util.js';
-import { saveConversationDocument } from '../utils/conversation.util.js';
-import { requireConversationParticipant } from './helpers/conversation-access.helper.js';
+import AppError from "../../../core/AppError.js";
+import { normalizeParticipantIds } from "../utils/participant.util.js";
+import { saveConversationDocument } from "../utils/conversation.util.js";
+import { requireConversationParticipant } from "./helpers/conversation-access.helper.js";
+import { CHAT_CLOUDINARY_FOLDERS } from "../chat.upload.constants.js";
+import { mapCloudinaryAttachment } from "../mappers/cloudinary-attachment.mapper.js";
 
 export default class MessageService {
   constructor({
     conversationRepository,
     messageRepository,
     publishService,
+    cloudinaryProvider,
   }) {
     this.conversationRepository = conversationRepository;
     this.messageRepository = messageRepository;
     this.publishService = publishService;
+    this.cloudinaryProvider = cloudinaryProvider;
   }
 
   async getAssets(payload) {
@@ -42,11 +46,29 @@ export default class MessageService {
     return this.messageRepository.findConversationMessages(id);
   }
 
+  async uploadAttachments(uploadedFiles = []) {
+    const safeFiles = Array.isArray(uploadedFiles) ? uploadedFiles : [];
+    if (!safeFiles.length) return [];
+
+    const uploaded = await Promise.all(
+      safeFiles.map(async (file) => {
+        const result = await this.cloudinaryProvider.uploadImage(
+          file.buffer,
+          CHAT_CLOUDINARY_FOLDERS.attachments
+        );
+
+        return mapCloudinaryAttachment(file, result);
+      })
+    );
+
+    return uploaded;
+  }
+
   async sendMessage(payload) {
     const {
       conversationId,
-      text = '',
-      attachments = [],
+      text = "",
+      uploadedFiles = [],
       replyTo = null,
       currentUserId,
     } = payload;
@@ -62,24 +84,29 @@ export default class MessageService {
     if (replyTo) {
       const replyMessage = await this.messageRepository.findByIdLean(replyTo);
 
-      if (!replyMessage || String(replyMessage.conversationId) !== String(conversationId)) {
-        throw new AppError('Reply target is invalid', 400);
+      if (
+        !replyMessage ||
+        String(replyMessage.conversationId) !== String(conversationId)
+      ) {
+        throw new AppError("Reply target is invalid", 400);
       }
 
       replyToMessageId = replyTo;
     }
 
+    const attachments = await this.uploadAttachments(uploadedFiles);
+
     const createdMessage = await this.messageRepository.create({
       conversationId,
       senderId: currentUserId,
-      text: String(text || '').trim(),
+      text: String(text || "").trim(),
       attachments,
       links: [],
       replyTo: replyToMessageId,
       reactions: [],
       seenBy: [],
-      status: 'sent',
-      messageType: 'user',
+      status: "sent",
+      messageType: "user",
       isUnsent: false,
     });
 
@@ -89,7 +116,9 @@ export default class MessageService {
       touchUpdatedAt: true,
     });
 
-    const populatedMessage = await this.messageRepository.findByIdPopulated(createdMessage._id);
+    const populatedMessage = await this.messageRepository.findByIdPopulated(
+      createdMessage._id
+    );
 
     await this.publishService.publishNewMessage({
       conversationId,
@@ -105,7 +134,7 @@ export default class MessageService {
 
     const message = await this.messageRepository.findById(id);
     if (!message) {
-      throw new AppError('Message not found', 404);
+      throw new AppError("Message not found", 404);
     }
 
     const conversation = await requireConversationParticipant(
@@ -116,8 +145,8 @@ export default class MessageService {
 
     const existingIndex = (message.reactions || []).findIndex(
       (item) =>
-        String(item?.userId || '') === String(currentUserId) &&
-        String(item?.emoji || '') === String(emoji || '')
+        String(item?.userId || "") === String(currentUserId) &&
+        String(item?.emoji || "") === String(emoji || "")
     );
 
     if (existingIndex >= 0) {
@@ -126,7 +155,7 @@ export default class MessageService {
       message.reactions = Array.isArray(message.reactions) ? message.reactions : [];
       message.reactions.push({
         userId: currentUserId,
-        emoji: String(emoji || '').trim(),
+        emoji: String(emoji || "").trim(),
         reactedAt: new Date(),
       });
     }
@@ -149,11 +178,11 @@ export default class MessageService {
 
     const message = await this.messageRepository.findById(id);
     if (!message) {
-      throw new AppError('Message not found', 404);
+      throw new AppError("Message not found", 404);
     }
 
-    if (String(message.senderId || '') !== String(currentUserId)) {
-      throw new AppError('You can only unsend your own message', 403);
+    if (String(message.senderId || "") !== String(currentUserId)) {
+      throw new AppError("You can only unsend your own message", 403);
     }
 
     const conversation = await requireConversationParticipant(
@@ -162,7 +191,7 @@ export default class MessageService {
       currentUserId
     );
 
-    message.text = '';
+    message.text = "";
     message.attachments = [];
     message.links = [];
     message.isUnsent = true;

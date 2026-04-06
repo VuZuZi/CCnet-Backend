@@ -1,11 +1,11 @@
 import AppError from "../../core/AppError.js";
+import { DOMAIN_EVENTS } from "../notification/constants/notification.events.js";
 
 class FollowService {
-  constructor({ followRepository, userRepository, jobQueue }) {
-    Object.assign(this, { followRepository, userRepository, jobQueue });
+  constructor({ followRepository, userRepository, jobQueue, eventBus }) {
+    Object.assign(this, { followRepository, userRepository, jobQueue, eventBus });
   }
 
-  // --- PRIVATE HELPERS ---
   async _ensureUserExists(userId) {
     const user = await this.userRepository.findById(userId);
     if (!user) throw new AppError("User not found", 404);
@@ -45,19 +45,47 @@ class FollowService {
     }
   }
 
-  // --- MAIN METHODS ---
-  async followUser(followerId, followingId) {
-    this._checkSelfAction(followerId, followingId, "follow");
-    await this._ensureUserExists(followingId);
+  async _emitFollowCreatedEvent({ follower, followingUser, followId }) {
+    if (!this.eventBus || typeof this.eventBus.emit !== "function") return;
 
     try {
-      await this.followRepository.create(followerId, followingId);
+      await this.eventBus.emit(DOMAIN_EVENTS.FOLLOW_CREATED, {
+        actorId: follower._id,
+        actorName: follower.fullName,
+        actorAvatar: follower.avatar || "",
+        followId,
+        targetUserId: followingUser._id,
+      });
+    } catch (error) {
+      console.error("[FollowService] Failed to emit follow.created:", error.message);
+    }
+  }
+
+  async followUser(followerId, followingId) {
+    this._checkSelfAction(followerId, followingId, "follow");
+
+    const [follower, followingUser] = await Promise.all([
+      this._ensureUserExists(followerId),
+      this._ensureUserExists(followingId),
+    ]);
+
+    let createdFollow = null;
+
+    try {
+      createdFollow = await this.followRepository.create(followerId, followingId);
     } catch (e) {
       if (e?.code === 11000) return { isFollowing: true };
       throw e;
     }
 
     this._enqueueCounterUpdate("follow", followerId, followingId);
+
+    await this._emitFollowCreatedEvent({
+      follower,
+      followingUser,
+      followId: createdFollow?._id || null,
+    });
+
     return { isFollowing: true };
   }
 
@@ -74,12 +102,15 @@ class FollowService {
   }
 
   async statusUser(followerId, followingId) {
-    if (String(followerId) === String(followingId))
+    if (String(followerId) === String(followingId)) {
       return { isFollowing: false };
+    }
+
     const isFollowing = await this.followRepository.exists(
       followerId,
       followingId,
     );
+
     return { isFollowing };
   }
 
@@ -101,6 +132,7 @@ class FollowService {
     const users = rows
       .map((r) => this._formatUser(r?.followingId))
       .filter(Boolean);
+
     const nextCursor = rows.length === limit ? rows[rows.length - 1]._id : null;
 
     return { users, nextCursor, hasMore: !!nextCursor };
