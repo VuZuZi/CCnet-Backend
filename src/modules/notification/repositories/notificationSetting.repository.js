@@ -1,7 +1,7 @@
 import { NotificationSettingModel } from '../models/notificationSetting.model.js';
 import { DEFAULT_NOTIFICATION_SETTINGS } from '../constants/notification.constants.js';
 
-export class NotificationSettingRepository {
+class NotificationSettingRepository {
   async getOrCreate(userId) {
     return NotificationSettingModel.findOneAndUpdate(
       { userId },
@@ -21,3 +21,6 @@ export class NotificationSettingRepository {
     ).lean();
   }
 }
+
+export { NotificationSettingRepository };
+export default NotificationSettingRepository;
