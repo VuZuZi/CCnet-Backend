@@ -45,7 +45,7 @@ export const createApp = async () => {
   configureRoutes(app, { notificationModule });
 
   app.use((err, req, res, next) => {
-    console.error("Error:", err.message);
+    console.error(`[Global Error] ${err?.name || "Error"}:`, err?.message);
 
     const statusCode =
       Number.isInteger(err?.statusCode)
@@ -54,10 +54,24 @@ export const createApp = async () => {
           ? err.status
           : 500;
 
-    res.status(statusCode).json({
+    const status = typeof err?.status === "string" ? err.status : "error";
+
+    let message = err?.message || "Internal server error";
+    if (!err?.isOperational && statusCode === 500) {
+      message = "Internal server error";
+    }
+
+    const errorResponse = {
       success: false,
-      message: err.message || "Internal server error",
-    });
+      status,
+      message,
+    };
+
+    if (err?.errors) {
+      errorResponse.errors = err.errors;
+    }
+
+    res.status(statusCode).json(errorResponse);
   });
 
   return app;

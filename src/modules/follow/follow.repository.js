@@ -68,6 +68,19 @@ class FollowRepository {
       .lean()
       .exec();
   }
+
+  async existsProjectFollow(userId, projectId) {
+    const result = await Follow.exists({ followerId: userId, projectId });
+    return !!result;
+  }
+
+  async createProjectFollow(userId, projectId) {
+    return await Follow.create({ followerId: userId, projectId });
+  }
+
+  async deleteProjectFollow(userId, projectId) {
+    return await Follow.deleteOne({ followerId: userId, projectId });
+  }
 }
 
 export default FollowRepository;

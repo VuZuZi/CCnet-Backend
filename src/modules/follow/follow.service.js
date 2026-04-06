@@ -2,14 +2,36 @@ import AppError from "../../core/AppError.js";
 import { DOMAIN_EVENTS } from "../notification/constants/notification.events.js";
 
 class FollowService {
-  constructor({ followRepository, userRepository, jobQueue, eventBus }) {
-    Object.assign(this, { followRepository, userRepository, jobQueue, eventBus });
+  constructor({
+    followRepository,
+    userRepository,
+    projectRepository,
+    jobQueue,
+    eventBus,
+  }) {
+    Object.assign(this, {
+      followRepository,
+      userRepository,
+      projectRepository,
+      jobQueue,
+      eventBus,
+    });
   }
 
   async _ensureUserExists(userId) {
     const user = await this.userRepository.findById(userId);
     if (!user) throw new AppError("User not found", 404);
     return user;
+  }
+
+  async _ensureProjectExists(projectId) {
+    if (!this.projectRepository) {
+      throw new AppError("Project repository is not available", 500);
+    }
+
+    const project = await this.projectRepository.findById(projectId);
+    if (!project) throw new AppError("Project not found", 404);
+    return project;
   }
 
   _checkSelfAction(id1, id2, actionName) {
@@ -33,6 +55,7 @@ class FollowService {
     try {
       const jobName =
         action === "follow" ? "increment-counter" : "decrement-counter";
+
       await this.jobQueue.addJob("follow-updates", jobName, {
         followerId,
         followingId,
@@ -41,6 +64,25 @@ class FollowService {
     } catch (error) {
       console.error(
         `[CRITICAL][FollowService] Failed to enqueue ${action} update: ${error.message}`,
+      );
+    }
+  }
+
+  async _enqueueProjectCounterUpdate(action, followerId, projectId) {
+    try {
+      const jobName =
+        action === "follow"
+          ? "increment-project-follower"
+          : "decrement-project-follower";
+
+      await this.jobQueue.addJob("project-maintenance", jobName, {
+        followerId,
+        projectId,
+        action,
+      });
+    } catch (error) {
+      console.error(
+        `[CRITICAL][FollowService] Failed to enqueue project ${action} update: ${error.message}`,
       );
     }
   }
@@ -146,6 +188,25 @@ class FollowService {
       .filter(Boolean);
 
     return { users };
+  }
+
+  async toggleProjectFollow(userId, projectId) {
+    await this._ensureProjectExists(projectId);
+
+    const isFollowing = await this.followRepository.existsProjectFollow(
+      userId,
+      projectId,
+    );
+
+    if (isFollowing) {
+      await this.followRepository.deleteProjectFollow(userId, projectId);
+      this._enqueueProjectCounterUpdate("unfollow", userId, projectId);
+      return { isFollowing: false };
+    }
+
+    await this.followRepository.createProjectFollow(userId, projectId);
+    this._enqueueProjectCounterUpdate("follow", userId, projectId);
+    return { isFollowing: true };
   }
 }
 
