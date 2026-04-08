@@ -83,7 +83,13 @@ class VolunteerService {
         }
 
         if (status === 'REJECTED') {
-          await this.volunteerRepository.create({
+          await this.volunteerRepository.update(
+            existing._id,
+            { status: 'CANCELLED' },
+            changerId || volunteerId,
+          );
+
+          const application = await this.volunteerRepository.create({
             volunteerId,
             opportunityId,
             changerId,
@@ -91,6 +97,7 @@ class VolunteerService {
             motivation,
             availability,
           });
+          return application;
         }
       }
 

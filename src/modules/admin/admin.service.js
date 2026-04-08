@@ -29,7 +29,12 @@ class AdminService {
           as: "organizer",
         },
       },
-      { $unwind: "$organizer" },
+      { $unwind: { path: "$organizer", preserveNullAndEmptyArrays: true } },
+      {
+        $addFields: {
+          organizer: { $ifNull: ["$organizer", {}] },
+        },
+      },
       {
         $lookup: {
           from: "projects",
@@ -39,16 +44,38 @@ class AdminService {
         },
       },
       {
+        $lookup: {
+          from: "media",
+          localField: "documents",
+          foreignField: "_id",
+          as: "documentsMedia",
+        },
+      },
+      {
         $addFields: {
           "organizer.projectCount": { $size: "$organizerProjects" },
         },
       },
       {
-        $project: {
-          organizerProjects: 0,
-          "organizer.password": 0,
+        $addFields: {
+          documentsMedia: {
+            $map: {
+              input: "$documentsMedia",
+              as: "m",
+              in: {
+                _id: "$$m._id",
+                url: "$$m.url",
+                publicId: "$$m.publicId",
+                originalName: "$$m.originalName",
+                mimetype: "$$m.mimetype",
+                size: "$$m.size",
+                createdAt: "$$m.createdAt",
+              },
+            },
+          },
         },
       },
+      { $unset: ["organizerProjects", "documents", "organizer.password"] },
       { $sort: { createdAt: -1 } },
     ]);
   };
