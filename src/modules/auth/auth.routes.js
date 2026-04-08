@@ -55,6 +55,15 @@ router.post('/google', authLimiter, execute('googleLogin'));
 // Làm mới token
 router.post('/refresh-token', execute('refreshToken'));
 
+// Quên mật khẩu - gửi OTP về email
+router.post('/forgot-password', authLimiter, execute('forgotPassword'));
+
+// Xác minh OTP để nhận reset token
+router.post('/verify-password-otp', authLimiter, execute('verifyPasswordOTP'));
+
+// Đặt lại mật khẩu bằng reset token (sau khi xác minh OTP)
+router.post('/reset-password', authLimiter, execute('resetPassword'));
+
 // ==================== PROTECTED ROUTES ====================
 // Đăng xuất
 router.post('/logout', authenticate, execute('logout'));

@@ -18,6 +18,16 @@ class ApiResponse {
   static noContent(res) {
     return res.status(StatusCodes.NO_CONTENT).send();
   }
+  static badRequest(res, message = 'Bad Request', errors = null) {
+    const response = {
+      status: 'fail',
+      message
+    };
+    if (errors) {
+      response.errors = errors;
+    }
+    return res.status(StatusCodes.BAD_REQUEST).json(response);
+  }
   static error(res, message = ReasonPhrases.INTERNAL_SERVER_ERROR, statusCode = StatusCodes.INTERNAL_SERVER_ERROR, errors = null) {
     const response = {
       status: 'error',

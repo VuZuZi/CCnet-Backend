@@ -33,6 +33,7 @@ const envSchema = Joi.object({
   CORS_ORIGIN: Joi.string().optional(),
   REDIS_URL: Joi.string().allow('', null).optional(),
   EMAIL_SECURE: Joi.string().valid('true', 'false').optional(),
+  FRONTEND_URL: Joi.string().uri().optional(),
 
   NOTIFICATION_STREAM_CROSS_SITE: Joi.string().valid('true', 'false').default('false'),
 }).unknown();
@@ -54,6 +55,7 @@ const parseCorsOrigins = () => {
 export const config = {
   env: envVars.NODE_ENV,
   port: envVars.PORT,
+  frontendUrl: envVars.FRONTEND_URL || 'http://localhost:5173',
 
   mongodb: {
     uri: envVars.MONGODB_URI,

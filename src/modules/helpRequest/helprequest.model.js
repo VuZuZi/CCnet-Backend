@@ -83,6 +83,12 @@ const helpRequestSchema = new mongoose.Schema(
       type: String,
       maxlength: 1000,
     },
+    assignedByAdminId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
     assignedOrganizerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
