@@ -1,10 +1,13 @@
 import AppError from "../../core/AppError.js";
+import fs from 'fs';
+import fsPromises from 'fs/promises';
 
 class ProjectFeedService {
-  constructor({ projectRepository, volunteerRepository, projectFeedRepository }) {
+  constructor({ projectRepository, volunteerRepository, projectFeedRepository, cloudinaryProvider }) {
     this.projectRepository = projectRepository;
     this.volunteerRepository = volunteerRepository;
     this.projectFeedRepository = projectFeedRepository;
+    this.cloudinaryProvider = cloudinaryProvider;
   }
 
   async _getProjectOrThrow(projectId) {
@@ -62,7 +65,19 @@ class ProjectFeedService {
     return { posts: enriched, nextCursor };
   }
 
-  async createPost(projectId, { userId, content = "", media = [] }) {
+  async createPost(projectId, { userId, content = "", media = null }) {
+    console.log('[createPost] Start with params:', {
+      projectId: projectId.toString?.() || projectId,
+      userId: userId.toString?.() || userId,
+      contentLength: content?.length || 0,
+      media: media ? {
+        filename: media.filename,
+        mimetype: media.mimetype,
+        size: media.size,
+        hasPath: !!media.path
+      } : 'null'
+    });
+
     const project = await this._getProjectOrThrow(projectId);
     const can = await this._canInteract(project, userId);
     if (!can)
@@ -72,19 +87,43 @@ class ProjectFeedService {
       );
 
     const trimmed = String(content || "").trim();
-    if (!trimmed && (!Array.isArray(media) || media.length === 0)) {
+    if (!trimmed && !media) {
       throw new AppError("Nội dung bài viết không được rỗng.", 400);
     }
 
-    const sanitizedMedia = Array.isArray(media)
-      ? media
-          .map((m) => ({
-            url: m?.url,
-            publicId: m?.publicId,
-            mediaType: m?.mediaType === "video" ? "video" : "image",
-          }))
-          .filter((m) => Boolean(m.url && m.publicId))
-      : [];
+    let sanitizedMedia = [];
+    if (media && media.path) {
+      try {
+        console.log('[ProjectFeed] Uploading media:', {
+          filename: media.filename,
+          mimetype: media.mimetype,
+          size: media.size,
+          path: media.path
+        });
+
+        // Upload to Cloudinary
+        const uploadedUrl = await this.cloudinaryProvider.uploadImage(media.path, 'projectFeed');
+
+        console.log('[ProjectFeed] Media uploaded successfully:', {
+          url: uploadedUrl.secure_url,
+          publicId: uploadedUrl.public_id
+        });
+
+        sanitizedMedia = [{
+          url: uploadedUrl.secure_url,
+          publicId: uploadedUrl.public_id,
+          mediaType: media.mimetype?.startsWith('video') ? 'video' : 'image',
+        }];
+      } catch (error) {
+        console.error('[ProjectFeed] Error uploading media:', error);
+        throw new AppError("Lỗi khi tải lên media. Vui lòng thử lại.", 500);
+      } finally {
+        // Clean up temp file
+        if (media.path && fs.existsSync(media.path)) {
+          fsPromises.unlink(media.path).catch(err => console.error('Error cleaning up temp file:', err));
+        }
+      }
+    }
 
     const created = await this.projectFeedRepository.createPost({
       projectId: project._id,

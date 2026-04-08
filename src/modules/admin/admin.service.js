@@ -141,12 +141,42 @@ class AdminService {
   toggleUserBan = async (userId) => {
     const user = await User.findById(userId);
     if (!user) throw new Error("User not found");
+
+    const nextStatus = user.isActive ? "banned" : "active";
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      { $set: { isActive: !user.isActive } },
+      { $set: { isActive: !user.isActive, status: nextStatus } },
       { new: true },
     );
 
+    return updatedUser;
+  };
+
+  verifyUser = async (userId, isVerified) => {
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { $set: { isVerified: Boolean(isVerified) } },
+      { new: true },
+    );
+
+    if (!user) throw new Error("User not found");
+    return user;
+  };
+
+  updateUserStatus = async (userId, status) => {
+    const allowed = new Set(["active", "inactive", "banned"]);
+    if (!allowed.has(status)) {
+      throw new Error("Invalid user status");
+    }
+
+    const isActive = status !== "banned";
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { $set: { status, isActive } },
+      { new: true },
+    );
+
+    if (!updatedUser) throw new Error("User not found");
     return updatedUser;
   };
 

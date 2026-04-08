@@ -30,6 +30,26 @@ class AdminController {
     }
   };
 
+  verifyUser = async (req, res, next) => {
+    try {
+      const { isVerified } = req.body;
+      const user = await this.adminService.verifyUser(req.params.id, isVerified);
+      res.json({ status: "success", data: user });
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  updateUserStatus = async (req, res, next) => {
+    try {
+      const { status } = req.body || {};
+      const user = await this.adminService.updateUserStatus(req.params.id, status);
+      res.json({ status: "success", data: user });
+    } catch (e) {
+      next(e);
+    }
+  };
+
   getReports = async (req, res, next) => {
     try {
       const reports = await this.adminService.getReports();

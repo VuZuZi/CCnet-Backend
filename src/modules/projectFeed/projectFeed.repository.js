@@ -43,12 +43,27 @@ class ProjectFeedRepository {
   }
 
   async createPost({ projectId, authorId, content, media }) {
+    console.log('[ProjectFeedRepository.createPost] Creating post with:', {
+      projectId: projectId.toString?.() || projectId,
+      authorId: authorId.toString?.() || authorId,
+      contentLength: content?.length || 0,
+      mediaCount: media?.length || 0,
+      media: media
+    });
+
     const created = await ProjectFeedPost.create({
       projectId,
       authorId,
       content,
       media,
     });
+
+    console.log('[ProjectFeedRepository.createPost] Post created:', {
+      postId: created._id.toString(),
+      mediaCount: created.media?.length || 0,
+      media: created.media
+    });
+
     return created;
   }
 
