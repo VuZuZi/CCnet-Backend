@@ -1,4 +1,4 @@
-import { NotificationRepository } from './repositories/notification.repository.js';
+import NotificationRepository from './notification.repository.js';
 import { NotificationSettingRepository } from './repositories/notificationSetting.repository.js';
 import { NotificationSettingService } from './services/notificationSetting.service.js';
 import { NotificationSSEService } from './services/notificationSSE.service.js';

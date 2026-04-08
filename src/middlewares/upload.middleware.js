@@ -55,6 +55,26 @@ export const uploadFiles = multer({
   limits: { fileSize: 10 * 1024 * 1024, files: 10 }
 });
 
+// Media upload (images and videos) for feed posts
+const mediaFileFilter = (req, file, cb) => {
+  const ALLOWED_MEDIA_TYPES = [
+    'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+    'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo'
+  ];
+  
+  if (ALLOWED_MEDIA_TYPES.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new AppError(`Định dạng file không hợp lệ: ${file.mimetype}. Chỉ cho phép ảnh và video.`, 400), false);
+  }
+};
+
+export const uploadMedia = multer({
+  storage: storage,
+  fileFilter: mediaFileFilter,
+  limits: { fileSize: 50 * 1024 * 1024, files: 1 }
+});
+
 const MAGIC_BYTES = {
   'ffd8ffe0': 'image/jpeg',
   'ffd8ffe1': 'image/jpeg',

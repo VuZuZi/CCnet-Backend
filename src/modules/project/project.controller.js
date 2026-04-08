@@ -186,9 +186,40 @@ class ProjectController {
     try {
       const projectId = req.params.id;
       const userId = req.user.userId;
-      const result = await this.projectFeedService.createPost(projectId, { userId, content: req.body?.content, media: req.body?.media });
+      const content = req.body?.content;
+
+      console.log('[createFeedPost] Received request:', {
+        projectId,
+        userId,
+        content: content?.substring(0, 50),
+        hasFile: !!req.file,
+        fileInfo: req.file ? {
+          filename: req.file.filename,
+          originalname: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size
+        } : null
+      });
+
+      let media = null;
+      if (req.file) {
+        media = {
+          filename: req.file.filename,
+          originalName: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size,
+          path: req.file.path
+        };
+      }
+
+      const result = await this.projectFeedService.createPost(projectId, { userId, content, media });
+      console.log('[createFeedPost] Post created successfully:', {
+        postId: result._id,
+        hasMedia: result.media?.length > 0
+      });
       return ApiResponse.created(res, result, 'Đăng bài thành công');
     } catch (error) {
+      console.error('[createFeedPost] Error:', error.message);
       next(error);
     }
   };

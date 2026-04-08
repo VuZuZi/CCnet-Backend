@@ -10,6 +10,7 @@ import { createDraftSchema, updateDraftSchema } from "./project.validation.js";
 import { validateBody } from "../../middlewares/validate.middleware.js";
 import {
   uploadFiles,
+  uploadMedia,
   validateMagicBytes,
 } from "../../middlewares/upload.middleware.js";
 import { autoCleanupTempFiles } from "../../middlewares/cleanup.middleware.js";
@@ -63,7 +64,7 @@ router.get(
 );
 
 router.get('/:id/feed/posts', maybeAuthenticate, execute('getFeedPosts'));
-router.post('/:id/feed/posts', authenticate, execute('createFeedPost'));
+router.post('/:id/feed/posts', authenticate, uploadMedia.single('media'), execute('createFeedPost'));
 router.get('/:id/feed/posts/:postId/comments', maybeAuthenticate, execute('listFeedComments'));
 router.post('/:id/feed/posts/:postId/comments', authenticate, execute('createFeedComment'));
 router.post('/:id/feed/posts/:postId/like', authenticate, execute('toggleFeedPostLike'));
