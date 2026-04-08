@@ -6,6 +6,7 @@ import {
   optionalAuthenticate,
 } from "../../middlewares/auth.middleware.js";
 import { maybeAuthenticate } from '../../middlewares/maybeAuth.middleware.js';
+import { z } from 'zod';
 import { createDraftSchema, updateDraftSchema } from "./project.validation.js";
 import { validateBody } from "../../middlewares/validate.middleware.js";
 import {
@@ -118,6 +119,25 @@ router.post(
   authenticate,
   authorize("Organizer"),
   execute("submitForApproval"),
+);
+
+const reportProjectSchema = z.object({
+  reason_code: z.enum([
+    'spam',
+    'harassment',
+    'inappropriate',
+    'violence',
+    'hate_speech',
+    'other',
+  ]),
+  description: z.string().max(1000).optional(),
+});
+
+router.post(
+  "/:id/report",
+  authenticate,
+  validateBody(reportProjectSchema),
+  execute("reportProject"),
 );
 
 export default router;

@@ -33,15 +33,23 @@ const userSchema = new mongoose.Schema(
     title: { type: String, default: 'Advocate' },
 
     isEmailVerified: { type: Boolean, default: false },
+    isVerified: { type: Boolean, default: false },
 
     role: { type: String, enum: ['user', 'admin', 'organizer', 'Organizer'], default: 'user' },
+
+    status: {
+      type: String,
+      enum: ['active', 'banned', 'inactive'],
+      default: 'active',
+      index: true,
+    },
 
     isActive: { type: Boolean, default: true }
   },
   { timestamps: true }
 );
 
-userSchema.pre('validate', function(next) {
+userSchema.pre('validate', function (next) {
   if (this.isNew || this.isModified('password')) {
     if (!this.googleId && !this.password) {
       this.invalidate('password', 'Password is required for email registration');

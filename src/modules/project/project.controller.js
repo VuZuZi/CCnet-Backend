@@ -2,9 +2,10 @@ import ApiResponse from "../../core/Response.js";
 import AppError from "../../core/AppError.js";
 
 class ProjectController {
-  constructor({ projectService, projectFeedService }) {
+  constructor({ projectService, projectFeedService, reportService }) {
     this.projectService = projectService;
     this.projectFeedService = projectFeedService;
+    this.reportService = reportService;
   }
 
   //     createDraft = async (req, res, next) => {
@@ -165,6 +166,30 @@ class ProjectController {
         result,
         "Dự án đã được gửi để Ban quản trị kiểm duyệt thành công",
       );
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  reportProject = async (req, res, next) => {
+    try {
+      const projectId = req.params.id;
+      const { reason_code, description = "" } = req.body;
+
+      const reportData = {
+        report_ref: `REP-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        reporter_ref: req.user.userId,
+        target_type: "project",
+        target_ref: projectId,
+        reason_code: reason_code.trim(),
+        description: description.trim(),
+        evidence_files: [],
+        status: "pending",
+      };
+
+      const report = await this.reportService.createReport(reportData);
+
+      return ApiResponse.created(res, report, "Báo cáo dự án đã gửi thành công");
     } catch (error) {
       next(error);
     }
