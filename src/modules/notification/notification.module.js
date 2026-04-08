@@ -102,6 +102,8 @@ function registerDomainListeners({
   eventBus,
   notificationService,
   notificationBroadcastService,
+  mailProvider = null,
+  userRepository = null,
   logger,
 }) {
   if (registeredListenerBuses.has(eventBus)) {
@@ -117,6 +119,8 @@ function registerDomainListeners({
   registerProjectNotificationListener({
     eventBus,
     notificationService,
+    mailProvider,
+    userRepository,
     logger,
   });
 
@@ -177,6 +181,8 @@ export async function createNotificationModule({
   redis = null,
   streamSessionStore = null,
   clientRegistry = new InMemoryNotificationClientRegistry(),
+  mailProvider = null,
+  userRepository = null,
 } = {}) {
   if (typeof authenticate !== 'function') {
     throw new Error('createNotificationModule requires authenticate middleware');
@@ -255,6 +261,8 @@ export async function createNotificationModule({
     eventBus,
     notificationService,
     notificationBroadcastService,
+    mailProvider,
+    userRepository,
     logger,
   });
 
