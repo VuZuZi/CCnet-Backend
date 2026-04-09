@@ -6,8 +6,8 @@ const documentSchema = new mongoose.Schema(
     fileName: { type: String, required: true, trim: true },
     mimeType: { type: String, required: true, trim: true },
     size: { type: Number, default: 0, min: 0 },
-    url: { type: String, default: '' },
-    dataUrl: { type: String, default: '' },
+    url: { type: String, trim: true, default: undefined },
+    dataUrl: { type: String, trim: true, default: undefined },
   },
   { _id: false }
 );
@@ -62,6 +62,9 @@ const organizerRequestSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+organizerRequestSchema.index({ createdAt: -1 });
+organizerRequestSchema.index({ status: 1, createdAt: -1 });
+
 organizerRequestSchema.index(
   { userId: 1, status: 1 },
   {
@@ -72,12 +75,13 @@ organizerRequestSchema.index(
           ORGANIZER_REQUEST_STATUS.DRAFT_SUBMITTED,
           ORGANIZER_REQUEST_STATUS.SYSTEM_CHECKING,
           ORGANIZER_REQUEST_STATUS.AWAITING_MICRO_DEPOSIT,
-          ORGANIZER_REQUEST_STATUS.PENDING
-        ]
-      }
+          ORGANIZER_REQUEST_STATUS.PENDING,
+        ],
+      },
     },
   }
 );
 
 const OrganizerRequest = mongoose.model('OrganizerRequest', organizerRequestSchema);
+
 export default OrganizerRequest;

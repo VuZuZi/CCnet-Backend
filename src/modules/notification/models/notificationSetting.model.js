@@ -26,6 +26,10 @@ const notificationSettingSchema = new mongoose.Schema(
       type: Boolean,
       default: DEFAULT_NOTIFICATION_SETTINGS.organizerRequestEnabled,
     },
+    postEnabled: {
+      type: Boolean,
+      default: DEFAULT_NOTIFICATION_SETTINGS.postEnabled,
+    },
   },
   {
     timestamps: true,

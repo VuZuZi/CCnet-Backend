@@ -14,7 +14,16 @@ class AdminController {
 
   getUsers = async (req, res, next) => {
     try {
-      const users = await this.adminService.getUsers();
+      const hasQueryParams =
+        req.query?.search ||
+        req.query?.page ||
+        req.query?.limit ||
+        req.query?.role;
+
+      const users = hasQueryParams
+        ? await this.adminService.getUsers(req.query)
+        : await this.adminService.getUsers();
+
       res.json({ status: "success", data: users });
     } catch (e) {
       next(e);
@@ -75,7 +84,21 @@ class AdminController {
 
   sendNotification = async (req, res, next) => {
     try {
-      const notif = await this.adminService.createSystemNotification(req.body);
+      const currentRole = String(req.user?.role || "").toLowerCase();
+
+      if (currentRole !== "admin") {
+        return res.status(403).json({
+          status: "error",
+          message: "Only admin can create system notifications.",
+        });
+      }
+
+      const notif = await this.adminService.createSystemNotification({
+        ...req.body,
+        actorId: req.user?.userId || null,
+        actorRole: currentRole,
+      });
+
       res.status(201).json({ status: "success", data: notif });
     } catch (e) {
       next(e);
@@ -114,4 +137,5 @@ class AdminController {
     }
   };
 }
+
 export default AdminController;
