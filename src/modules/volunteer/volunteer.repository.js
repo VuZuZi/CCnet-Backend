@@ -203,6 +203,25 @@ class VolunteerRepository {
       throw error;
     }
   }
+
+  async findByUserWithProject(volunteerId) {
+    try {
+      return await this.model.find({ volunteerId })
+        .populate({
+          path: 'opportunityId',
+          select: 'title coverMedia category targetAmount currentAmount location status organizerId startDate endDate stats createdAt',
+          populate: {
+            path: 'organizerId',
+            select: 'fullName avatar',
+          },
+        })
+        .sort({ createdAt: -1 })
+        .lean();
+    } catch (error) {
+      console.error('❌ [Repository] findByUserWithProject error:', error);
+      throw error;
+    }
+  }
 }
 
 export default VolunteerRepository;

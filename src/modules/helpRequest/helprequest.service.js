@@ -368,20 +368,6 @@ export default class HelpRequestService {
     });
     console.log(`[ASSIGN] Notification created for organizer`);
 
-    if (helpRequest.requesterId) {
-      console.log(`[ASSIGN] Creating notification for requester ${helpRequest.requesterId}`);
-      await this.createHelpRequestNotification({
-        type: 'HELP_REQUEST_ASSIGNED',
-        title: 'Organizer assigned to your request',
-        message: `${organizer.fullName || 'An organizer'} is now reviewing your request: ${helpRequest.title}`,
-        recipientId: helpRequest.requesterId,
-        senderId: adminId,
-        link: `/need-help/${helpRequest._id}`,
-        metadata: { helpRequestId: helpRequest._id.toString(), organizerId: organizerId.toString() },
-      });
-      console.log(`[ASSIGN] Notification created for requester`);
-    }
-
     console.log(`[ASSIGN] Assignment completed successfully`);
     // Re-fetch with full populate so frontend gets assignedOrganizerId.fullName etc.
     // If the refresh fails for any reason, fall back to the updated document so the
@@ -490,11 +476,11 @@ export default class HelpRequestService {
       : `${organizer?.fullName || 'Organizer'} declined the assignment for: ${helpRequest.title}`;
 
     const requesterTitle = isAccept
-      ? 'Organizer accepted your NeedHelp request'
-      : 'Organizer declined your NeedHelp request';
+      ? `${organizer?.fullName || 'Organizer'} đã đồng ý host yêu cầu của bạn`
+      : null;
     const requesterMessage = isAccept
-      ? `${organizer?.fullName || 'Organizer'} accepted your request: ${helpRequest.title}`
-      : `${organizer?.fullName || 'Organizer'} declined your request: ${helpRequest.title}`;
+      ? `Yêu cầu "${helpRequest.title}" đã được chấp nhận và đang được triển khai.`
+      : null;
 
     const adminRecipientId =
       helpRequest.assignedByAdminId ||
@@ -516,7 +502,7 @@ export default class HelpRequestService {
       });
     }
 
-    if (helpRequest.requesterId) {
+    if (isAccept && helpRequest.requesterId) {
       await this.createHelpRequestNotification({
         type: 'HELP_REQUEST_ASSIGNMENT_RESPONDED',
         title: requesterTitle,

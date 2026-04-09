@@ -15,6 +15,7 @@ class ProjectService {
     redis,
     followRepository,
     helprequestRepository,
+    notificationRepository,
   }) {
     this.projectRepository = projectRepository;
     this.mediaRepository = mediaRepository;
@@ -24,6 +25,7 @@ class ProjectService {
     this.redis = redis;
     this.followRepository = followRepository;
     this.helpRequestRepository = helprequestRepository;
+    this.notificationRepository = notificationRepository;
     this.notificationEventBus = eventBus;
   }
 
@@ -450,10 +452,34 @@ class ProjectService {
 
           if (projectData.fromHelpRequestId && this.helpRequestRepository) {
             try {
+              const linkedHelpRequest = await this.helpRequestRepository.findById(projectData.fromHelpRequestId);
+
               await this.helpRequestRepository.updateById(
                 projectData.fromHelpRequestId,
                 { linkedProjectId: createdProject._id },
               );
+
+              if (linkedHelpRequest?.requesterId && this.notificationRepository) {
+                const organizerUser = await User.findById(organizerId)
+                  .select('fullName')
+                  .lean()
+                  .exec();
+
+                await this.notificationRepository.create({
+                  recipientId: linkedHelpRequest.requesterId,
+                  actorId: organizerId,
+                  type: 'help_request_assignment_responded',
+                  title: `${organizerUser?.fullName || 'Organizer'} đã đồng ý host yêu cầu của bạn`,
+                  message: `Yêu cầu "${linkedHelpRequest.title}" đã được chấp nhận và chuyển thành dự án.`,
+                  actionUrl: `/projects/${createdProject._id}`,
+                  metadata: {
+                    helpRequestId: String(linkedHelpRequest._id),
+                    projectId: String(createdProject._id),
+                    organizerId: String(organizerId),
+                    action: 'hosted',
+                  },
+                });
+              }
             } catch (err) {
               console.error(
                 "[Project Creation] Failed to link help request:",

@@ -234,6 +234,126 @@ class VolunteerService {
     };
   }
 
+  async getMySupportedProjects(userId, filters = {}) {
+    const {
+      view = 'ALL',
+      search = '',
+      page = 1,
+      limit = 12,
+    } = filters;
+
+    const applications = await this.volunteerRepository.findByUserWithProject(userId);
+
+    const normalizedSearch = search.trim().toLowerCase();
+
+    const items = applications
+      .map((application) => {
+        const project = application.opportunityId || null;
+        const isApproved = application.status === 'APPROVED';
+        const derivedStatus = !project
+          ? application.status
+          : application.status === 'PENDING'
+            ? 'PENDING'
+            : application.status === 'REJECTED'
+              ? 'REJECTED'
+              : application.status === 'CANCELLED'
+                ? 'CANCELLED'
+                : project.status === 'IN_PROGRESS'
+                  ? 'IN_PROGRESS'
+                  : project.status === 'COMPLETED'
+                    ? 'COMPLETED'
+                    : isApproved
+                      ? 'JOINED'
+                      : application.status;
+
+        return {
+          applicationId: String(application._id),
+          applicationStatus: application.status,
+          appliedAt: application.appliedAt || application.createdAt,
+          rejectReason: application.rejectReason || null,
+          reason: application.reason || null,
+          derivedStatus,
+          project: project
+            ? {
+                id: String(project._id),
+                title: project.title,
+                coverMedia: project.coverMedia || null,
+                category: project.category,
+                targetAmount: project.targetAmount || 0,
+                currentAmount: project.currentAmount || 0,
+                location: project.location || null,
+                status: project.status,
+                organizer: project.organizerId || null,
+                startDate: project.startDate || null,
+                endDate: project.endDate || null,
+                stats: project.stats || null,
+              }
+            : null,
+        };
+      })
+      .filter((item) => {
+        const matchesSearch = !normalizedSearch
+          || item.project?.title?.toLowerCase().includes(normalizedSearch)
+          || item.project?.category?.toLowerCase().includes(normalizedSearch)
+          || item.project?.location?.address?.toLowerCase().includes(normalizedSearch);
+
+        if (!matchesSearch) {
+          return false;
+        }
+
+        switch (view) {
+          case 'JOINED':
+            return item.applicationStatus === 'APPROVED';
+          case 'IN_PROGRESS':
+            return item.applicationStatus === 'APPROVED' && item.project?.status === 'IN_PROGRESS';
+          case 'COMPLETED':
+            return item.applicationStatus === 'APPROVED' && item.project?.status === 'COMPLETED';
+          case 'PENDING':
+            return item.applicationStatus === 'PENDING';
+          case 'REJECTED':
+            return item.applicationStatus === 'REJECTED';
+          case 'CANCELLED':
+            return item.applicationStatus === 'CANCELLED';
+          default:
+            return true;
+        }
+      });
+
+    const total = items.length;
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.max(1, Number(limit) || 12);
+    const start = (safePage - 1) * safeLimit;
+    const data = items.slice(start, start + safeLimit);
+
+    const summary = {
+      totalApplications: applications.length,
+      totalSupported: applications.filter((item) => item.status === 'APPROVED').length,
+      joined: applications.filter((item) => item.status === 'APPROVED').length,
+      inProgress: applications.filter((item) => item.status === 'APPROVED' && item.opportunityId?.status === 'IN_PROGRESS').length,
+      completed: applications.filter((item) => item.status === 'APPROVED' && item.opportunityId?.status === 'COMPLETED').length,
+      pending: applications.filter((item) => item.status === 'PENDING').length,
+      rejected: applications.filter((item) => item.status === 'REJECTED').length,
+      cancelled: applications.filter((item) => item.status === 'CANCELLED').length,
+    };
+
+    return {
+      data,
+      summary,
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / safeLimit)),
+        hasNext: start + safeLimit < total,
+        hasPrev: safePage > 1,
+      },
+      filters: {
+        view,
+        search,
+      },
+    };
+  }
+
   // GET PROJECT APPLICATIONS
   async getProjectApplications(projectId, limit = 10, cursor) {
     await this._ensureProjectExists(projectId);
