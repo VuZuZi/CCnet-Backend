@@ -23,7 +23,10 @@ class FollowRepository {
   }
 
   async findFollowingIds(followerId) {
-    const follows = await Follow.find({ followerId })
+    const follows = await Follow.find({
+      followerId,
+      followingId: { $exists: true, $ne: null },
+    })
       .select("followingId")
       .lean()
       .exec();
@@ -32,8 +35,7 @@ class FollowRepository {
   }
 
   async findFollowingUsers(followerId, limit = 50, cursor = null) {
-    const normalizedLimit = Number(limit) > 0 ? Number(limit) : 50;
-    const query = { followerId };
+    const query = { followerId, followingId: { $exists: true, $ne: null } };
 
     if (cursor) {
       query._id = { $lt: cursor };
@@ -60,10 +62,35 @@ class FollowRepository {
 
     return Follow.find(query)
       .sort({ _id: -1 })
-      .limit(normalizedLimit)
+      .limit(limit)
+      .populate({
+        path: "followingId",
+        select: "_id fullName email avatar username role",
+      })
+      .lean()
+      .exec();
+  }
+
+  async findFollowingProjects(userId, limit, cursor) {
+    const query = {
+      followerId: userId,
+      projectId: { $exists: true, $ne: null },
+    };
+
+    if (cursor) {
+      query._id = { $lt: cursor };
+    }
+
+    return await Follow.find(query).sort({ _id: -1 }).limit(limit).lean(); // 🚨 Không dùng populate ở đây nữa
+  }
+
+  async findFollowers(userId, limit = 50) {
+    return await Follow.find({ followingId: userId })
+      .sort({ _id: -1 })
+      .limit(limit)
       .populate({
         path: "followerId",
-        select: "_id fullName email avatar username",
+        select: "_id fullName email avatar username role",
       })
       .lean()
       .exec();

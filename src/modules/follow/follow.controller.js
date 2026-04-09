@@ -52,12 +52,21 @@ class FollowController {
 
   getMyFollowing = async (req, res, next) => {
     try {
-      const { limit, cursor } = req.query;
+      const type = req.query.type || "user";
+      const limit = parseInt(req.query.limit, 10) || 50;
+      const cursor = req.query.cursor;
+
+      console.log(
+        `🔥 [BACKEND LOG] Đang gọi API lấy danh sách cho Tab: ${type.toUpperCase()}`,
+      );
+
       const data = await this.followService.getMyFollowing(
         req.user.userId,
         limit,
         cursor,
+        type,
       );
+
       return ApiResponse.success(res, data, "Following list retrieved");
     } catch (e) {
       next(e);
