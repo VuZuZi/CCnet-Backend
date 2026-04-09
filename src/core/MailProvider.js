@@ -81,6 +81,32 @@ class MailProvider {
       `;
     }
 
+    if (type === 'FORGOT_PASSWORD_OTP') {
+      return `
+        <div style="font-family: Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; line-height: 1.6; color: #333;">
+          <div style="background: linear-gradient(135deg, #f59e0b, #d97706); padding: 32px; text-align: center; border-radius: 12px 12px 0 0;">
+            <h1 style="color: white; margin: 0; font-size: 24px; font-weight: 800;">🔐 Password Reset OTP</h1>
+          </div>
+          <div style="background: #fff; border: 1px solid #e5e7eb; border-top: none; padding: 32px; border-radius: 0 0 12px 12px;">
+            <p>Hello <strong>${data.fullName || 'there'}</strong>,</p>
+            <p>We received a request to reset your CCNet password. Use the code below to proceed:</p>
+            <div style="background: #fffbeb; border: 2px dashed #f59e0b; padding: 24px; text-align: center; border-radius: 12px; margin: 24px 0;">
+              <p style="margin: 0 0 8px; font-size: 13px; color: #92400e; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;">Your Reset Code</p>
+              <div style="font-size: 48px; font-weight: 900; letter-spacing: 12px; color: #1c1917; font-family: monospace;">${data.otp}</div>
+            </div>
+            <div style="background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px 16px; border-radius: 4px; margin: 16px 0;">
+              <p style="margin: 0; font-size: 13px; color: #78350f;">
+                ⏰ This code expires in <strong>15 minutes</strong>. If you didn't request this, ignore this email — your account is safe.
+              </p>
+            </div>
+            <p style="color: #6b7280; font-size: 12px;">For security, never share this code with anyone, including CCNet staff.</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
+            <p style="color: #9ca3af; font-size: 12px; text-align: center; margin: 0;">© CCNet — Connecting Communities, Creating Impact</p>
+          </div>
+        </div>
+      `;
+    }
+
     return data.content;
   }
 

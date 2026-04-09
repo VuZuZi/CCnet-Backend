@@ -14,6 +14,7 @@ class ProjectService {
     redis,
     followRepository,
     helprequestRepository,
+    notificationRepository,
     userRepository,
     eventBus
   }) {
@@ -25,13 +26,13 @@ class ProjectService {
     this.redis = redis;
     this.followRepository = followRepository;
     this.helpRequestRepository = helprequestRepository;
+    this.notificationRepository = notificationRepository;
     this.userRepository = userRepository;
     this.eventBus = eventBus;
   }
 
-
   async _enforceKycTierCaps(project, organizerId) {
-    const user = await this.userRepository.findById(organizerId); // Giả định hàm này return .lean() từ repo
+    const user = await this.userRepository.findById(organizerId);
     if (!user) throw new AppError("Không tìm thấy thông tin Organizer.", 404);
 
     const tier = user.kyc?.tier ?? 0;
@@ -66,7 +67,6 @@ class ProjectService {
   }
 
   async _processMediaPayload(mediaArray, organizerId, context) {
-    // (Giữ nguyên logic cực tốt của bạn)
     const validMediaIds = new Set();
     const newMediaToInsert = [];
 
@@ -141,7 +141,9 @@ class ProjectService {
       throw new AppError("Bắt buộc phải cấu hình Ngày bắt đầu và Ngày kết thúc.", 400);
     }
 
-    const validationResult = projectCompleteSchema.safeParse(project);
+    const projectObj = project.toObject ? project.toObject() : project;
+    const validationResult = projectCompleteSchema.safeParse(projectObj);
+    
     if (!validationResult.success) {
       const issues = validationResult.error.issues || validationResult.error.errors;
       const firstError = issues && issues.length > 0 ? issues[0].message : "Dữ liệu không hợp lệ";
@@ -149,7 +151,7 @@ class ProjectService {
       throw new AppError(`Dự án chưa đủ điều kiện gửi duyệt: ${firstError}`, 400);
     }
 
-    await this._enforceKycTierCaps(project, organizerId);
+    await this._enforceKycTierCaps(projectObj, organizerId);
 
     const updatedProject = await this.projectRepository.transitionStatus(
       projectId,
@@ -427,10 +429,32 @@ class ProjectService {
 
           if (projectData.fromHelpRequestId && this.helpRequestRepository) {
             try {
+              const linkedHelpRequest = await this.helpRequestRepository.findById(projectData.fromHelpRequestId);
+
               await this.helpRequestRepository.updateById(
                 projectData.fromHelpRequestId,
                 { linkedProjectId: createdProject._id },
+                session
               );
+
+              if (linkedHelpRequest?.requesterId && this.notificationRepository) {
+                const organizerUser = await this.userRepository.findById(organizerId);
+
+                await this.notificationRepository.create({
+                  recipientId: linkedHelpRequest.requesterId,
+                  actorId: organizerId,
+                  type: 'help_request_assignment_responded',
+                  title: `${organizerUser?.fullName || 'Organizer'} đã đồng ý host yêu cầu của bạn`,
+                  message: `Yêu cầu "${linkedHelpRequest.title}" đã được chấp nhận và chuyển thành dự án.`,
+                  actionUrl: `/projects/${createdProject._id}`,
+                  metadata: {
+                    helpRequestId: String(linkedHelpRequest._id),
+                    projectId: String(createdProject._id),
+                    organizerId: String(organizerId),
+                    action: 'hosted',
+                  },
+                });
+              }
             } catch (err) {
               console.error(
                 "[Project Creation] Failed to link help request:",

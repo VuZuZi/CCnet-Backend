@@ -4,6 +4,10 @@ export const NOTIFICATION_TYPES = Object.freeze({
   ORGANIZER_REQUEST_SUBMITTED: 'organizer_request_submitted',
   ORGANIZER_REQUEST_UPDATED: 'organizer_request_updated',
   SYSTEM_ANNOUNCEMENT: 'system_announcement',
+  HELP_REQUEST_ASSIGNED: 'help_request_assigned',
+  HELP_REQUEST_VERIFIED: 'help_request_verified',
+  HELP_REQUEST_COMPLETED: 'help_request_completed',
+  HELP_REQUEST_ASSIGNMENT_RESPONDED: 'help_request_assignment_responded',
 
   KYC_EXPIRING_WARNING: 'kyc.expiringWarning',
   KYC_EXPIRED: 'kyc.expired',

@@ -36,6 +36,12 @@ router.get(
     execute('application')
 );
 
+router.get(
+    '/me/projects',
+    authenticate,
+    execute('getMySupportedProjects')
+);
+
 // Cập nhật đơn
 router.patch(
     '/applications/:id',

@@ -115,6 +115,28 @@ class VolunteerController {
     }
   };
 
+  getMySupportedProjects = async (req, res, next) => {
+    try {
+      const {
+        view = 'ALL',
+        search = '',
+        page = 1,
+        limit = 12,
+      } = req.query;
+
+      const data = await this.volunteerService.getMySupportedProjects(req.user.userId, {
+        view,
+        search,
+        page: parseInt(page, 10),
+        limit: parseInt(limit, 10),
+      });
+
+      return ApiResponse.success(res, data, 'Supported projects retrieved');
+    } catch (e) {
+      next(e);
+    }
+  };
+
   //  THÊM METHOD MỚI: Get applications của project theo status
   getProjectApplications = async (req, res, next) => {
     try {
