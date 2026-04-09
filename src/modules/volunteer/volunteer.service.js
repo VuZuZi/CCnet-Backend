@@ -17,7 +17,7 @@ class VolunteerService {
     // Kiểm tra project tồn tại (comment tạm thời nếu project chưa có)
     try {
       const volunteer = await this.volunteerRepository.findByProject(projectId);
-      return volunteer
+    return volunteer
     } catch (error) {
       return {
         data: [],
@@ -25,10 +25,9 @@ class VolunteerService {
         hasMore: false,
         total: 0
       };
-    }
-  }
+    }}
 
-  // check volunteer của Project
+    // check volunteer của Project
   async getProjectApplications(projectId) {
     const volunteer = await this.volunteerRepository.findByProject(projectId);
     if (!volunteer) throw new AppError('volunteer not found', 404);
@@ -65,42 +64,6 @@ class VolunteerService {
         "motivation:" + motivation,
         "availabilit:" + availability
       );
-
-      const existing = await this.volunteerRepository.findOne({
-        volunteerId,
-        opportunityId,
-      });
-
-      if (existing) {
-        const status = String(existing.status || '').toUpperCase();
-
-        if (status === 'APPROVED') {
-          throw new AppError('Already approved', 400);
-        }
-
-        if (status === 'PENDING') {
-          throw new AppError('Already applied', 400);
-        }
-
-        if (status === 'REJECTED') {
-          await this.volunteerRepository.update(
-            existing._id,
-            { status: 'CANCELLED' },
-            changerId || volunteerId,
-          );
-
-          const application = await this.volunteerRepository.create({
-            volunteerId,
-            opportunityId,
-            changerId,
-            skills,
-            motivation,
-            availability,
-          });
-          return application;
-        }
-      }
-
       const application =
         await this.volunteerRepository.create({
           volunteerId,
@@ -114,32 +77,6 @@ class VolunteerService {
     } catch (e) {
       // ❗ duplicate apply
       if (e?.code === 11000) {
-        const existing = await this.volunteerRepository.findOne({
-          volunteerId,
-          opportunityId,
-        });
-
-        if (existing) {
-          const status = String(existing.status || '').toUpperCase();
-          if (status === 'REJECTED') {
-            await this.volunteerRepository.update(
-              existing._id,
-              { status: 'CANCELLED' },
-              changerId || volunteerId,
-            );
-
-            const application = await this.volunteerRepository.create({
-              volunteerId,
-              opportunityId,
-              changerId,
-              skills,
-              motivation,
-              availability,
-            });
-            return application;
-          }
-        }
-
         throw new AppError('Already applied', 400);
       }
       throw e;
@@ -222,9 +159,9 @@ class VolunteerService {
 
     //  Sử dụng hàm update để cập nhật status
     const updated = await this.volunteerRepository.update(
-      applicationId,
-      { status: 'APPROVED' },  // updateData
-      adminId                   // changerId
+        applicationId,
+        { status: 'APPROVED' },  // updateData
+        adminId                   // changerId
     );
 
     return updated;
@@ -236,9 +173,9 @@ class VolunteerService {
       throw new AppError('Application not found', 404);
     }
     const restore = await this.volunteerRepository.update(
-      applicationId,
-      { status: 'PENDING' },  // updateData
-      userID                   // changerId
+        applicationId,
+        { status: 'PENDING' },  // updateData
+        userID                   // changerId
     );
     return restore;
   }
@@ -260,9 +197,9 @@ class VolunteerService {
     return application;
   }
 
-  async pendingVolunteer(applicationId, userId) {
+  async pendingVolunteer(applicationId,userId) {
     const application =
-      await this.volunteerRepository.findById(applicationId);
+        await this.volunteerRepository.findById(applicationId);
 
     if (!application) {
       throw new AppError('Application not found', 404);
