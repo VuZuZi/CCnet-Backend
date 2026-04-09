@@ -13,7 +13,7 @@ export const validate = (schema) => (req, res, next) => {
   } catch (error) {
     if (error.errors) {
       const errorMessages = error.errors.map((err) => `${err.path.join('.')}: ${err.message}`);
-      return ApiResponse.badRequest(res, "Validation Error", errorMessages);
+      return ApiResponse.error(res, "Validation Error", 400, errorMessages);
     }
     return next(error);
   }
@@ -29,7 +29,7 @@ export const validateBody = (schema) => (req, res, next) => {
   } catch (error) {
     if (error.errors) {
       const errorMessages = error.errors.map((err) => `${err.path.join('.')}: ${err.message}`);
-      return ApiResponse.badRequest(res, "Body Validation Error", errorMessages);
+      return ApiResponse.error(res, "Body Validation Error", 400, errorMessages);
     }
     return next(error);
   }
@@ -43,7 +43,7 @@ export const validateQuery = (schema) => (req, res, next) => {
   } catch (error) {
     if (error.errors) {
       const errorMessages = error.errors.map((err) => `${err.path.join('.')}: ${err.message}`);
-      return ApiResponse.badRequest(res, "Query Validation Error", errorMessages);
+      return ApiResponse.error(res, "Query Validation Error", 400, errorMessages);
     }
     return next(error);
   }
@@ -57,7 +57,7 @@ export const validateParams = (schema) => (req, res, next) => {
   } catch (error) {
     if (error.errors) {
       const errorMessages = error.errors.map((err) => `${err.path.join('.')}: ${err.message}`);
-      return ApiResponse.badRequest(res, "Params Validation Error", errorMessages);
+      return ApiResponse.error(res, "Params Validation Error", 400, errorMessages);
     }
     return next(error);
   }

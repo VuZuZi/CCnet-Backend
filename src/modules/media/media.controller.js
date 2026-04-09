@@ -1,3 +1,4 @@
+import AppError from '../../core/AppError.js';
 import ApiResponse from '../../core/Response.js';
 
 class MediaController {
@@ -25,6 +26,48 @@ class MediaController {
       const signatureData = this.mediaService.getUploadSignature(userId, context);
 
       return ApiResponse.success(res, signatureData, 'Đã cấp chữ ký tải lên mây thành công');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  uploadSmart = async (req, res, next) => {
+    try {
+      const userId = req.user.userId;
+      const context = req.body.context || 'general'; 
+      const files = req.file ? [req.file] : (req.files || []);
+
+      if (files.length === 0) throw new AppError('Không tìm thấy file để xử lý', 400);
+
+      const mediaList = await this.mediaService.uploadSmartMultiple(files, userId, context);
+      
+      const responseData = req.file ? mediaList[0] : mediaList;
+
+      return ApiResponse.created(res, { media: responseData }, 'Tải lên thành công');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  syncMedia = async (req, res, next) => {
+    try {
+      const userId = req.user.userId;
+      const media = await this.mediaService.syncMediaRecord(userId, req.body);
+      
+      return ApiResponse.created(res, { media }, 'Đồng bộ dữ liệu media thành công');
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  deleteMedia = async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const userId = req.user.userId;
+      const role = req.user.role;
+
+      await this.mediaService.deleteMedia(id, userId, role);
+      return ApiResponse.success(res, null, 'Xóa file thành công');
     } catch (error) {
       next(error);
     }

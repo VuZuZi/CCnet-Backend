@@ -7,7 +7,7 @@ const documentSchema = new mongoose.Schema(
     mimeType: { type: String, required: true, trim: true },
     size: { type: Number, default: 0, min: 0 },
     url: { type: String, default: '' },
-    dataUrl: { type: String, default: '' }, 
+    dataUrl: { type: String, default: '' },
   },
   { _id: false }
 );
@@ -30,23 +30,25 @@ const organizerRequestSchema = new mongoose.Schema(
     },
     organizationWebsite: { type: String, default: '', trim: true, maxlength: 255 },
 
-    idCardFront: { type: documentSchema, required: true },   
-    idCardBack: { type: documentSchema, required: true },    
-    businessLicense: { type: documentSchema, default: null }, 
-    bankProof: { type: documentSchema, default: null },       
+    idCardFront: { type: documentSchema, required: true },
+    idCardBack: { type: documentSchema, required: true },
+    selfie: { type: documentSchema, required: true },
+    businessLicense: { type: documentSchema, default: null },
+    bankProof: { type: documentSchema, default: null },
+
+    bankAccountId: { type: mongoose.Schema.Types.ObjectId, ref: 'BankAccount', default: null },
 
     bankName: { type: String, required: true, trim: true, maxlength: 100 },
     bankAccountNumber: { type: String, required: true, trim: true, maxlength: 50 },
     bankAccountName: { type: String, required: true, trim: true, maxlength: 150 },
 
     notes: { type: String, default: '', trim: true, maxlength: 1000 },
-
     aiRiskScore: { type: Number, min: 0, max: 100, default: 0 },
 
     status: {
       type: String,
       enum: Object.values(ORGANIZER_REQUEST_STATUS),
-      default: ORGANIZER_REQUEST_STATUS.PENDING,
+      default: ORGANIZER_REQUEST_STATUS.DRAFT_SUBMITTED,
       index: true,
     },
 
@@ -57,9 +59,7 @@ const organizerRequestSchema = new mongoose.Schema(
 
     resubmissionCount: { type: Number, default: 0, min: 0 },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
 organizerRequestSchema.index(
@@ -67,7 +67,14 @@ organizerRequestSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      status: ORGANIZER_REQUEST_STATUS.PENDING,
+      status: {
+        $in: [
+          ORGANIZER_REQUEST_STATUS.DRAFT_SUBMITTED,
+          ORGANIZER_REQUEST_STATUS.SYSTEM_CHECKING,
+          ORGANIZER_REQUEST_STATUS.AWAITING_MICRO_DEPOSIT,
+          ORGANIZER_REQUEST_STATUS.PENDING
+        ]
+      }
     },
   }
 );

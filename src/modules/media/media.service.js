@@ -1,12 +1,13 @@
 import sharp from 'sharp';
-import { encode } from 'blurhash'; 
+import { encode } from 'blurhash';
 import { v4 as uuidv4 } from 'uuid';
 import AppError from '../../core/AppError.js';
 
 class MediaService {
-  constructor({ mediaRepository, cloudinaryProvider }) {
+  constructor({ mediaRepository, cloudinaryProvider, jobQueue }) {
     this.mediaRepository = mediaRepository;
     this.cloudinaryProvider = cloudinaryProvider;
+    this.jobQueue = jobQueue;
   }
 
   async _processImage(buffer) {
@@ -26,9 +27,9 @@ class MediaService {
       const newMetadata = await sharp(processedBuffer).metadata();
 
       return {
-          buffer: processedBuffer,
-          width: newMetadata.width,
-          height: newMetadata.height 
+        buffer: processedBuffer,
+        width: newMetadata.width,
+        height: newMetadata.height
       };
     } catch (error) {
       console.error('[CTO Media Error]: Xử lý ảnh thất bại', error.message);
@@ -43,7 +44,7 @@ class MediaService {
         .ensureAlpha()
         .resize(32, 32, { fit: 'inside' })
         .toBuffer({ resolveWithObject: true });
-        
+
       return encode(new Uint8ClampedArray(data), info.width, info.height, 4, 4);
     } catch (error) {
       console.error("[CTO Warning] BlurHash lỗi, trả về null để không đứt luồng chính:", error);
@@ -55,64 +56,151 @@ class MediaService {
     if (!files || files.length === 0) return [];
 
     const results = [];
-    
+
     for (const file of files) {
-        try {
-            const sourceData = file.path || file.buffer; 
-            const { buffer: optimizedBuffer, width, height } = await this._processImage(sourceData);
+      try {
+        const sourceData = file.path || file.buffer;
+        const { buffer: optimizedBuffer, width, height } = await this._processImage(sourceData);
 
-            const folder = `users/${userId}/${context}`;
-            
-            const [uploadResult, blurHash] = await Promise.all([
-                this.cloudinaryProvider.uploadImage(optimizedBuffer, folder, uuidv4()),
-                this._generateBlurHash(optimizedBuffer)
-            ]);
+        const folder = `users/${userId}/${context}`;
 
-            const mediaData = {
-                originalName: file.originalname || 'unknown',
-                publicId: uploadResult.public_id,
-                url: uploadResult.secure_url, 
-                mimetype: 'image/webp',
-                size: uploadResult.bytes,
-                width: width,
-                height: height,
-                blurHash: blurHash, 
-                uploadedBy: userId,
-                context
-            };
+        const [uploadResult, blurHash] = await Promise.all([
+          this.cloudinaryProvider.uploadImage(optimizedBuffer, folder, uuidv4()),
+          this._generateBlurHash(optimizedBuffer)
+        ]);
 
-            const newMedia = await this.mediaRepository.create(mediaData);
-            results.push(newMedia);
-        } catch (error) {
-            console.error(`[CTO Error] Lỗi upload batch file:`, error);
-            throw new AppError(`Tải lên hình ảnh thất bại trong quá trình xử lý`, 500);
-        }
+        const mediaData = {
+          originalName: file.originalname || 'unknown',
+          publicId: uploadResult.public_id,
+          url: uploadResult.secure_url,
+          mimetype: 'image/webp',
+          size: uploadResult.bytes,
+          width: width,
+          height: height,
+          blurHash: blurHash,
+          uploadedBy: userId,
+          context
+        };
+
+        const newMedia = await this.mediaRepository.create(mediaData);
+        results.push(newMedia);
+      } catch (error) {
+        console.error(`[CTO Error] Lỗi upload batch file:`, error);
+        throw new AppError(`Tải lên hình ảnh thất bại trong quá trình xử lý`, 500);
+      }
     }
 
     return results;
   }
 
   async uploadSingle(file, userId, context = 'general') {
-      if (!file) throw new AppError('Không tìm thấy file để xử lý', 400);
-      const [result] = await this.uploadMultiple([file], userId, context);
-      return result;
+    if (!file) throw new AppError('Không tìm thấy file để xử lý', 400);
+    const [result] = await this.uploadMultiple([file], userId, context);
+    return result;
   }
 
   getUploadSignature(userId, context = 'project_cover') {
     const folder = `projects/${userId}/${context}`;
-    
+
     const paramsToSign = {
       folder: folder,
-      tags: userId.toString() 
+      tags: userId.toString()
     };
 
     const sigData = this.cloudinaryProvider.generateSignature(paramsToSign);
-    
+
     return {
       ...sigData,
       folder,
       tags: userId.toString()
     };
+  }
+
+  async syncMediaRecord(userId, payload) {
+    const mediaData = {
+      ...payload,
+      uploadedBy: userId
+    };
+    return await this.mediaRepository.create(mediaData);
+  }
+
+  async uploadSmartMultiple(files, userId, context = 'general') {
+    if (!files || files.length === 0) return [];
+
+    const results = [];
+
+    for (const file of files) {
+      try {
+        const isImage = file.mimetype.startsWith('image/');
+        const sourceData = file.path || file.buffer;
+
+        let optimizedBuffer = sourceData;
+        let finalWidth = 0;
+        let finalHeight = 0;
+        let blurHash = null;
+        let finalMimetype = file.mimetype;
+
+        if (isImage) {
+          const processed = await this._processImage(sourceData);
+          optimizedBuffer = processed.buffer;
+          finalWidth = processed.width;
+          finalHeight = processed.height;
+          finalMimetype = 'image/webp';
+          blurHash = await this._generateBlurHash(optimizedBuffer);
+        }
+
+        const folder = `users/${userId}/${context}`;
+        
+        const uploadResult = await this.cloudinaryProvider.uploadImage(optimizedBuffer, folder, uuidv4());
+
+        const mediaData = {
+          originalName: file.originalname || 'unknown',
+          publicId: uploadResult.public_id,
+          url: uploadResult.secure_url,
+          mimetype: finalMimetype,
+          size: uploadResult.bytes,
+          width: finalWidth,
+          height: finalHeight,
+          blurHash: blurHash,
+          uploadedBy: userId,
+          context
+        };
+
+        const newMedia = await this.mediaRepository.create(mediaData);
+        results.push(newMedia);
+      } catch (error) {
+        console.error(`[CTO Error] Lỗi upload smart file:`, error);
+        throw new AppError(`Tải lên tệp thất bại trong quá trình xử lý`, 500);
+      }
+    }
+
+    return results;
+  }
+
+  async deleteMedia(mediaId, userId, userRole) {
+    const media = await this.mediaRepository.findById(mediaId);
+    
+    if (!media) {
+      throw new AppError('Không tìm thấy file media', 404);
+    }
+
+    if (String(media.uploadedBy) !== String(userId) && userRole !== 'admin') {
+      throw new AppError('Bạn không có quyền xóa file media này', 403);
+    }
+
+    await this.mediaRepository.deleteById(mediaId);
+
+    if (media.publicId) {
+      if (this.jobQueue) {
+        this.jobQueue.addJob('media-cleanup', 'delete-cloudinary', { publicId: media.publicId })
+          .catch(err => console.error('[CTO Warning] Lỗi đẩy job xóa media vào Queue:', err.message));
+      } else {
+        this.cloudinaryProvider.deleteImage(media.publicId)
+          .catch(err => console.error('[CTO Warning] Lỗi xóa media nền Cloudinary:', err.message));
+      }
+    }
+
+    return true;
   }
 }
 

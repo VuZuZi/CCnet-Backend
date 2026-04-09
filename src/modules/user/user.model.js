@@ -12,10 +12,7 @@ const userSchema = new mongoose.Schema(
       default: 'https://www.gravatar.com/avatar/3b3be63a4c2a439b013787725dfce802?d=identicon'
     },
     avatarPublicId: { type: String, select: false },
-    coverPhoto: {
-      type: String,
-      default: ''
-    },
+    coverPhoto: { type: String, default: '' },
     coverPhotoPublicId: { type: String, select: false },
 
     fullName: { type: String, required: true, trim: true },
@@ -24,7 +21,6 @@ const userSchema = new mongoose.Schema(
 
     headline: { type: String, trim: true, default: '' },
     about: { type: String, trim: true, default: '' },
-
     skills: [{ type: String, trim: true }],
 
     followersCount: { type: Number, default: 0 },
@@ -33,23 +29,26 @@ const userSchema = new mongoose.Schema(
     title: { type: String, default: 'Advocate' },
 
     isEmailVerified: { type: Boolean, default: false },
-    isVerified: { type: Boolean, default: false },
-
     role: { type: String, enum: ['user', 'admin', 'organizer', 'Organizer'], default: 'user' },
+    isActive: { type: Boolean, default: true },
 
-    status: {
-      type: String,
-      enum: ['active', 'banned', 'inactive'],
-      default: 'active',
-      index: true,
-    },
-
-    isActive: { type: Boolean, default: true }
+    kyc: {
+      tier: { type: Number, enum: [0, 1, 2, 3], default: 0 },
+      status: {
+        type: String,
+        enum: ['UNVERIFIED', 'PENDING', 'VERIFIED', 'EXPIRED', 'LOCKED'],
+        default: 'UNVERIFIED'
+      },
+      verifiedAt: { type: Date, default: null },
+      expiresAt: { type: Date, default: null }
+    }
   },
   { timestamps: true }
 );
 
-userSchema.pre('validate', function (next) {
+userSchema.index({ 'kyc.status': 1, 'kyc.expiresAt': 1 });
+
+userSchema.pre('validate', function(next) {
   if (this.isNew || this.isModified('password')) {
     if (!this.googleId && !this.password) {
       this.invalidate('password', 'Password is required for email registration');

@@ -8,6 +8,10 @@ export const NOTIFICATION_TYPES = Object.freeze({
   HELP_REQUEST_VERIFIED: 'help_request_verified',
   HELP_REQUEST_COMPLETED: 'help_request_completed',
   HELP_REQUEST_ASSIGNMENT_RESPONDED: 'help_request_assignment_responded',
+
+  KYC_EXPIRING_WARNING: 'kyc.expiringWarning',
+  KYC_EXPIRED: 'kyc.expired',
+  KYC_GRACE_PERIOD_ENDED: 'kyc.gracePeriodEnded',
 });
 
 export const NOTIFICATION_CHANNELS = Object.freeze({

@@ -1,39 +1,43 @@
 import OrganizerRequest from './organizerRequest.model.js';
+import { ORGANIZER_REQUEST_STATUS } from './organizerRequest.constant.js';
 
 class OrganizerRequestRepository {
-  async create(payload) {
-    return OrganizerRequest.create(payload);
+  async create(payload, session = null) {
+    const options = session ? { session } : {};
+    const docs = await OrganizerRequest.create([payload], options);
+    return docs[0].toObject();
   }
 
   async findPendingByUserId(userId) {
-    return OrganizerRequest.findOne({
+    return await OrganizerRequest.findOne({
       userId,
-      status: 'PENDING',
-    })
-      .lean()
-      .exec();
+      status: ORGANIZER_REQUEST_STATUS.PENDING,
+    }).lean().exec();
   }
 
   async findLatestByUserId(userId) {
-    return OrganizerRequest.findOne({ userId })
+    return await OrganizerRequest.findOne({ userId })
       .sort({ createdAt: -1 })
       .lean()
       .exec();
   }
 
   async findById(id) {
-    return OrganizerRequest.findById(id)
+    return await OrganizerRequest.findById(id)
       .populate('userId', 'fullName email avatar role phone location')
       .populate('reviewedBy', 'fullName email avatar role')
       .lean()
       .exec();
   }
 
-  async updateById(id, updateData) {
-    return OrganizerRequest.findByIdAndUpdate(
+  async updateById(id, updateData, session = null) {
+    const options = { new: true, runValidators: true };
+    if (session) options.session = session;
+
+    return await OrganizerRequest.findByIdAndUpdate(
       id,
       { $set: updateData },
-      { new: true, runValidators: true }
+      options
     )
       .populate('userId', 'fullName email avatar role phone location')
       .populate('reviewedBy', 'fullName email avatar role')
@@ -48,9 +52,7 @@ class OrganizerRequestRepository {
 
     const filter = {};
 
-    if (status) {
-      filter.status = String(status).toUpperCase();
-    }
+    if (status) filter.status = String(status).toUpperCase();
 
     if (search?.trim()) {
       const keyword = search.trim();
@@ -67,9 +69,7 @@ class OrganizerRequestRepository {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(safeLimit)
-        .select(
-          'fullNameSnapshot emailSnapshot organizationName status submittedAt reviewedAt reviewReason createdAt'
-        )
+        .select('fullNameSnapshot emailSnapshot organizationName status submittedAt reviewedAt reviewReason createdAt')
         .lean()
         .exec(),
       OrganizerRequest.countDocuments(filter),
@@ -84,6 +84,20 @@ class OrganizerRequestRepository {
         totalPages: Math.ceil(total / safeLimit) || 1,
       },
     };
+  }
+
+  async findActivePipelineByUserId(userId) {
+    return await OrganizerRequest.findOne({
+      userId,
+      status: {
+        $in: [
+          ORGANIZER_REQUEST_STATUS.DRAFT_SUBMITTED,
+          ORGANIZER_REQUEST_STATUS.SYSTEM_CHECKING,
+          ORGANIZER_REQUEST_STATUS.AWAITING_MICRO_DEPOSIT,
+          ORGANIZER_REQUEST_STATUS.PENDING
+        ]
+      }
+    }).lean().exec();
   }
 }
 
