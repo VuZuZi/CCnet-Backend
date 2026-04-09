@@ -30,6 +30,10 @@ const userSchema = new mongoose.Schema(
 
     isEmailVerified: { type: Boolean, default: false },
     role: { type: String, enum: ['user', 'admin', 'organizer', 'Organizer'], default: 'user' },
+    coolingPeriodEnd: {
+      type: Date,
+      default: null
+    },
     isActive: { type: Boolean, default: true },
 
     kyc: {
@@ -48,7 +52,7 @@ const userSchema = new mongoose.Schema(
 
 userSchema.index({ 'kyc.status': 1, 'kyc.expiresAt': 1 });
 
-userSchema.pre('validate', function(next) {
+userSchema.pre('validate', function (next) {
   if (this.isNew || this.isModified('password')) {
     if (!this.googleId && !this.password) {
       this.invalidate('password', 'Password is required for email registration');
