@@ -118,7 +118,9 @@ class AuthService {
     if (!isPasswordValid) throw new AppError('Invalid email or password', 401);
 
     if (!user.isEmailVerified) throw new AppError('Please verify your email first', 403);
-    if (!user.isActive) throw new AppError('Account is deactivated', 403);
+    if (!user.isActive || user.status === 'banned') {
+      throw new AppError('Account is deactivated or banned', 403);
+    }
 
     return this._generateAuthResponse(user);
   }
@@ -148,8 +150,8 @@ class AuthService {
       let user = await this.userService.getUserByEmail(email);
 
       if (user) {
-        if (!user.isActive) {
-          throw new AppError('Account is deactivated', 403);
+        if (!user.isActive || user.status === 'banned') {
+          throw new AppError('Account is deactivated or banned', 403);
         }
 
         if (!user.googleId) {
@@ -206,7 +208,9 @@ class AuthService {
     }
 
     const user = await this.userService.getUserById(tokenDoc.userId);
-    if (!user || !user.isActive) throw new AppError('User not found or deactivated', 403);
+    if (!user || !user.isActive || user.status === 'banned') {
+      throw new AppError('User not found or deactivated', 403);
+    }
 
     return this._generateAuthResponse(user);
   }

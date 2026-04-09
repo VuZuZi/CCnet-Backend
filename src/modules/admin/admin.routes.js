@@ -21,6 +21,12 @@ router.get("/users", (req, res, next) =>
 router.patch("/users/:id/ban", (req, res, next) =>
   getController().banUser(req, res, next),
 );
+router.patch("/users/:id/verify", (req, res, next) =>
+  getController().verifyUser(req, res, next),
+);
+router.patch("/users/:id/status", (req, res, next) =>
+  getController().updateUserStatus(req, res, next),
+);
 
 router.get("/projects", (req, res, next) =>
   getController().getProjects(req, res, next),

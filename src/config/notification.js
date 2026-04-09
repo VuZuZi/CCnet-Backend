@@ -24,6 +24,24 @@ function resolveRedisInstance() {
   }
 }
 
+function resolveMailProvider() {
+  try {
+    const container = getContainer();
+    return container.resolve('mailProvider');
+  } catch {
+    return null;
+  }
+}
+
+function resolveUserRepository() {
+  try {
+    const container = getContainer();
+    return container.resolve('userRepository');
+  } catch {
+    return null;
+  }
+}
+
 export const eventBus = getSharedEventBus();
 
 export async function createConfiguredNotificationModule({
@@ -33,6 +51,8 @@ export async function createConfiguredNotificationModule({
     authenticate,
     eventBus: customEventBus,
     redis: resolveRedisInstance(),
+    mailProvider: resolveMailProvider(),
+    userRepository: resolveUserRepository(),
     responsePresenter: {
       success(res, data, message) {
         return ApiResponse.success(res, data, message);

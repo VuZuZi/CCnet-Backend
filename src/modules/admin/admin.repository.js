@@ -10,7 +10,7 @@ class AdminRepository {
           $group: {
             _id: null,
             total: { $sum: 1 },
-            banned: { $sum: { $cond: ["$isBanned", 1, 0] } },
+            banned: { $sum: { $cond: [{ $eq: ["$status", "banned"] }, 1, 0] } },
           },
         },
       ]),
@@ -42,7 +42,7 @@ class AdminRepository {
       .populate("reporter_ref", "username email")
       .populate({
         path: "target_ref",
-        select: "content title",
+        select: "content title fullName email isActive status",
       })
       .sort({ createdAt: -1 });
   }

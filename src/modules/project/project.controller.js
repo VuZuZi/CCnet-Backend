@@ -2,9 +2,10 @@ import ApiResponse from "../../core/Response.js";
 import AppError from "../../core/AppError.js";
 
 class ProjectController {
-  constructor({ projectService, projectFeedService }) {
+  constructor({ projectService, projectFeedService, reportService }) {
     this.projectService = projectService;
     this.projectFeedService = projectFeedService;
+    this.reportService = reportService;
   }
 
   //     createDraft = async (req, res, next) => {
@@ -170,6 +171,30 @@ class ProjectController {
     }
   };
 
+  reportProject = async (req, res, next) => {
+    try {
+      const projectId = req.params.id;
+      const { reason_code, description = "" } = req.body;
+
+      const reportData = {
+        report_ref: `REP-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        reporter_ref: req.user.userId,
+        target_type: "project",
+        target_ref: projectId,
+        reason_code: reason_code.trim(),
+        description: description.trim(),
+        evidence_files: [],
+        status: "pending",
+      };
+
+      const report = await this.reportService.createReport(reportData);
+
+      return ApiResponse.created(res, report, "Báo cáo dự án đã gửi thành công");
+    } catch (error) {
+      next(error);
+    }
+  };
+
   getFeedPosts = async (req, res, next) => {
     try {
       const projectId = req.params.id;
@@ -186,9 +211,40 @@ class ProjectController {
     try {
       const projectId = req.params.id;
       const userId = req.user.userId;
-      const result = await this.projectFeedService.createPost(projectId, { userId, content: req.body?.content, media: req.body?.media });
+      const content = req.body?.content;
+
+      console.log('[createFeedPost] Received request:', {
+        projectId,
+        userId,
+        content: content?.substring(0, 50),
+        hasFile: !!req.file,
+        fileInfo: req.file ? {
+          filename: req.file.filename,
+          originalname: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size
+        } : null
+      });
+
+      let media = null;
+      if (req.file) {
+        media = {
+          filename: req.file.filename,
+          originalName: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size,
+          path: req.file.path
+        };
+      }
+
+      const result = await this.projectFeedService.createPost(projectId, { userId, content, media });
+      console.log('[createFeedPost] Post created successfully:', {
+        postId: result._id,
+        hasMedia: result.media?.length > 0
+      });
       return ApiResponse.created(res, result, 'Đăng bài thành công');
     } catch (error) {
+      console.error('[createFeedPost] Error:', error.message);
       next(error);
     }
   };
