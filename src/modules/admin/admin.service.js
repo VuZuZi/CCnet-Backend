@@ -1,91 +1,69 @@
-import Post from "../communitypost/post.model.js";
-import Report from "../report/report.model.js";
+import AppError from "../../core/AppError.js";
+import { PROJECT_STATUS, PROJECT_TYPE } from "../project/project.constant.js";
+import { DOMAIN_EVENTS } from "../../config/notification.js";
 import User from "../user/user.model.js";
-import Project from "../project/project.model.js";
-import { PROJECT_STATUS } from "../project/project.constant.js";
-import { eventBus, DOMAIN_EVENTS } from "../../config/notification.js";
 
 class AdminService {
-  constructor({ adminRepository }) {
+  constructor({
+    adminRepository,
+    projectRepository,
+    userRepository,
+    reportRepository,
+    postRepository,
+    transactionManager,
+    jobQueue,
+    eventBus
+  }) {
     this.adminRepository = adminRepository;
-    this.notificationEventBus = eventBus;
+    this.projectRepository = projectRepository;
+    this.userRepository = userRepository;
+    this.reportRepository = reportRepository;
+    this.postRepository = postRepository;
+    this.transactionManager = transactionManager;
+    this.jobQueue = jobQueue; 
+    this.eventBus = eventBus;
   }
 
-  getDashboardStats = async () => {
-    return await this.adminRepository.getSystemStats();
-  };
 
-  getUsers = async () => {
-    return await this.adminRepository.findAllUsers();
-  };
-
-  getProjects = async () => {
-    return await Project.aggregate([
-      {
-        $lookup: {
-          from: "users",
-          localField: "organizerId",
-          foreignField: "_id",
-          as: "organizer",
-        },
-      },
-      { $unwind: "$organizer" },
-      {
-        $lookup: {
-          from: "projects",
-          localField: "organizerId",
-          foreignField: "organizerId",
-          as: "organizerProjects",
-        },
-      },
-      {
-        $addFields: {
-          "organizer.projectCount": { $size: "$organizerProjects" },
-        },
-      },
-      {
-        $project: {
-          organizerProjects: 0,
-          "organizer.password": 0,
-        },
-      },
-      { $sort: { createdAt: -1 } },
-    ]);
-  };
-
-  _buildProjectStatusNotificationMessage(projectTitle, status) {
-    if (status === PROJECT_STATUS.ACTIVE) {
+  _buildProjectStatusNotificationMessage(projectTitle, status, feedback) {
+    if ([PROJECT_STATUS.FUNDING, PROJECT_STATUS.RECRUITING, PROJECT_STATUS.ACTIVE].includes(status)) {
       return {
-        title: "Project approved",
-        message: `Your project "${projectTitle}" has been approved by admin.`,
+        title: "Dự án đã được phê duyệt",
+        message: `Dự án "${projectTitle}" của bạn đã được Ban quản trị phê duyệt và đang đi vào hoạt động (Trạng thái: ${status}).`,
       };
     }
 
-    if (status === PROJECT_STATUS.CANCELLED) {
+    if (status === PROJECT_STATUS.REVISION_REQUESTED) {
       return {
-        title: "Project rejected",
-        message: `Your project "${projectTitle}" has been rejected by admin.`,
+        title: "Dự án cần chỉnh sửa",
+        message: `Dự án "${projectTitle}" của bạn cần được chỉnh sửa. Lý do: ${feedback}. Bạn có 14 ngày để bổ sung.`,
+      };
+    }
+
+    if (status === PROJECT_STATUS.REJECTED) {
+      return {
+        title: "Dự án bị từ chối",
+        message: `Dự án "${projectTitle}" đã bị từ chối. Lý do: ${feedback}. Tài khoản của bạn bị tạm ngưng tạo dự án mới trong 7 ngày.`,
       };
     }
 
     return {
-      title: "Project status updated",
-      message: `Your project "${projectTitle}" status has been updated to ${status}.`,
+      title: "Cập nhật trạng thái dự án",
+      message: `Trạng thái dự án "${projectTitle}" đã được cập nhật thành ${status}.`,
     };
   }
 
-  _emitProjectStatusUpdated = async ({ project, actorId }) => {
+  _emitProjectStatusUpdated = ({ project, actorId, feedback }) => {
     if (!project?.organizerId) return;
-    if (!this.notificationEventBus || typeof this.notificationEventBus.emit !== "function") {
-      return;
-    }
+    if (!this.eventBus || typeof this.eventBus.emit !== "function") return;
 
     const { title, message } = this._buildProjectStatusNotificationMessage(
       project.title,
       project.status,
+      feedback
     );
 
-    await this.notificationEventBus.emit(DOMAIN_EVENTS.PROJECT_STATUS_UPDATED, {
+    this.eventBus.emit(DOMAIN_EVENTS.PROJECT_STATUS_UPDATED, {
       recipientIds: [String(project.organizerId)],
       actorId,
       projectId: project._id,
@@ -97,41 +75,112 @@ class AdminService {
     });
   };
 
-  updateProjectStatus = async (projectId, status, adminId = null) => {
-    if (!status) throw new Error("Status is required");
+  updateProjectStatus = async (projectId, targetStatus, feedback, adminId) => {
+    if (!targetStatus) throw new AppError("Trạng thái không được để trống", 400);
 
-    const normalized = String(status).trim().toUpperCase();
-    const mapped =
-      normalized === "PENDING" ? PROJECT_STATUS.PENDING_APPROVAL : normalized;
+    const normalized = String(targetStatus).trim().toUpperCase();
+    
+    return await this.transactionManager.runInTransaction(async (session) => {
+      const project = await this.projectRepository.findById(projectId, session);
+      if (!project) throw new AppError("Không tìm thấy dự án", 404);
 
-    const allowed = new Set(Object.values(PROJECT_STATUS));
-    if (!allowed.has(mapped)) {
-      throw new Error("Invalid status");
-    }
+      if (![PROJECT_STATUS.PENDING_APPROVAL, PROJECT_STATUS.REVISION_REQUESTED].includes(project.status)) {
+        throw new AppError(`Không thể duyệt dự án đang ở trạng thái ${project.status}`, 400);
+      }
 
-    const project = await Project.findByIdAndUpdate(
-      projectId,
-      { $set: { status: mapped } },
-      { new: true },
-    )
-      .select("status title organizerId targetAmount currentAmount stats needsVolunteers")
-      .lean()
-      .exec();
+      let finalStatus = null;
+      let updateData = {};
+      let userUpdate = null;
 
-    if (!project) throw new Error("Project not found");
+      // 1. Phân luồng Ý định (Intent) từ request
+      let mappedIntent = normalized;
+      if (normalized === "PENDING") mappedIntent = PROJECT_STATUS.PENDING_APPROVAL;
+      if (normalized === "APPROVED" || normalized === "ACTIVE") mappedIntent = "APPROVED_INTENT";
 
-    await this._emitProjectStatusUpdated({
-      project,
-      actorId: adminId,
+      // 2. Xử lý Logic Business theo Intent
+      if (mappedIntent === PROJECT_STATUS.REVISION_REQUESTED) {
+        if (!feedback) throw new AppError("Bắt buộc phải cung cấp lý do (feedback) khi yêu cầu chỉnh sửa", 400);
+
+        const currentRevisions = project.revisionCount || 0;
+        if (currentRevisions >= 2) {
+          finalStatus = PROJECT_STATUS.REJECTED;
+          updateData.rejectionReason = "Đã vượt quá giới hạn 2 lần yêu cầu sửa đổi. Dự án tự động bị từ chối.";
+        } else {
+          finalStatus = PROJECT_STATUS.REVISION_REQUESTED;
+          updateData.status = finalStatus;
+          updateData.revisionCount = currentRevisions + 1;
+          updateData.rejectionReason = feedback;
+          updateData.revisionRequestedAt = new Date();
+
+          // [WORKER] Bắn job delay 14 ngày đếm ngược Timeout Auto-Reject
+          if (this.jobQueue) {
+            this.jobQueue.addJob(
+              "project-maintenance", 
+              "check-revision-timeout", 
+              { projectId }, 
+              { delay: 14 * 24 * 60 * 60 * 1000 } // 14 ngày
+            ).catch(err => console.error(`[Queue] Failed to schedule timeout for ${projectId}`, err.message));
+          }
+        }
+      }
+
+      if (mappedIntent === PROJECT_STATUS.REJECTED) {
+        if (!feedback && !updateData.rejectionReason) {
+            throw new AppError("Bắt buộc phải có lý do từ chối", 400);
+        }
+        finalStatus = PROJECT_STATUS.REJECTED;
+        updateData.status = finalStatus;
+        updateData.rejectionReason = updateData.rejectionReason || feedback;
+
+        const coolingPeriodEnd = new Date();
+        coolingPeriodEnd.setDate(coolingPeriodEnd.getDate() + 7);
+        userUpdate = { coolingPeriodEnd };
+      }
+
+      if (mappedIntent === "APPROVED_INTENT") {
+        finalStatus = project.projectType === PROJECT_TYPE.FUNDED 
+          ? PROJECT_STATUS.FUNDING 
+          : PROJECT_STATUS.RECRUITING;
+
+        updateData.status = finalStatus;
+        updateData.approvedBy = adminId;
+        updateData.approvedAt = new Date();
+      }
+
+      if (!finalStatus) throw new AppError("Trạng thái không hợp lệ", 400);
+
+      const updatedProject = await this.projectRepository.updateById(projectId, updateData, session);
+
+      if (userUpdate) {
+        await this.userRepository.updateById(project.organizerId, userUpdate, session);
+      }
+
+      this._emitProjectStatusUpdated({
+        project: updatedProject,
+        actorId: adminId,
+        feedback: updateData.rejectionReason,
+      });
+
+      return updatedProject;
     });
-
-    return project;
   };
 
   deleteProject = async (projectId) => {
-    const project = await Project.findByIdAndDelete(projectId);
-    if (!project) throw new Error("Project not found");
+    const project = await this.projectRepository.deleteById(projectId);
+    if (!project) throw new AppError("Không tìm thấy dự án", 404);
     return project;
+  };
+
+  getDashboardStats = async () => {
+    return await this.adminRepository.getSystemStats();
+  };
+
+  getUsers = async () => {
+    return await this.adminRepository.findAllUsers();
+  };
+
+  getProjects = async () => {
+    return await this.adminRepository.findProjectsForReview({ skip: 0, limit: 50 });
   };
 
   getReports = async () => {
