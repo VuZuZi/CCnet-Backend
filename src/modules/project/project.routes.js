@@ -5,8 +5,13 @@ import {
   authorize,
   optionalAuthenticate,
 } from "../../middlewares/auth.middleware.js";
-import { maybeAuthenticate } from '../../middlewares/maybeAuth.middleware.js';
-import { z } from 'zod';
+import { maybeAuthenticate } from "../../middlewares/maybeAuth.middleware.js";
+import { 
+  requireKycTier, 
+  ensureKycActive, 
+  ensureKycValidFor 
+} from "../../middlewares/kyc.middleware.js";
+import { z } from "zod";
 import { createDraftSchema, updateDraftSchema } from "./project.validation.js";
 import { validateBody } from "../../middlewares/validate.middleware.js";
 import {
@@ -25,7 +30,7 @@ const execute = (action) => (req, res, next) => {
   try {
     if (!req.scope) {
       throw new Error(
-        " Bắt buộc phải có req.scope. Kiểm tra lại di.middleware.",
+        "Bắt buộc phải có req.scope. Kiểm tra lại di.middleware.",
       );
     }
     const controller = req.scope.resolve("projectController");
@@ -64,44 +69,21 @@ router.get(
   execute("getWorkspaceProjects"),
 );
 
-router.get('/:id/feed/posts', maybeAuthenticate, execute('getFeedPosts'));
-router.post('/:id/feed/posts', authenticate, uploadMedia.single('media'), execute('createFeedPost'));
-router.get('/:id/feed/posts/:postId/comments', maybeAuthenticate, execute('listFeedComments'));
-router.post('/:id/feed/posts/:postId/comments', authenticate, execute('createFeedComment'));
-router.post('/:id/feed/posts/:postId/like', authenticate, execute('toggleFeedPostLike'));
-router.post('/:id/feed/comments/:commentId/like', authenticate, execute('toggleFeedCommentLike'));
+router.get("/:id/feed/posts", maybeAuthenticate, execute("getFeedPosts"));
+router.post("/:id/feed/posts", authenticate, uploadMedia.single("media"), execute("createFeedPost"));
+router.get("/:id/feed/posts/:postId/comments", maybeAuthenticate, execute("listFeedComments"));
+router.post("/:id/feed/posts/:postId/comments", authenticate, execute("createFeedComment"));
+router.post("/:id/feed/posts/:postId/like", authenticate, execute("toggleFeedPostLike"));
+router.post("/:id/feed/comments/:commentId/like", authenticate, execute("toggleFeedCommentLike"));
 
 router.get("/:id", optionalAuthenticate, execute("getDetail"));
-
-
-// router.post(
-//     '/',
-//     authenticate,
-//     authorize('Organizer'),
-//     projectUploads,
-//     autoCleanupTempFiles,
-//     validateMagicBytes,
-//     parseJsonFields(['location', 'milestones', 'volunteerRoles', 'deletedDocumentIds', 'needsVolunteers']),
-//     validateBody(createDraftSchema),
-//     execute('createDraft')
-// );
-
-// router.put(
-//     '/:id/draft',
-//     authenticate,
-//     authorize('Organizer'),
-//     projectUploads,
-//     autoCleanupTempFiles,
-//     validateMagicBytes,
-//     parseJsonFields(['location', 'milestones', 'volunteerRoles', 'deletedDocumentIds', 'needsVolunteers']),
-//     validateBody(updateDraftSchema),
-//     execute('updateDraft')
-// );
 
 router.post(
   "/",
   authenticate,
   authorize("Organizer"),
+  requireKycTier(1),
+  ensureKycActive,
   validateBody(createDraftSchema),
   execute("createDraft"),
 );
@@ -110,6 +92,8 @@ router.put(
   "/:id/draft",
   authenticate,
   authorize("Organizer"),
+  requireKycTier(1),
+  ensureKycActive,
   validateBody(updateDraftSchema),
   execute("updateDraft"),
 );
@@ -118,17 +102,19 @@ router.post(
   "/:id/submit",
   authenticate,
   authorize("Organizer"),
+  ensureKycActive,
+  ensureKycValidFor(30),
   execute("submitForApproval"),
 );
 
 const reportProjectSchema = z.object({
   reason_code: z.enum([
-    'spam',
-    'harassment',
-    'inappropriate',
-    'violence',
-    'hate_speech',
-    'other',
+    "spam",
+    "harassment",
+    "inappropriate",
+    "violence",
+    "hate_speech",
+    "other",
   ]),
   description: z.string().max(1000).optional(),
 });
