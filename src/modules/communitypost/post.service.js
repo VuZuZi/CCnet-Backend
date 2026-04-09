@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import AppError from "../../core/AppError.js";
-import Follow from "../follow/follow.model.js"; // Nên chuyển logic này vào FollowRepository
+import Follow from "../follow/follow.model.js";
 
 class PostService {
   constructor({ postRepository, mediaService, userRepository, redis }) {
@@ -76,7 +76,6 @@ class PostService {
       stats: { likes: 0, comments: 0, shares: 0, views: 0 },
     });
 
-    // Invalidate trang đầu của feed public
     this.redis.del(this._getFeedKey(null, 10)).catch(() => null);
     return newPost;
   }
@@ -93,18 +92,20 @@ class PostService {
       postId,
       userId,
     );
+
     if (!post)
       throw new AppError(
         "Không tìm thấy bài viết hoặc bạn không có quyền",
         404,
       );
 
-    let images = post.images.filter(
-      (img) => !removeFiles?.includes(img.publicId),
-    );
-
+    let images = post.images || [];
     if (removeFiles?.length) {
-      this.mediaService.deleteMultiple(removeFiles).catch(console.error);
+      images = images.filter((img) => !removeFiles.includes(img.publicId));
+
+      this.mediaService.deleteMultiple(removeFiles).catch((err) => {
+        console.error("🔥 Lỗi xóa ảnh thực tế:", err);
+      });
     }
 
     if (newFiles?.length) {
@@ -131,6 +132,7 @@ class PostService {
       userId,
       updateData,
     );
+
     this._invalidateCache(postId);
     return updated;
   }
@@ -160,35 +162,55 @@ class PostService {
 
   async toggleReaction({ postId, userId, type }) {
     return mongoose.connection.transaction(async (session) => {
-      const existing = await this.postRepository.upsertReaction(
-        { userId, postId, type },
+      const existingReaction = await this.postRepository.getReaction(
+        { userId, postId },
         session,
       );
-      const isUpdate = existing?.lastErrorObject?.updatedExisting;
-      const result = { action: "created", type };
+      const oldType = existingReaction ? existingReaction.type : null;
 
-      if (!isUpdate) {
-        await this.postRepository.incrementPostStats(
-          postId,
-          "likes",
-          1,
+      const result = { action: "created", type };
+      let likeChange = 0;
+
+      if (!existingReaction) {
+        await this.postRepository.createReaction(
+          { userId, postId, type },
           session,
         );
-      } else if (existing.value?.type === type) {
+        if (type === "like") {
+          likeChange = 1;
+        }
+      } else if (oldType === type) {
         await this.postRepository.deleteReaction({ userId, postId }, session);
-        await this.postRepository.incrementPostStats(
-          postId,
-          "likes",
-          -1,
-          session,
-        );
         result.action = "removed";
         result.type = null;
+
+        if (oldType === "like") {
+          likeChange = -1;
+        }
       } else {
+        await this.postRepository.updateReaction(
+          { userId, postId, type },
+          session,
+        );
         result.action = "switched";
+
+        if (oldType === "like" && type === "dislike") {
+          likeChange = -1;
+        } else if (oldType === "dislike" && type === "like") {
+          likeChange = 1;
+        }
+      }
+      if (likeChange !== 0) {
+        await this.postRepository.incrementPostStats(
+          postId,
+          "likes",
+          likeChange,
+          session,
+        );
       }
 
       this.redis.del(`post:${postId}`).catch(() => null);
+
       return result;
     });
   }
@@ -230,7 +252,6 @@ class PostService {
     if (!posts?.length)
       return { data: [], paging: { nextCursor: null, hasMore: false } };
 
-    // Attach user reaction
     const data = await this._attachUserReactions(posts, userId);
 
     return {
@@ -295,7 +316,19 @@ class PostService {
     }
     return post;
   }
+  async getComments({ postId, page = 1, sort = "relevant" }) {
+    const limit = 10;
+    const skip = (page - 1) * limit;
 
+    const comments = await this.postRepository.getCommentsByPostId({
+      postId,
+      skip,
+      limit,
+      sort,
+    });
+
+    return { data: comments };
+  }
   async deletePost({ postId, userId }) {
     const deleted = await this.postRepository.softDeletePost(postId, userId);
     if (!deleted)
@@ -304,7 +337,7 @@ class PostService {
         404,
       );
 
-    this._invalidateCache(postId); // Đã bọc Promise.allSettled ở hàm helper nên chạy mượt hơn
+    this._invalidateCache(postId);
     return { message: "Deleted" };
   }
 }

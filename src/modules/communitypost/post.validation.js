@@ -34,9 +34,9 @@ const sharedEntitySchema = z.object({
 });
 
 export const PostValidation = {
-  createPost: z.object({
-    body: z
-      .object({
+  createPost: z
+    .object({
+      body: z.object({
         content: commonFields.content.optional(),
         privacy: commonFields.privacy.default("public"),
         type: z
@@ -45,12 +45,26 @@ export const PostValidation = {
         sharedEntity: z
           .union([sharedEntitySchema, jsonStringHelper(sharedEntitySchema)])
           .optional(),
-      })
-      .refine((data) => !!data.content?.trim() || !!data.sharedEntity, {
-        message: "Post must have content or a shared item",
-        path: ["content"],
       }),
-  }),
+      files: z.any().optional(),
+      file: z.any().optional(),
+    })
+
+    .refine(
+      (req) => {
+        const hasContent = !!req.body?.content?.trim();
+        const hasSharedEntity = !!req.body?.sharedEntity;
+        const hasFiles = Array.isArray(req.files)
+          ? req.files.length > 0
+          : !!req.files || !!req.file;
+
+        return hasContent || hasSharedEntity || hasFiles;
+      },
+      {
+        message: "Post must have content, a shared item, or an image/video",
+        path: ["body", "content"],
+      },
+    ),
 
   updatePost: z.object({
     params: z.object({ id: objectId }),

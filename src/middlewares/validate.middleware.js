@@ -7,10 +7,16 @@ export const validate = (schema) => (req, res, next) => {
       body: req.body,
       query: req.query,
       params: req.params,
+      files: req.files,
+      file: req.file,
     });
-    req.body = validData.body;
-    req.query = validData.query;
-    req.params = validData.params;
+
+    req.body = validData.body || req.body;
+    req.query = validData.query || req.query;
+    req.params = validData.params || req.params;
+    req.files = validData.files || req.files;
+    req.file = validData.file || req.file;
+    
     next();
   } catch (error) {
     const issues = error.issues || error.errors;
@@ -24,6 +30,12 @@ export const validate = (schema) => (req, res, next) => {
 
 export const validateBody = (schema) => (req, res, next) => {
   try {
+    // Dungfix: Cảnh báo thiếu schema
+    if (!schema) {
+      throw new Error(
+        "CTO Warning: Validation schema is undefined. Check your route imports!"
+      );
+    }
     req.body = schema.parse(req.body);
     next();
   } catch (error) {

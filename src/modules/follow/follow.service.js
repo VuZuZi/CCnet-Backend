@@ -63,7 +63,7 @@ class FollowService {
       });
     } catch (error) {
       console.error(
-        `[CRITICAL][FollowService] Failed to enqueue ${action} update: ${error.message}`,
+        `[CRITICAL][FollowService] Failed to enqueue ${action}: ${error.message}`,
       );
     }
   }
@@ -82,7 +82,7 @@ class FollowService {
       });
     } catch (error) {
       console.error(
-        `[CRITICAL][FollowService] Failed to enqueue project ${action} update: ${error.message}`,
+        `[CRITICAL][FollowService] Failed to enqueue project ${action}: ${error.message}`,
       );
     }
   }
@@ -133,13 +133,10 @@ class FollowService {
 
   async unfollowUser(followerId, followingId) {
     this._checkSelfAction(followerId, followingId, "unfollow");
-
     const result = await this.followRepository.delete(followerId, followingId);
-
     if (result.deletedCount > 0) {
       this._enqueueCounterUpdate("unfollow", followerId, followingId);
     }
-
     return { isFollowing: false };
   }
 
@@ -164,35 +161,64 @@ class FollowService {
     };
   }
 
-  async getMyFollowing(userId, limit, cursor) {
+  async getMyFollowing(userId, limit, cursor, type = "user") {
+    const requestType = String(type).trim().toLowerCase();
+
+    if (requestType === "project") {
+      const rows = await this.followRepository.findFollowingProjects(
+        userId,
+        limit,
+        cursor,
+      );
+
+      const projectIds = rows
+        .map((r) => r?.projectId?._id?.toString() || r?.projectId?.toString())
+        .filter(Boolean);
+
+      // Fetch data chi tiết
+      const projectsRaw = await Promise.all(
+        projectIds.map((id) =>
+          this.projectRepository.findById(id).catch(() => null),
+        ),
+      );
+
+      const projects = projectsRaw
+        .map((p) => p?.data || p)
+        .filter((p) => p && typeof p === "object")
+        .map((p) => {
+          const plainObj = p.toObject ? p.toObject() : p;
+          plainObj._id = plainObj._id || plainObj.id;
+          return plainObj;
+        });
+
+      const nextCursor =
+        rows.length === limit ? rows[rows.length - 1]._id : null;
+      return { data: projects, nextCursor, hasMore: !!nextCursor };
+    }
+
     const rows = await this.followRepository.findFollowingUsers(
       userId,
       limit,
       cursor,
     );
-
     const users = rows
       .map((r) => this._formatUser(r?.followingId))
       .filter(Boolean);
 
     const nextCursor = rows.length === limit ? rows[rows.length - 1]._id : null;
-
-    return { users, nextCursor, hasMore: !!nextCursor };
+    return { users, data: users, nextCursor, hasMore: !!nextCursor };
   }
 
   async getFollowers({ userId, limit }) {
     const rows = await this.followRepository.findFollowers(userId, limit);
-
     const users = rows
       .map((r) => this._formatUser(r?.followerId))
       .filter(Boolean);
-
     return { users };
   }
 
   async toggleProjectFollow(userId, projectId) {
     await this._ensureProjectExists(projectId);
-
     const isFollowing = await this.followRepository.existsProjectFollow(
       userId,
       projectId,
