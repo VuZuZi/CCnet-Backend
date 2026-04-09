@@ -2,6 +2,7 @@
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { OAuth2Client } from 'google-auth-library';
 import AppError from '../../core/AppError.js';
 
@@ -241,6 +242,99 @@ class AuthService {
     return await this.tokenRepository.deleteAllByUserId(userId);
   }
 
+  async forgotPassword(email) {
+    const normalizedEmail = email?.trim().toLowerCase();
+    const user = await this.userService.getUserByEmail(normalizedEmail);
+    if (!user) return { sent: true }; // Don't reveal email existence
+
+    if (!user.password) {
+      throw new AppError('This account uses Google Sign-In. Password reset is not available.', 400);
+    }
+
+    const otp = crypto.randomInt(100000, 999999).toString();
+    const otpKey = `pwd-otp:${normalizedEmail}`;
+    await this.redis.set(otpKey, otp, 'EX', 15 * 60);
+    await this.redis.set(`pwd-otp-uid:${normalizedEmail}`, user._id.toString(), 'EX', 15 * 60);
+
+    try {
+      await this.mailProvider.sendEmail(
+        user.email,
+        'Reset your CCNet password',
+        'FORGOT_PASSWORD_OTP',
+        { otp, fullName: user.fullName || user.email }
+      );
+    } catch (err) {
+      console.error('Failed to send password reset OTP:', err);
+    }
+
+    if (this.config.env === 'development') {
+      console.log(`[DEV ONLY] Password reset OTP for ${user.email}: ${otp}`);
+    }
+
+    return { sent: true };
+  }
+
+  async verifyPasswordOTP(email, otp) {
+    const normalizedEmail = email?.trim().toLowerCase();
+    const normalizedOTP = otp?.toString().replace(/\D/g, '');
+
+    if (!normalizedEmail || !normalizedOTP) {
+      throw new AppError('Email and OTP are required', 400);
+    }
+
+    const otpKey = `pwd-otp:${normalizedEmail}`;
+    const rawStored = await this.redis.get(otpKey);
+    const storedOTP = rawStored ? String(rawStored).replace(/\D/g, '') : null;
+
+    console.log(`[DEBUG-OTP] email=${normalizedEmail} stored=${JSON.stringify(storedOTP)} received=${JSON.stringify(normalizedOTP)} match=${storedOTP === normalizedOTP}`);
+
+    if (!storedOTP) {
+      throw new AppError('OTP code has expired. Please request a new one.', 400);
+    }
+    if (storedOTP !== normalizedOTP) {
+      throw new AppError('Invalid OTP code. Please check and try again.', 400);
+    }
+
+    await this.redis.del(otpKey);
+
+    const uidKey = `pwd-otp-uid:${normalizedEmail}`;
+    let userId = await this.redis.get(uidKey);
+    await this.redis.del(uidKey);
+
+    if (!userId) {
+      const user = await this.userService.getUserByEmail(normalizedEmail);
+      if (!user) throw new AppError('User not found', 404);
+      userId = user._id.toString();
+    }
+
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetKey = `pwd-reset:${resetToken}`;
+    await this.redis.set(resetKey, userId, 'EX', 10 * 60);
+
+    return { resetToken };
+  }
+
+  async resetPassword(resetToken, newPassword) {
+    if (!resetToken || !newPassword) {
+      throw new AppError('Reset token and new password are required', 400);
+    }
+
+    const resetKey = `pwd-reset:${resetToken}`;
+    const userId = await this.redis.get(resetKey);
+
+    if (!userId) {
+      throw new AppError('Session expired. Please start the reset process again.', 400);
+    }
+
+    const user = await this.userService.getUserById(userId);
+    if (!user) throw new AppError('User not found', 404);
+
+    await this.userService.resetPasswordDirect(userId, newPassword);
+    await this.redis.del(resetKey);
+    await this.tokenRepository.deleteAllByUserId(userId);
+
+    return { success: true };
+  }
   async _sendOTPToUser(user) {
     const otp = crypto.randomInt(100000, 999999).toString();
     await this.redis.set(`otp:${user._id}`, otp, 'EX', 300);

@@ -75,6 +75,18 @@ class UserService {
     return toUserResponse(updatedUser);
   }
 
+  // Dùng cho forgot password flow — không cần current password
+  async resetPasswordDirect(userId, newPassword) {
+    const user = await this.userRepository.findById(userId);
+    if (!user) throw new AppError("User not found", 404);
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    await this.userRepository.updateById(userId, { password: hashedPassword });
+    return true;
+  }
+
   async changeAvatar(userId, file) {
     if (!file) throw new AppError("Please upload an image", 400);
 

@@ -1,5 +1,7 @@
 import { getContainer } from "../../container/index.js";
 import Project from "./project.model.js";
+import { PROJECT_STATUS } from "./project.constant.js";
+import { DOMAIN_EVENTS } from "../../config/notification.js";
 
 const chunkArray = (array, chunkSize) => {
   const chunks = [];
@@ -99,12 +101,12 @@ export const processViewSync = async (job) => {
     throw error;
   }
 };
+
 export const processProjectFollower = async (job) => {
   const { projectId, action } = job.data;
   const incValue = action === "follow" ? 1 : -1;
 
   try {
-    // Tìm dự án hiện tại
     const project = await Project.findById(projectId);
     if (!project) return { success: false, message: "Dự án không tồn tại" };
 
@@ -126,6 +128,72 @@ export const processProjectFollower = async (job) => {
     throw error;
   }
 };
+
+export const processRevisionTimeout = async (job) => {
+  const { projectId } = job.data;
+  console.log(`[Worker] Bắt đầu xử lý kiểm tra timeout 14 ngày cho dự án: ${projectId}`);
+
+  const container = getContainer();
+  const projectRepository = container.resolve("projectRepository");
+  const userRepository = container.resolve("userRepository");
+  const transactionManager = container.resolve("transactionManager");
+  const eventBus = container.resolve("eventBus");
+
+  try {
+    const project = await projectRepository.findById(projectId);
+    
+    if (!project) {
+      return { success: false, message: "Không tìm thấy dự án, có thể đã bị xóa." };
+    }
+
+    if (project.status !== PROJECT_STATUS.REVISION_REQUESTED) {
+      console.log(`[Worker] Dự án ${projectId} đã thay đổi trạng thái (${project.status}). Bỏ qua timeout.`);
+      return { success: true, message: "Project status changed, timeout ignored." };
+    }
+
+    await transactionManager.runInTransaction(async (session) => {
+      const rejectionReason = "Hệ thống tự động từ chối do quá 14 ngày không bổ sung yêu cầu chỉnh sửa.";
+      
+      await projectRepository.updateById(
+        projectId,
+        {
+          status: PROJECT_STATUS.REJECTED,
+          rejectionReason: rejectionReason,
+        },
+        session
+      );
+
+      const coolingPeriodEnd = new Date();
+      coolingPeriodEnd.setDate(coolingPeriodEnd.getDate() + 7);
+
+      await userRepository.updateById(
+        project.organizerId,
+        { coolingPeriodEnd },
+        session
+      );
+
+      if (eventBus && typeof eventBus.emit === "function") {
+        eventBus.emit(DOMAIN_EVENTS.PROJECT_STATUS_UPDATED, {
+          recipientIds: [String(project.organizerId)],
+          actorId: "system",
+          projectId: project._id,
+          projectName: project.title,
+          status: PROJECT_STATUS.REJECTED,
+          title: "Dự án bị từ chối tự động (Quá hạn)",
+          message: `Dự án "${project.title}" đã bị hệ thống từ chối do quá 14 ngày không cập nhật theo yêu cầu. Tài khoản của bạn bị tạm ngưng tạo dự án mới trong 7 ngày.`,
+          actionUrl: `/projects/${project._id}`,
+        });
+      }
+    });
+
+    console.log(`[Worker] Đã Auto-Rejected dự án ${projectId} thành công.`);
+    return { success: true };
+  } catch (error) {
+    console.error(`[Worker] [CRITICAL] Lỗi xử lý Revision Timeout cho dự án ${projectId}:`, error.message);
+    throw error;
+  }
+};
+
 export const initProjectWorkers = () => {
   try {
     const container = getContainer();
@@ -139,6 +207,10 @@ export const initProjectWorkers = () => {
           job.name === "decrement-project-follower"
         ) {
           return await processProjectFollower(job);
+        }
+        
+        if (job.name === "check-revision-timeout") {
+          return await processRevisionTimeout(job);
         }
 
         return await processViewSync(job);

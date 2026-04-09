@@ -1,0 +1,6 @@
+export const BANK_ACCOUNT_STATUS = {
+    ACTIVE: 'ACTIVE',
+    LOCKED: 'LOCKED',
+    FLAGGED: 'FLAGGED',
+    DEPRECATED: 'DEPRECATED'
+};

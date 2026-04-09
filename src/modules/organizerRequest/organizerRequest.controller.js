@@ -1,18 +1,25 @@
 import ApiResponse from '../../core/Response.js';
-import OrganizerRequestService from './organizerRequest.service.js';
 
 class OrganizerRequestController {
-  constructor({ organizerRequestService = new OrganizerRequestService() } = {}) {
+  constructor({ organizerRequestService }) {
     this.organizerRequestService = organizerRequestService;
   }
 
   submitMyRequest = async (req, res, next) => {
     try {
-      const request = await this.organizerRequestService.submitMyRequest(
-        req.user.userId,
-        req.body
+      const payload = req.body; 
+      const userId = req.user.userId;
+
+      const requestDoc = await this.organizerRequestService.submitMyRequest(userId, payload);
+
+      const { microDepositAmount, ...safeResponse } = requestDoc;
+
+      return ApiResponse.success(
+        res,
+        { request: safeResponse },
+        'Hồ sơ đã được gửi. Vui lòng theo dõi tiến trình xác minh.',
+        201
       );
-      return ApiResponse.created(res, { request }, 'Gửi đơn đăng ký Organizer thành công');
     } catch (error) {
       next(error);
     }
@@ -45,13 +52,31 @@ class OrganizerRequestController {
     }
   };
 
+  verifyMicroDeposit = async (req, res, next) => {
+    try {
+      const { requestId } = req.params;
+      const { amount } = req.body;
+      const userId = req.user.userId;
+
+      const updatedRequest = await this.organizerRequestService.verifyMicroDeposit(userId, requestId, amount);
+
+      return ApiResponse.success(
+        res,
+        { request: updatedRequest },
+        'Xác minh tài khoản ngân hàng thành công. Hồ sơ đang chuyển cho Ban Quản Lý duyệt.'
+      );
+    } catch (error) {
+      next(error);
+    }
+  };
+
   approveRequest = async (req, res, next) => {
     try {
-      const request = await this.organizerRequestService.approveRequest(
-        req.params.id,
-        req.user.userId
-      );
-      return ApiResponse.success(res, { request }, 'Duyệt hồ sơ Organizer thành công');
+      const { id } = req.params;
+      const adminId = req.user.userId;
+
+      const result = await this.organizerRequestService.approveRequest(id, adminId);
+      return ApiResponse.success(res, { request: result }, 'Duyệt hồ sơ thành công');
     } catch (error) {
       next(error);
     }
@@ -59,8 +84,9 @@ class OrganizerRequestController {
 
   declineRequest = async (req, res, next) => {
     try {
+      const { id } = req.params;
       const request = await this.organizerRequestService.declineRequest(
-        req.params.id,
+        id,
         req.user.userId,
         req.body.reviewReason
       );

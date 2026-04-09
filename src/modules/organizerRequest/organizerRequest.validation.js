@@ -7,13 +7,17 @@ const ACCOUNT_NAME_REGEX = /^[\p{L}\s.'-]{2,150}$/u;
 
 const documentPayloadSchema = z
   .object({
+    id: z.string().optional(),
+    _id: z.string().optional(),
+    publicId: z.string().optional(),
+    blurHash: z.string().nullable().optional(),
+    
     fileName: z.string().min(1, "Tên file là bắt buộc"),
     mimeType: z.string().min(1, "Loại file là bắt buộc"),
     size: z.coerce.number().min(0).optional(),
     url: z.string().url("URL file không hợp lệ").optional(),
     dataUrl: z.string().min(1, "dataUrl không được rỗng").optional(),
   })
-  .strict()
   .refine((data) => data.url || data.dataUrl, {
     message: "Document bắt buộc phải có url hoặc dataUrl",
     path: ["url"],
@@ -37,6 +41,7 @@ export const submitOrganizerRequestSchema = z
       .default(""),
     idCardFront: documentPayloadSchema,
     idCardBack: documentPayloadSchema,
+    selfie: documentPayloadSchema,
     businessLicense: z.preprocess(
       (value) => (value === null ? undefined : value),
       documentPayloadSchema.optional()
@@ -59,5 +64,18 @@ export const submitOrganizerRequestSchema = z
 export const declineOrganizerRequestSchema = z
   .object({
     reviewReason: z.string().min(5, "Lý do từ chối tối thiểu 5 ký tự").max(1000),
+  })
+  .strict();
+
+export const verifyDepositSchema = z
+  .object({
+    amount: z.number({ 
+        required_error: "Vui lòng nhập số tiền xác nhận", 
+        invalid_type_error: "Số tiền phải là một con số" 
+      })
+      .int("Số tiền không hợp lệ")
+      .positive("Số tiền phải lớn hơn 0")
+      .min(1000, "Số tiền tối thiểu là 1000đ")
+      .max(5000, "Số tiền tối đa là 5000đ")
   })
   .strict();

@@ -52,11 +52,14 @@ class UserRepository {
     return await User.create(userData);
   }
 
-  async updateById(id, updateData) {
+  async updateById(id, updateData, session = null) {
+    const options = { new: true, runValidators: true };
+    if (session) options.session = session;
+
     return await User.findByIdAndUpdate(
       id,
       { $set: updateData },
-      { new: true, runValidators: true },
+      options
     )
       .lean()
       .exec();
@@ -79,6 +82,38 @@ class UserRepository {
     )
       .lean()
       .exec();
+  }
+
+  async findKycExpiringInDays(targetDays, batchSize = 100, lastId = null) {
+    const targetDateStart = new Date();
+    targetDateStart.setUTCDate(targetDateStart.getUTCDate() + targetDays);
+    targetDateStart.setUTCHours(0, 0, 0, 0);
+
+    const targetDateEnd = new Date(targetDateStart);
+    targetDateEnd.setUTCDate(targetDateEnd.getUTCDate() + 1);
+
+    const query = {
+      'kyc.status': 'VERIFIED',
+      'kyc.expiresAt': { $gte: targetDateStart, $lt: targetDateEnd }
+    };
+
+    if (lastId) {
+      query._id = { $gt: lastId };
+    }
+
+    return await User.find(query)
+      .limit(batchSize)
+      .select('_id fullName email kyc.expiresAt')
+      .sort({ _id: 1 })
+      .lean()
+      .exec();
+  }
+
+  async updateKycStatusBatch(userIds, status) {
+    return await User.updateMany(
+      { _id: { $in: userIds } },
+      { $set: { 'kyc.status': status } }
+    ).exec();
   }
 }
 

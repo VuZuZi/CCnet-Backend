@@ -341,6 +341,7 @@ export default class HelpRequestService {
     }
 
     const updateData = {
+      assignedByAdminId: adminId,
       assignedOrganizerId: organizerId,
       assignedAt: new Date(),
       status: 'VERIFIED',
@@ -367,22 +368,20 @@ export default class HelpRequestService {
     });
     console.log(`[ASSIGN] Notification created for organizer`);
 
-    if (helpRequest.requesterId) {
-      console.log(`[ASSIGN] Creating notification for requester ${helpRequest.requesterId}`);
-      await this.createHelpRequestNotification({
-        type: 'HELP_REQUEST_ASSIGNED',
-        title: 'Organizer assigned to your request',
-        message: `${organizer.fullName || 'An organizer'} is now reviewing your request: ${helpRequest.title}`,
-        recipientId: helpRequest.requesterId,
-        senderId: adminId,
-        link: `/need-help/${helpRequest._id}`,
-        metadata: { helpRequestId: helpRequest._id.toString(), organizerId: organizerId.toString() },
-      });
-      console.log(`[ASSIGN] Notification created for requester`);
-    }
-
     console.log(`[ASSIGN] Assignment completed successfully`);
-    return updatedHelpRequest;
+    // Re-fetch with full populate so frontend gets assignedOrganizerId.fullName etc.
+    // If the refresh fails for any reason, fall back to the updated document so the
+    // assignment still succeeds instead of bubbling a 500 back to the admin UI.
+    try {
+      const refreshedHelpRequest = await this.helpRequestRepository.findById(updatedHelpRequest._id, {
+        populate: ['requester', 'assignedOrganizer', 'linkedProject'],
+      });
+
+      return refreshedHelpRequest || updatedHelpRequest;
+    } catch (error) {
+      console.error('[ASSIGN] Failed to refresh populated help request:', error.message);
+      return updatedHelpRequest;
+    }
   }
 
   async getOrganizerSuggestions(helpRequestId, filters = {}) {
@@ -469,18 +468,45 @@ export default class HelpRequestService {
     const updatedRequest = await this.helpRequestRepository.updateById(id, updateData);
 
     const actionLabel = isAccept ? 'accepted' : 'rejected';
-    const title = isAccept
-      ? 'Organizer accepted your NeedHelp request'
-      : 'Organizer declined your NeedHelp request';
-    const message = isAccept
+    const adminTitle = isAccept
+      ? 'Organizer accepted assignment'
+      : 'Organizer declined assignment';
+    const adminMessage = isAccept
       ? `${organizer?.fullName || 'Organizer'} accepted the assignment for: ${helpRequest.title}`
-      : `${organizer?.fullName || 'Organizer'} rejected the assignment for: ${helpRequest.title}`;
+      : `${organizer?.fullName || 'Organizer'} declined the assignment for: ${helpRequest.title}`;
 
-    if (helpRequest.requesterId) {
+    const requesterTitle = isAccept
+      ? `${organizer?.fullName || 'Organizer'} đã đồng ý host yêu cầu của bạn`
+      : null;
+    const requesterMessage = isAccept
+      ? `Yêu cầu "${helpRequest.title}" đã được chấp nhận và đang được triển khai.`
+      : null;
+
+    const adminRecipientId =
+      helpRequest.assignedByAdminId ||
+      helpRequest.verifiedBy ||
+      null;
+    if (adminRecipientId) {
       await this.createHelpRequestNotification({
-        type: 'HELP_REQUEST_ASSIGNMENT_RESPONSE',
-        title,
-        message,
+        type: 'HELP_REQUEST_ASSIGNMENT_RESPONDED',
+        title: adminTitle,
+        message: adminMessage,
+        recipientId: adminRecipientId,
+        senderId: organizerId,
+        link: `/need-help/${helpRequest._id}`,
+        metadata: {
+          helpRequestId: helpRequest._id.toString(),
+          action: actionLabel,
+          organizerId: organizerId.toString(),
+        },
+      });
+    }
+
+    if (isAccept && helpRequest.requesterId) {
+      await this.createHelpRequestNotification({
+        type: 'HELP_REQUEST_ASSIGNMENT_RESPONDED',
+        title: requesterTitle,
+        message: requesterMessage,
         recipientId: helpRequest.requesterId,
         senderId: organizerId,
         link: `/need-help/${helpRequest._id}`,
@@ -605,16 +631,25 @@ export default class HelpRequestService {
       return null;
     }
 
-    return this.notificationRepository.create({
-      type,
-      title,
-      message,
-      recipient: 'user',
-      recipientId,
-      sender: senderId ? 'user' : 'system',
-      senderId: senderId || null,
-      link,
-      metadata: metadata || {},
-    });
+    // Map type string to enum value (e.g. 'HELP_REQUEST_ASSIGNED' → 'help_request_assigned')
+    const typeValue = type?.toLowerCase
+      ? type.toLowerCase()
+      : type;
+
+    try {
+      return await this.notificationRepository.create({
+        type: typeValue,
+        title,
+        message,
+        recipientId,
+        actorId: senderId || null,
+        actionUrl: link || null,
+        metadata: metadata || {},
+      });
+    } catch (err) {
+      // Log but don't rethrow — notification failure shouldn't break the main flow
+      console.error('[NOTIFY] Failed to create help request notification:', err.message);
+      return null;
+    }
   }
 }

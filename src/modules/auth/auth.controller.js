@@ -168,6 +168,44 @@ class AuthController {
         }
     };
 
+    forgotPassword = async (req, res, next) => {
+        try {
+            const { email } = req.body;
+            if (!email) throw new AppError('Email is required', 400);
+            await this.authService.forgotPassword(email);
+            return ApiResponse.success(
+                res, null,
+                'If that email exists, a password reset OTP has been sent.'
+            );
+        } catch (error) { next(error); }
+    };
+
+    verifyPasswordOTP = async (req, res, next) => {
+        try {
+            const { email, otp } = req.body;
+            if (!email || !otp) throw new AppError('Email and OTP code are required', 400);
+            const result = await this.authService.verifyPasswordOTP(email, otp);
+            return ApiResponse.success(
+                res,
+                { resetToken: result.resetToken },
+                'OTP verified. You can now set your new password.'
+            );
+        } catch (error) { next(error); }
+    };
+
+    resetPassword = async (req, res, next) => {
+        try {
+            const { token, newPassword } = req.body;
+            if (!token || !newPassword) throw new AppError('Token and new password are required', 400);
+            if (newPassword.length < 6) throw new AppError('Password must be at least 6 characters', 400);
+            await this.authService.resetPassword(token, newPassword);
+            return ApiResponse.success(
+                res, null,
+                'Password has been reset successfully. Please log in with your new password.'
+            );
+        } catch (error) { next(error); }
+    };
+
     _setRefreshTokenCookie(res, token) {
         if (!token) return;
 

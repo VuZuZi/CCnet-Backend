@@ -12,6 +12,7 @@ import { initPostWorkers } from "./modules/communitypost/post.worker.js";
 import { initFollowWorkers } from "./modules/follow/follow.worker.js";
 import { initProjectWorkers } from "./modules/project/project.worker.js";
 import { initVolunteerWorkers } from "./modules/volunteer/volunteer.worker.js";
+import { initUserWorkers } from  "./modules/user/user.worker.js";
 
 export const createApp = async () => {
   const app = express();
@@ -37,6 +38,7 @@ export const createApp = async () => {
   initFollowWorkers();
   initProjectWorkers();
   initVolunteerWorkers();
+  initUserWorkers();
 
   if (typeof configureSystemRoutes === "function") {
     configureSystemRoutes(app);

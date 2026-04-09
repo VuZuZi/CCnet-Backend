@@ -1,9 +1,8 @@
 import AppError from "../../core/AppError.js";
-import { PROJECT_STATUS, MILESTONE_STATUS } from "./project.constant.js";
-import fs from "fs";
-import fsPromises from "fs/promises";
-import User from "../user/user.model.js";
-import { eventBus, DOMAIN_EVENTS } from "../../config/notification.js";
+import { PROJECT_STATUS, MILESTONE_STATUS, PROJECT_TYPE } from "./project.constant.js";
+import { KYC_TIER_LIMITS } from "../user/kyc.constant.js";
+import { DOMAIN_EVENTS } from "../../config/notification.js";
+import { projectCompleteSchema } from "./project.validation.js";
 
 class ProjectService {
   constructor({
@@ -15,6 +14,9 @@ class ProjectService {
     redis,
     followRepository,
     helprequestRepository,
+    notificationRepository,
+    userRepository,
+    eventBus
   }) {
     this.projectRepository = projectRepository;
     this.mediaRepository = mediaRepository;
@@ -24,7 +26,44 @@ class ProjectService {
     this.redis = redis;
     this.followRepository = followRepository;
     this.helpRequestRepository = helprequestRepository;
-    this.notificationEventBus = eventBus;
+    this.notificationRepository = notificationRepository;
+    this.userRepository = userRepository;
+    this.eventBus = eventBus;
+  }
+
+  async _enforceKycTierCaps(project, organizerId) {
+    const user = await this.userRepository.findById(organizerId);
+    if (!user) throw new AppError("Không tìm thấy thông tin Organizer.", 404);
+
+    const tier = user.kyc?.tier ?? 0;
+    const limits = KYC_TIER_LIMITS[tier];
+
+    if (!limits || !limits.canCreateProject) {
+      throw new AppError(`Tài khoản Tier ${tier} không được phép tạo dự án. Vui lòng nâng cấp KYC.`, 403);
+    }
+
+    const start = new Date(project.startDate);
+    const end = new Date(project.endDate);
+    const durationDays = (end - start) / (1000 * 60 * 60 * 24);
+
+    if (limits.maxDurationDays !== null && durationDays > limits.maxDurationDays) {
+      throw new AppError(`Tier ${tier} chỉ được tạo dự án tối đa ${limits.maxDurationDays} ngày (Dự án của bạn: ${Math.ceil(durationDays)} ngày).`, 403);
+    }
+
+    if (project.projectType === PROJECT_TYPE.FUNDED && limits.maxFundingCap !== null) {
+      if (project.targetAmount > limits.maxFundingCap) {
+        throw new AppError(`Tier ${tier} chỉ được gọi vốn tối đa ${limits.maxFundingCap.toLocaleString('vi-VN')} VND.`, 403);
+      }
+    }
+
+    if (limits.maxConcurrentProjects !== null) {
+      const stats = await this.projectRepository.getOrganizerStats(organizerId);
+      const concurrent = stats.activeProjects + stats.pendingProjects;
+
+      if (concurrent >= limits.maxConcurrentProjects) {
+        throw new AppError(`Tier ${tier} chỉ được phép chạy song song tối đa ${limits.maxConcurrentProjects} dự án.`, 403);
+      }
+    }
   }
 
   async _processMediaPayload(mediaArray, organizerId, context) {
@@ -86,118 +125,58 @@ class ProjectService {
     };
   }
 
-  async _emitProjectSubmittedForApproval(project, organizerId) {
-    if (!project?._id) return;
-    if (
-      !this.notificationEventBus ||
-      typeof this.notificationEventBus.emit !== "function"
-    ) {
-      return;
-    }
-
-    const adminUsers = await User.find({ role: { $regex: /^admin$/i } })
-      .select("_id")
-      .lean()
-      .exec();
-
-    const recipientIds = adminUsers
-      .map((user) => String(user._id))
-      .filter(Boolean);
-
-    if (!recipientIds.length) return;
-
-    await this.notificationEventBus.emit(
-      DOMAIN_EVENTS.PROJECT_SUBMITTED_FOR_APPROVAL,
-      {
-        recipientIds,
-        actorId: organizerId,
-        projectId: project._id,
-        projectName: project.title,
-        status: project.status,
-        title: "New project approval request",
-        message: `Project "${project.title}" has been submitted for admin review.`,
-        actionUrl: `/admin/projects/${project._id}?highlight=1`,
-      },
-    );
-  }
-
   async submitForApproval(projectId, organizerId) {
     const project = await this.projectRepository.findById(projectId);
-    if (!project) throw new AppError("Không tìm thấy dự án", 404);
+    if (!project) throw new AppError("Không tìm thấy dự án.", 404);
+
     if (project.organizerId.toString() !== organizerId.toString()) {
-      throw new AppError(
-        "Bạn không có quyền thực hiện hành động này trên dự án của người khác",
-        403,
-      );
+      throw new AppError("Bạn không có quyền thực hiện hành động này trên dự án của người khác.", 403);
+    }
+
+    if (project.status !== PROJECT_STATUS.DRAFT) {
+      throw new AppError("Chỉ có thể Gửi duyệt dự án đang ở trạng thái Bản nháp (DRAFT).", 400);
     }
 
     if (!project.startDate || !project.endDate) {
-      throw new AppError(
-        "Bắt buộc phải có Ngày bắt đầu và Ngày kết thúc.",
-        400,
-      );
+      throw new AppError("Bắt buộc phải cấu hình Ngày bắt đầu và Ngày kết thúc.", 400);
     }
 
-    const isFromHelpRequest =
-      project.fromHelpRequestId &&
-      project.fromHelpRequestId.toString().length > 0;
-
-    if (
-      !isFromHelpRequest &&
-      (!project.documents || project.documents.length === 0)
-    ) {
-      throw new AppError("Bắt buộc phải có tài liệu chứng minh.", 400);
+    const projectObj = project.toObject ? project.toObject() : project;
+    const validationResult = projectCompleteSchema.safeParse(projectObj);
+    
+    if (!validationResult.success) {
+      const issues = validationResult.error.issues || validationResult.error.errors;
+      const firstError = issues && issues.length > 0 ? issues[0].message : "Dữ liệu không hợp lệ";
+      
+      throw new AppError(`Dự án chưa đủ điều kiện gửi duyệt: ${firstError}`, 400);
     }
 
-    if (project.targetAmount > 0) {
-      if (!project.milestones || project.milestones.length === 0) {
-        throw new AppError(
-          "Dự án có gọi vốn bắt buộc phải có mốc giải ngân.",
-          400,
-        );
-      }
-
-      const sumMilestones = project.milestones.reduce(
-        (acc, curr) => acc + curr.targetAmount,
-        0,
-      );
-
-      if (sumMilestones !== project.targetAmount) {
-        throw new AppError("Tổng tiền các mốc không khớp ngân sách.", 400);
-      }
-    }
-
-    if (
-      project.needsVolunteers &&
-      (!project.volunteerRoles || project.volunteerRoles.length === 0)
-    ) {
-      throw new AppError("Dự án thiếu cấu hình vai trò tình nguyện.", 400);
-    }
+    await this._enforceKycTierCaps(projectObj, organizerId);
 
     const updatedProject = await this.projectRepository.transitionStatus(
       projectId,
       PROJECT_STATUS.DRAFT,
-      PROJECT_STATUS.PENDING_APPROVAL,
+      PROJECT_STATUS.PENDING_APPROVAL
     );
 
     if (!updatedProject) {
-      throw new AppError(
-        "Dự án đã được gửi duyệt hoặc không còn ở trạng thái DRAFT. Vui lòng reload trang.",
-        409,
-      );
+      throw new AppError("Xung đột hệ thống: Dự án đã bị đổi trạng thái bởi một phiên làm việc khác.", 409);
     }
 
-    this.jobQueue
-      .addJob("project-ai-scan", "scan-risk", {
-        projectId: updatedProject._id,
-        title: updatedProject.title,
-        description: updatedProject.description,
-      })
-      .catch((err) =>
-        console.error(`[Queue Error] Project ${projectId}:`, err),
-      );
+    this.jobQueue.addJob("project-ai-scan", "scan-risk", {
+      projectId: updatedProject._id,
+      title: updatedProject.title,
+      description: updatedProject.description,
+    }).catch(err => console.error(`[Queue Error] AI Scan failed for ${projectId}:`, err.message));
 
-    await this._emitProjectSubmittedForApproval(updatedProject, organizerId);
+    if (this.eventBus) {
+      this.eventBus.emit(DOMAIN_EVENTS.PROJECT_SUBMITTED_FOR_APPROVAL, {
+        projectId: updatedProject._id,
+        organizerId: organizerId,
+        projectType: updatedProject.projectType,
+        title: updatedProject.title,
+      });
+    }
 
     return updatedProject;
   }
@@ -329,11 +308,11 @@ class ProjectService {
         ...project,
         currentMilestone: currentMilestone
           ? {
-              title: currentMilestone.title,
-              targetAmount: currentMilestone.targetAmount,
-              status: currentMilestone.status,
-              index: milestoneIndex,
-            }
+            title: currentMilestone.title,
+            targetAmount: currentMilestone.targetAmount,
+            status: currentMilestone.status,
+            index: milestoneIndex,
+          }
           : null,
       };
     });
@@ -450,10 +429,32 @@ class ProjectService {
 
           if (projectData.fromHelpRequestId && this.helpRequestRepository) {
             try {
+              const linkedHelpRequest = await this.helpRequestRepository.findById(projectData.fromHelpRequestId);
+
               await this.helpRequestRepository.updateById(
                 projectData.fromHelpRequestId,
                 { linkedProjectId: createdProject._id },
+                session
               );
+
+              if (linkedHelpRequest?.requesterId && this.notificationRepository) {
+                const organizerUser = await this.userRepository.findById(organizerId);
+
+                await this.notificationRepository.create({
+                  recipientId: linkedHelpRequest.requesterId,
+                  actorId: organizerId,
+                  type: 'help_request_assignment_responded',
+                  title: `${organizerUser?.fullName || 'Organizer'} đã đồng ý host yêu cầu của bạn`,
+                  message: `Yêu cầu "${linkedHelpRequest.title}" đã được chấp nhận và chuyển thành dự án.`,
+                  actionUrl: `/projects/${createdProject._id}`,
+                  metadata: {
+                    helpRequestId: String(linkedHelpRequest._id),
+                    projectId: String(createdProject._id),
+                    organizerId: String(organizerId),
+                    action: 'hosted',
+                  },
+                });
+              }
             } catch (err) {
               console.error(
                 "[Project Creation] Failed to link help request:",
