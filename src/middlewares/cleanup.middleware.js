@@ -1,7 +1,12 @@
 import fsPromises from 'fs/promises';
 
 export const autoCleanupTempFiles = (req, res, next) => {
+    let cleaned = false;
+
     const cleanup = async () => {
+        if (cleaned) return;
+        cleaned = true;
+
         const filesToClean = [];
         
         if (req.file) filesToClean.push(req.file);

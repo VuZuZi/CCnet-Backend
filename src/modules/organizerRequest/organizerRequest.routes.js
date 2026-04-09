@@ -1,24 +1,17 @@
 import { Router } from 'express';
+import { getContainer } from '../../container/index.js';
 import { authenticate, authorize } from '../../middlewares/auth.middleware.js';
-import { validateBody } from '../../middlewares/validate.middleware.js';
-import OrganizerRequestController from './organizerRequest.controller.js';
-import OrganizerRequestService from './organizerRequest.service.js';
-import OrganizerRequestRepository from './organizerRequest.repository.js';
+import { validateBody, validateParams } from '../../middlewares/validate.middleware.js';
 import {
   submitOrganizerRequestSchema,
   declineOrganizerRequestSchema,
+  verifyDepositSchema
 } from './organizerRequest.validation.js';
 
-const organizerRequestRepository = new OrganizerRequestRepository();
-const organizerRequestService = new OrganizerRequestService({
-  organizerRequestRepository,
-});
-const organizerRequestController = new OrganizerRequestController({
-  organizerRequestService,
-});
-
 const execute = (action) => (req, res, next) => {
-  return organizerRequestController[action](req, res, next);
+  const container = getContainer();
+  const controller = container.resolve('organizerRequestController');
+  return controller[action](req, res, next);
 };
 
 export const organizerRequestUserRouter = Router();
@@ -31,6 +24,13 @@ organizerRequestUserRouter.post(
   authenticate,
   validateBody(submitOrganizerRequestSchema),
   execute('submitMyRequest')
+);
+
+organizerRequestUserRouter.post(
+  '/:requestId/verify-deposit',
+  authenticate,
+  validateBody(verifyDepositSchema),
+  execute('verifyMicroDeposit')
 );
 
 organizerRequestAdminRouter.get(
