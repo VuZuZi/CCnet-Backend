@@ -53,6 +53,7 @@ class FollowController {
   getMyFollowing = async (req, res, next) => {
     try {
       const type = req.query.type || "user";
+      // 1. Ở đây biến tên là "limit"
       const limit = parseInt(req.query.limit, 10) || 50;
       const cursor = req.query.cursor;
 
@@ -62,7 +63,7 @@ class FollowController {
 
       const data = await this.followService.getMyFollowing(
         req.user.userId,
-        limit,
+        limit, // 🚨 2. SỬA LẠI CHỖ NÀY THÀNH "limit" (Xóa chữ normalizedLimit đi)
         cursor,
         type,
       );

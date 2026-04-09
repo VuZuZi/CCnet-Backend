@@ -11,16 +11,15 @@ class PostController {
       const limit = parseInt(req.query.limit, 10) || 10;
       const cursor = req.query.cursor || null;
       const currentUserId = req.user?.userId || null;
-
-      // 1. LẤY BIẾN TYPE TỪ URL (Frontend đã gửi lên rồi)
       const type = req.query.type || "for-you";
+
       console.log("🚀 [Controller] Frontend yêu cầu bảng tin loại:", type);
 
       const result = await this.postService.getNewsFeed({
         cursor,
         limit,
         userId: currentUserId,
-        type, // 2. TRUYỀN NÓ XUỐNG SERVICE CHỖ NÀY
+        type,
       });
 
       return ApiResponse.success(res, result.data, result.paging);
@@ -115,12 +114,16 @@ class PostController {
     }
   };
 
+  // 🚨 HÀM GET COMMENTS MỚI NÈ: Nằm ngay ngắn trong class
   getComments = async (req, res, next) => {
     try {
       const page = parseInt(req.query.page, 10) || 1;
+      const sort = req.query.sort || "relevant"; // Hứng biến sort
+
       const comments = await this.postService.getComments({
         postId: req.params.id,
         page,
+        sort,
       });
       return ApiResponse.success(res, comments);
     } catch (error) {
@@ -140,6 +143,7 @@ class PostController {
       next(error);
     }
   };
+
   updatePost = async (req, res, next) => {
     try {
       const { content, privacy, removeFiles } = req.body;

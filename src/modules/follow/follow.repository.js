@@ -35,6 +35,7 @@ class FollowRepository {
   }
 
   async findFollowingUsers(followerId, limit = 50, cursor = null) {
+    const normalizedLimit = Number(limit) > 0 ? Number(limit) : 50;
     const query = { followerId, followingId: { $exists: true, $ne: null } };
 
     if (cursor) {
@@ -52,6 +53,20 @@ class FollowRepository {
       .exec();
   }
 
+  async findFollowingProjects(userId, limit, cursor) {
+    const normalizedLimit = Number(limit) > 0 ? Number(limit) : 50;
+    const query = {
+      followerId: userId,
+      projectId: { $exists: true, $ne: null },
+    };
+
+    if (cursor) {
+      query._id = { $lt: cursor };
+    }
+
+    return Follow.find(query).sort({ _id: -1 }).limit(normalizedLimit).lean();
+  }
+
   async findFollowers(userId, limit = 50, cursor = null) {
     const normalizedLimit = Number(limit) > 0 ? Number(limit) : 50;
     const query = { followingId: userId };
@@ -62,32 +77,7 @@ class FollowRepository {
 
     return Follow.find(query)
       .sort({ _id: -1 })
-      .limit(limit)
-      .populate({
-        path: "followingId",
-        select: "_id fullName email avatar username role",
-      })
-      .lean()
-      .exec();
-  }
-
-  async findFollowingProjects(userId, limit, cursor) {
-    const query = {
-      followerId: userId,
-      projectId: { $exists: true, $ne: null },
-    };
-
-    if (cursor) {
-      query._id = { $lt: cursor };
-    }
-
-    return await Follow.find(query).sort({ _id: -1 }).limit(limit).lean(); // 🚨 Không dùng populate ở đây nữa
-  }
-
-  async findFollowers(userId, limit = 50) {
-    return await Follow.find({ followingId: userId })
-      .sort({ _id: -1 })
-      .limit(limit)
+      .limit(normalizedLimit)
       .populate({
         path: "followerId",
         select: "_id fullName email avatar username role",
@@ -102,11 +92,11 @@ class FollowRepository {
   }
 
   async createProjectFollow(userId, projectId) {
-    return await Follow.create({ followerId: userId, projectId });
+    return Follow.create({ followerId: userId, projectId });
   }
 
   async deleteProjectFollow(userId, projectId) {
-    return await Follow.deleteOne({ followerId: userId, projectId });
+    return Follow.deleteOne({ followerId: userId, projectId });
   }
 }
 

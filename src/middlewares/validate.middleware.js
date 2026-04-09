@@ -1,4 +1,4 @@
-import ApiResponse from '../core/Response.js';
+import ApiResponse from "../core/Response.js";
 
 export const validate = (schema) => (req, res, next) => {
   try {
@@ -6,30 +6,45 @@ export const validate = (schema) => (req, res, next) => {
       body: req.body,
       query: req.query,
       params: req.params,
+      files: req.files,
+      file: req.file,
     });
-    req.body = validData.body;
-    req.query = validData.query;
-    req.params = validData.params;
+
+    req.body = validData.body || req.body;
+    req.query = validData.query || req.query;
+    req.params = validData.params || req.params;
+    req.files = validData.files || req.files;
+    req.file = validData.file || req.file;
   } catch (error) {
     if (error.errors) {
-      const errorMessages = error.errors.map((err) => `${err.path.join('.')}: ${err.message}`);
+      const errorMessages = error.errors.map(
+        (err) => `${err.path.join(".")}: ${err.message}`,
+      );
       return ApiResponse.badRequest(res, "Validation Error", errorMessages);
     }
     return next(error);
   }
-  next(); 
+  next();
 };
 
 export const validateBody = (schema) => (req, res, next) => {
   try {
     if (!schema) {
-      throw new Error("CTO Warning: Validation schema is undefined. Check your route imports!");
+      throw new Error(
+        "CTO Warning: Validation schema is undefined. Check your route imports!",
+      );
     }
     req.body = schema.parse(req.body);
   } catch (error) {
     if (error.errors) {
-      const errorMessages = error.errors.map((err) => `${err.path.join('.')}: ${err.message}`);
-      return ApiResponse.badRequest(res, "Body Validation Error", errorMessages);
+      const errorMessages = error.errors.map(
+        (err) => `${err.path.join(".")}: ${err.message}`,
+      );
+      return ApiResponse.badRequest(
+        res,
+        "Body Validation Error",
+        errorMessages,
+      );
     }
     return next(error);
   }
@@ -42,8 +57,14 @@ export const validateQuery = (schema) => (req, res, next) => {
     req.query = schema.parse(req.query);
   } catch (error) {
     if (error.errors) {
-      const errorMessages = error.errors.map((err) => `${err.path.join('.')}: ${err.message}`);
-      return ApiResponse.badRequest(res, "Query Validation Error", errorMessages);
+      const errorMessages = error.errors.map(
+        (err) => `${err.path.join(".")}: ${err.message}`,
+      );
+      return ApiResponse.badRequest(
+        res,
+        "Query Validation Error",
+        errorMessages,
+      );
     }
     return next(error);
   }
@@ -56,8 +77,14 @@ export const validateParams = (schema) => (req, res, next) => {
     req.params = schema.parse(req.params);
   } catch (error) {
     if (error.errors) {
-      const errorMessages = error.errors.map((err) => `${err.path.join('.')}: ${err.message}`);
-      return ApiResponse.badRequest(res, "Params Validation Error", errorMessages);
+      const errorMessages = error.errors.map(
+        (err) => `${err.path.join(".")}: ${err.message}`,
+      );
+      return ApiResponse.badRequest(
+        res,
+        "Params Validation Error",
+        errorMessages,
+      );
     }
     return next(error);
   }

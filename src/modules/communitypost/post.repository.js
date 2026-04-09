@@ -4,7 +4,6 @@ import Comment from "./comment.model.js";
 import mongoose from "mongoose";
 
 class PostRepository {
-  // === READ ===
   async findById(id) {
     return Post.findOne({ _id: id, isDeleted: false }).lean();
   }
@@ -16,7 +15,8 @@ class PostRepository {
     }
     return Post.find(query).sort({ _id: -1 }).limit(limit).lean();
   }
-  // Lấy bài viết để verify quyền edit
+
+
   async findActivePostByIdAndAuthor(postId, authorId) {
     return Post.findOne({
       _id: postId,
@@ -32,6 +32,7 @@ class PostRepository {
       { new: true },
     ).lean();
   }
+
   async getReactionsByUserAndTargets(userId, targetIds) {
     if (!userId || targetIds.length === 0) return [];
     return Reaction.find({
@@ -43,6 +44,14 @@ class PostRepository {
       .lean();
   }
 
+  async getReaction({ userId, postId }, session) {
+    return Reaction.findOne({
+      userId,
+      targetId: postId,
+      targetType: "Post",
+    }).session(session);
+  }
+
   async getComments(postId, skip, limit) {
     return Comment.find({ postId, isDeleted: false })
       .sort({ createdAt: -1 })
@@ -52,17 +61,41 @@ class PostRepository {
       .lean();
   }
 
-  // === WRITE  ===
+  async getCommentsByPostId({ postId, skip, limit, sort }) {
+    let sortQuery = { createdAt: -1 };
+    if (sort === "all") {
+      sortQuery = { createdAt: 1 };
+    } else if (sort === "relevant") {
+      sortQuery = { createdAt: -1 };
+    }
+
+    return Comment.find({ postId, isDeleted: { $ne: true } })
+      .sort(sortQuery)
+      .skip(skip)
+      .limit(limit)
+      .populate("author", "_id fullName avatar username")
+      .lean()
+      .exec();
+  }
+
   async create(data, session = null) {
     const [post] = await Post.create([data], { session });
     return post;
   }
 
-  async upsertReaction({ userId, postId, type }, session) {
-    return Reaction.findOneAndUpdate(
+  async createReaction({ userId, postId, type }, session) {
+    const [reaction] = await Reaction.create(
+      [{ userId, targetId: postId, targetType: "Post", type }],
+      { session },
+    );
+    return reaction;
+  }
+
+  async updateReaction({ userId, postId, type }, session) {
+    return Reaction.updateOne(
       { userId, targetId: postId, targetType: "Post" },
       { $set: { type } },
-      { upsert: true, new: true, includeResultMetadata: true, session },
+      { session },
     );
   }
 
@@ -73,12 +106,29 @@ class PostRepository {
     );
   }
 
-  async incrementPostStats(postId, field, amount, session) {
-    return Post.updateOne(
-      { _id: postId },
-      { $inc: { [`stats.${field}`]: amount } },
-      { session },
+  async upsertReaction({ userId, postId, type }, session) {
+    return Reaction.findOneAndUpdate(
+      { userId, targetId: postId, targetType: "Post" },
+      { $set: { type } },
+      { upsert: true, new: true, includeResultMetadata: true, session },
     );
+  }
+
+
+  async incrementPostStats(postId, field, value, session) {
+    const updatedPost = await Post.findOneAndUpdate(
+      { _id: postId },
+      { $inc: { [`stats.${field}`]: value } },
+      { session, new: true },
+    );
+    if (updatedPost && updatedPost.stats.likes < 0) {
+      await Post.updateOne(
+        { _id: postId },
+        { $set: { "stats.likes": 0 } },
+        { session },
+      );
+    }
+    return updatedPost;
   }
 
   async createComment(data, session) {
