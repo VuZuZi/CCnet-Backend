@@ -20,12 +20,21 @@ router.get(
   validate(PostValidation.pagination),
   execute("getNewsFeed"),
 );
+
+router.get(
+  "/saved/all",
+  authenticate,
+  validate(PostValidation.pagination),
+  execute("getSavedPosts"),
+);
+
 router.get(
   "/:id",
   optionalAuthenticate,
   validate(PostValidation.paramsId),
   execute("getPostById"),
 );
+
 router.get(
   "/:id/comments",
   optionalAuthenticate,
@@ -55,18 +64,28 @@ router.delete(
   validate(PostValidation.paramsId),
   execute("deletePost"),
 );
+
+router.post(
+  "/:id/save",
+  authenticate,
+  validate(PostValidation.paramsId),
+  execute("toggleSavePost"),
+);
+
 router.post(
   "/:id/reaction",
   authenticate,
   validate(PostValidation.toggleReaction),
   execute("toggleReaction"),
 );
+
 router.post(
   "/:id/comments",
   authenticate,
   validate(PostValidation.addComment),
   execute("addComment"),
 );
+
 router.post(
   "/:id/report",
   authenticate,
