@@ -1,4 +1,3 @@
-// backend/src/modules/volunteer/volunteer.controller.js
 import ApiResponse from '../../core/Response.js';
 
 class VolunteerController {
@@ -6,12 +5,11 @@ class VolunteerController {
     this.volunteerService = volunteerService;
   }
 
-  // checkApply
   application = async (req, res, next) => {
     try {
       const data = await this.volunteerService.application(
-          req.user.userId,
-          req.query
+        req.user.userId,
+        req.query
       );
       return ApiResponse.success(res, data, 'Applied successfully');
     } catch (e) {
@@ -19,36 +17,33 @@ class VolunteerController {
     }
   };
 
-  // Apply volunteer
   applyVolunteer = async (req, res, next) => {
     try {
-      //  Sửa: chỉ truyền 2 tham số
       const data = await this.volunteerService.applyVolunteer(
-          req.user.userId,
-          req.body
+        req.user.userId,
+        req.body
       );
       return ApiResponse.success(res, data, 'Applied successfully');
     } catch (e) {
       next(e);
     }
   };
-  //restore
+
   restoreVolunteer = async (req, res, next) => {
     try {
       const { id } = req.params;
-      //  Gọi đúng tên method trong service
       const data = await this.volunteerService.restoreVolunteer(id, req.user.userId);
       return ApiResponse.success(res, data, 'Restored successfully');
     } catch (e) {
       next(e);
     }
   };
-  // UPDATE application
+
   updateApplication = async (req, res, next) => {
     try {
       const { id } = req.params;
-      const { skills,status, availability, motivation } = req.body;
-      const data = await this.volunteerService.updateApplication(req.user.userId,id, {
+      const { skills, status, availability, motivation } = req.body;
+      const data = await this.volunteerService.updateApplication(req.user.userId, id, {
         skills,
         status,
         availability,
@@ -70,13 +65,12 @@ class VolunteerController {
     }
   };
 
-  // Approve application
   approveVolunteer = async (req, res, next) => {
     try {
       const { id } = req.params;
       const data = await this.volunteerService.approveVolunteer(
-            id,
-            req.user.userId
+        id,
+        req.user.userId
       );
       return ApiResponse.success(res, data, 'Approved successfully');
     } catch (e) {
@@ -84,15 +78,13 @@ class VolunteerController {
     }
   };
 
-  // Reject application
   rejectVolunteer = async (req, res, next) => {
     try {
       const { rejectReason } = req.body;
-      //  Thêm adminId
       const data = await this.volunteerService.rejectVolunteer(
-          req.params.id,
-          req.user.userId,
-          rejectReason
+        req.params.id,
+        req.user.userId,
+        rejectReason
       );
       return ApiResponse.success(res, data, 'Rejected successfully');
     } catch (e) {
@@ -100,14 +92,13 @@ class VolunteerController {
     }
   };
 
-  // Get my applications
   getMyApplications = async (req, res, next) => {
     try {
       const { limit, cursor } = req.query;
       const data = await this.volunteerService.getMyApplications(
-          req.user.userId,
-          limit,
-          cursor
+        req.user.userId,
+        limit,
+        cursor
       );
       return ApiResponse.success(res, data, 'Applications retrieved');
     } catch (e) {
@@ -137,26 +128,26 @@ class VolunteerController {
     }
   };
 
-  //  THÊM METHOD MỚI: Get applications của project theo status
   getProjectApplications = async (req, res, next) => {
     try {
       const { projectId } = req.params;
-      const { status, limit = 20, cursor } = req.query;  // ← Lấy status từ query
+      const { status, limit = 20, cursor } = req.query;
+
       if (!projectId) {
         return ApiResponse.error(res, 'Missing projectId', 400);
       }
 
-      // Kiểm tra projectId hợp lệ
       if (projectId.length !== 24) {
         return ApiResponse.error(res, 'Invalid project ID format', 400);
       }
 
       const data = await this.volunteerService.getProjectApplications(
-          projectId,
-          status,           // ← Truyền status vào service
-          parseInt(limit),
-          cursor
+        projectId,
+        status,
+        parseInt(limit, 10),
+        cursor
       );
+
       return ApiResponse.success(res, data, 'Project applications retrieved');
     } catch (e) {
       console.error('❌ Error in getProjectApplications:', e);
@@ -164,7 +155,6 @@ class VolunteerController {
     }
   };
 
-  // Get pending applications (giữ lại để tương thích)
   getProjectPendingApplications = async (req, res, next) => {
     try {
       const { projectId } = req.params;
@@ -178,12 +168,10 @@ class VolunteerController {
         return ApiResponse.error(res, 'Invalid project ID format', 400);
       }
 
-      //  Gọi method getProjectApplications với status 'PENDING'
-      const data = await this.volunteerService.getProjectApplications(
-          projectId,
-          req.params.status,
-          parseInt(limit),
-          cursor
+      const data = await this.volunteerService.getProjectPendingApplications(
+        projectId,
+        parseInt(limit, 10),
+        cursor
       );
 
       return ApiResponse.success(res, data, 'Pending applications retrieved');
@@ -193,7 +181,6 @@ class VolunteerController {
     }
   };
 
-  // Get volunteer stats
   getStats = async (req, res, next) => {
     try {
       const data = await this.volunteerService.getStats(req.params.id);

@@ -34,14 +34,21 @@ class OrganizerRequestController {
     }
   };
 
-  listAdminRequests = async (req, res, next) => {
-    try {
-      const result = await this.organizerRequestService.listAdminRequests(req.query);
-      return ApiResponse.success(res, result, 'Lấy danh sách đơn Organizer thành công');
-    } catch (error) {
-      next(error);
-    }
-  };
+ listAdminRequests = async (req, res, next) => {
+  try {
+    console.log('[OrganizerRequestController] req.user =', req.user);
+    console.log('[OrganizerRequestController] req.query =', req.query);
+
+    const result = await this.organizerRequestService.listAdminRequests(req.query);
+
+    console.log('[OrganizerRequestController] result ok, total =', result?.pagination?.total);
+
+    return ApiResponse.success(res, result, 'Lấy danh sách đơn Organizer thành công');
+  } catch (error) {
+    console.error('[OrganizerRequestController] listAdminRequests error:', error);
+    next(error);
+  }
+};
 
   getAdminRequestDetail = async (req, res, next) => {
     try {

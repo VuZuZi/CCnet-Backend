@@ -7,6 +7,20 @@ function ensureText(value, fallback) {
   return fallback;
 }
 
+function buildCommentPreview(value, maxLength = 80) {
+  const text = ensureText(value, '');
+
+  if (!text) {
+    return '';
+  }
+
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, maxLength).trim()}...`;
+}
+
 export function buildNotificationPayload(input) {
   const { type } = input;
 
@@ -79,13 +93,102 @@ export function buildNotificationPayload(input) {
       return {
         title: ensureText(input.title, 'System announcement'),
         message: ensureText(input.message, 'You have a new system notification.'),
-        actionUrl: ensureText(input.actionUrl, '/notifications'),
+        actionUrl: input.actionUrl ? String(input.actionUrl).trim() : null,
         entityType: 'system',
         entityId: input.entityId || null,
         metadata: {
           severity: input.severity || 'info',
         },
       };
+
+    // --- Cases from feature/Hieu_Donate ---
+    case NOTIFICATION_TYPES.DONATION_SUCCESSFUL:
+      return {
+        title: 'Nhận được khoản tài trợ mới',
+        message: `${ensureText(input.donorName, 'Một nhà hảo tâm')} vừa ủng hộ ${input.amount ? input.amount.toLocaleString('vi-VN') : 'một số tiền'} VNĐ cho dự án "${ensureText(input.projectName, 'của bạn')}".`,
+        actionUrl: ensureText(input.actionUrl, `/projects/${input.entityId || ''}`),
+        entityType: 'project',
+        entityId: input.entityId || null,
+        metadata: {
+          donorName: input.donorName || null,
+          amount: input.amount || 0,
+          projectName: input.projectName || null,
+          transactionId: input.transactionId || null,
+        },
+      };
+
+    case NOTIFICATION_TYPES.TRANSACTION_REFUNDED: {
+      const refundReason = input.isAutoRefund ? 'từ dự án đã hủy' : 'theo yêu cầu của bạn';
+      return {
+        title: 'Hoàn tiền thành công',
+        message: `Số tiền ${input.amount ? input.amount.toLocaleString('vi-VN') : ''} VNĐ đã được hoàn vào ví nội bộ ${refundReason}.`,
+        actionUrl: ensureText(input.actionUrl, '/wallet'),
+        entityType: 'transaction',
+        entityId: input.entityId || null,
+        metadata: { amount: input.amount || 0, isAutoRefund: input.isAutoRefund },
+      };
+    }
+
+    case NOTIFICATION_TYPES.TRANSACTION_WITHDRAWAL_REQUESTED:
+      return {
+        title: 'Yêu cầu rút tiền đang xử lý',
+        message: `Hệ thống đã ghi nhận lệnh rút ${input.amount ? input.amount.toLocaleString('vi-VN') : ''} VNĐ về tài khoản ngân hàng của bạn.`,
+        actionUrl: ensureText(input.actionUrl, '/wallet/history'),
+        entityType: 'transaction',
+        entityId: input.entityId || null,
+        metadata: { amount: input.amount || 0 },
+      };
+
+    case NOTIFICATION_TYPES.TRANSACTION_FAILED:
+      return {
+        title: 'Giao dịch thất bại',
+        message: 'Giao dịch ủng hộ của bạn không thành công (có thể do lỗi từ phía ngân hàng hoặc bạn đã chủ động hủy).',
+        actionUrl: ensureText(input.actionUrl, '/wallet/history'),
+        entityType: 'transaction',
+        entityId: input.entityId || null,
+        metadata: { amount: input.amount || 0 },
+      };
+
+    // --- Cases from dev ---
+    case NOTIFICATION_TYPES.POST_REACTED:
+      return {
+        title: 'New reaction on your post',
+        message: `${ensureText(input.actorName, 'Someone')} liked your post.`,
+        actionUrl: ensureText(input.actionUrl, `/community/${input.postId || ''}`),
+        entityType: 'post',
+        entityId: input.postId || null,
+        metadata: {
+          postId: input.postId || null,
+          reactionType: input.reactionType || 'like',
+          actorName: input.actorName || null,
+          actorAvatar: input.actorAvatar || null,
+        },
+      };
+
+    case NOTIFICATION_TYPES.POST_COMMENTED: {
+      const actorName = ensureText(input.actorName, 'Someone');
+      const previewContent = buildCommentPreview(input.previewContent);
+
+      return {
+        title: 'New comment on your post',
+        message: previewContent
+          ? `${actorName} commented on your post: "${previewContent}"`
+          : `${actorName} commented on your post.`,
+        actionUrl: ensureText(
+          input.actionUrl,
+          `/community/${input.postId || ''}?commentId=${input.commentId || ''}`
+        ),
+        entityType: 'post_comment',
+        entityId: input.commentId || null,
+        metadata: {
+          postId: input.postId || null,
+          commentId: input.commentId || null,
+          actorName: input.actorName || null,
+          actorAvatar: input.actorAvatar || null,
+          previewContent: input.previewContent || null,
+        },
+      };
+    }
 
     default:
       throw new Error(`Unsupported notification type: ${type}`);

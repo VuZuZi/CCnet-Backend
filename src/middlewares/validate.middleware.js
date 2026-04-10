@@ -1,5 +1,32 @@
-import AppError from '../core/AppError.js';
+import { ZodError } from 'zod';
 import ApiResponse from '../core/Response.js';
+import AppError from '../core/AppError.js';
+
+const getErrorMessages = (error) => {
+  if (error instanceof ZodError) {
+    return error.issues.map((err) => `${err.path.join('.')}: ${err.message}`);
+  }
+
+  if (Array.isArray(error?.errors)) {
+    return error.errors.map((err) => `${(err.path || []).join('.')}: ${err.message}`);
+  }
+
+  if (Array.isArray(error?.issues)) {
+    return error.issues.map((err) => `${(err.path || []).join('.')}: ${err.message}`);
+  }
+
+  return null;
+};
+
+const handleValidationError = (res, title, error) => {
+  const errorMessages = getErrorMessages(error);
+
+  if (!errorMessages) {
+    return false;
+  }
+
+  return ApiResponse.error(res, title, 400, errorMessages);
+};
 
 export const validate = (schema) => (req, res, next) => {
   try {
@@ -16,67 +43,67 @@ export const validate = (schema) => (req, res, next) => {
     req.params = validData.params || req.params;
     req.files = validData.files || req.files;
     req.file = validData.file || req.file;
-    
+
     next();
   } catch (error) {
-    const issues = error.issues || error.errors;
-    if (issues) {
-      const errorMessages = issues.map((err) => `${err.path.join('.')}: ${err.message}`);
-      return ApiResponse.error(res, "Validation Error", 400, errorMessages);
-    }
+    const handled = handleValidationError(res, 'Validation Error', error);
+    if (handled) return;
     return next(error);
   }
 };
 
 export const validateBody = (schema) => (req, res, next) => {
   try {
-    // Dungfix: Cảnh báo thiếu schema
     if (!schema) {
       throw new Error(
-        "CTO Warning: Validation schema is undefined. Check your route imports!"
+        'CTO Warning: Validation schema is undefined. Check your route imports!'
       );
     }
+
     req.body = schema.parse(req.body);
     next();
   } catch (error) {
-    const issues = error.issues || error.errors;
-    if (issues) {
-      const formattedErrors = issues.map((err) => ({
+    if (error instanceof ZodError || error?.issues || error?.errors) {
+      const formattedErrors = (error.issues || error.errors || []).map((err) => ({
         field: err.path?.join('.') || 'unknown',
-        message: err.message
+        message: err.message,
       }));
-      return next(new AppError("Dữ liệu đầu vào không hợp lệ", 400, formattedErrors));
+
+      return next(new AppError('Dữ liệu đầu vào không hợp lệ', 400, formattedErrors));
     }
-    next(error);
+
+    const handled = handleValidationError(res, 'Body Validation Error', error);
+    if (handled) return;
+    return next(error);
   }
 };
 
 export const validateQuery = (schema) => (req, res, next) => {
   try {
-    if (!schema) throw new Error("Query Validation schema is undefined.");
+    if (!schema) {
+      throw new Error('Query Validation schema is undefined.');
+    }
+
     req.query = schema.parse(req.query);
     next();
   } catch (error) {
-    const issues = error.issues || error.errors;
-    if (issues) {
-      const errorMessages = issues.map((err) => `${err.path.join('.')}: ${err.message}`);
-      return ApiResponse.error(res, "Query Validation Error", 400, errorMessages);
-    }
+    const handled = handleValidationError(res, 'Query Validation Error', error);
+    if (handled) return;
     return next(error);
   }
 };
 
 export const validateParams = (schema) => (req, res, next) => {
   try {
-    if (!schema) throw new Error("Params Validation schema is undefined.");
+    if (!schema) {
+      throw new Error('Params Validation schema is undefined.');
+    }
+
     req.params = schema.parse(req.params);
     next();
   } catch (error) {
-    const issues = error.issues || error.errors;
-    if (issues) {
-      const errorMessages = issues.map((err) => `${err.path.join('.')}: ${err.message}`);
-      return ApiResponse.error(res, "Params Validation Error", 400, errorMessages);
-    }
+    const handled = handleValidationError(res, 'Params Validation Error', error);
+    if (handled) return;
     return next(error);
   }
 };

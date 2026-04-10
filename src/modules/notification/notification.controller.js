@@ -60,6 +60,7 @@ export class NotificationController {
     this.streamCookieOptions = { ...streamCookieOptions };
 
     this.getNotifications = this.getNotifications.bind(this);
+    this.getNotificationById = this.getNotificationById.bind(this);
     this.getUnreadCount = this.getUnreadCount.bind(this);
     this.markAsRead = this.markAsRead.bind(this);
     this.markAllAsRead = this.markAllAsRead.bind(this);
@@ -89,6 +90,22 @@ export class NotificationController {
         recipientId,
         page: query.page,
         limit: query.limit,
+      });
+
+      return this.responsePresenter.success(res, data);
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  async getNotificationById(req, res, next) {
+    try {
+      const recipientId = this.requireUserId(req);
+      const { id } = this.validateInput(notificationIdSchema, req.params);
+
+      const data = await this.notificationService.getNotificationById({
+        id,
+        recipientId,
       });
 
       return this.responsePresenter.success(res, data);

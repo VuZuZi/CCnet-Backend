@@ -3,10 +3,12 @@ import { PROJECT_STATUS, MILESTONE_STATUS, PROJECT_TYPE } from "./project.consta
 import { KYC_TIER_LIMITS } from "../user/kyc.constant.js";
 import { DOMAIN_EVENTS } from "../../config/notification.js";
 import { projectCompleteSchema } from "./project.validation.js";
+import { ProjectDTO } from "./project.dto.js";
 
 class ProjectService {
   constructor({
     projectRepository,
+    escrowRepository,
     mediaRepository,
     cloudinaryProvider,
     jobQueue,
@@ -19,6 +21,7 @@ class ProjectService {
     eventBus
   }) {
     this.projectRepository = projectRepository;
+    this.escrowRepository = escrowRepository;
     this.mediaRepository = mediaRepository;
     this.cloudinaryProvider = cloudinaryProvider;
     this.jobQueue = jobQueue;
@@ -143,11 +146,11 @@ class ProjectService {
 
     const projectObj = project.toObject ? project.toObject() : project;
     const validationResult = projectCompleteSchema.safeParse(projectObj);
-    
+
     if (!validationResult.success) {
       const issues = validationResult.error.issues || validationResult.error.errors;
       const firstError = issues && issues.length > 0 ? issues[0].message : "Dữ liệu không hợp lệ";
-      
+
       throw new AppError(`Dự án chưa đủ điều kiện gửi duyệt: ${firstError}`, 400);
     }
 
@@ -190,29 +193,28 @@ class ProjectService {
   }
 
   async getExploreProjects(queryParams) {
-    const { page = 1, limit = 9, category, location } = queryParams;
-    const skip = (Math.max(1, page) - 1) * Math.max(1, limit);
+    const { page, limit, category, location, sort } = queryParams; 
+    const skip = (page - 1) * limit;
 
     if (skip > 5000) {
-      throw new AppError(
-        "Truy vấn quá sâu. Vui lòng sử dụng bộ lọc hoặc tìm kiếm để có kết quả chính xác hơn.",
-        400,
-      );
+      throw new AppError("Truy vấn quá sâu. Vui lòng sử dụng bộ lọc để có kết quả chính xác hơn.", 400);
     }
 
     const filter = {};
-    let textSearch = null;
-
+    
     if (category) filter.category = category;
-    if (location) {
-      textSearch = location;
+
+    if (sort === 'ending_soon') {
+        filter.endDate = { $gt: new Date() };
+        filter.status = { $in: [PROJECT_STATUS.FUNDING, PROJECT_STATUS.RECRUITING] };
     }
 
     const result = await this.projectRepository.findAllProjects({
       filter,
       skip,
       limit,
-      textSearch,
+      sortType: sort,
+      textSearch: location || null,
     });
 
     const totalPages = Math.ceil(result.total / limit);
@@ -221,7 +223,7 @@ class ProjectService {
       projects: result.projects,
       pagination: {
         totalItems: result.total,
-        currentPage: Number(page),
+        currentPage: page,
         totalPages,
         hasNextPage: page < totalPages,
       },
@@ -234,31 +236,34 @@ class ProjectService {
       throw new AppError("Không tìm thấy dự án hoặc dự án đã bị xóa", 404);
     }
 
-    const redisKey = `project:${projectId}:views`;
-    this.redis
-      .incr(redisKey)
-      .catch((err) => console.error(`[Redis Error]:`, err.message));
+    let escrow = null;
+    if (project.projectType === PROJECT_TYPE.FUNDED) {
+      escrow = await this.escrowRepository.findByProjectId(projectId);
+    }
 
+    this.redis.incr(`project:${projectId}:views`).catch(() => { });
+
+    const orgId = project.organizerId?._id || project.organizerId;
     let isFollowing = false;
     let isFollowingOrganizer = false;
 
-    if (userId && this.followRepository) {
-      isFollowing = await this.followRepository.existsProjectFollow(
-        userId,
-        projectId,
-      );
-
-      const orgId = project.organizerId?._id || project.organizerId;
-      if (orgId) {
-        isFollowingOrganizer = await this.followRepository.exists(
-          userId,
-          orgId,
-        );
-      }
+    if (userId) {
+      [isFollowing, isFollowingOrganizer] = await Promise.all([
+        this.followRepository.existsProjectFollow(userId, projectId),
+        orgId ? this.followRepository.exists(userId, orgId) : Promise.resolve(false)
+      ]);
     }
 
-    const projectData = project.toObject ? project.toObject() : project;
-    return { ...projectData, isFollowing, isFollowingOrganizer };
+    const isOrganizer = userId && String(orgId) === String(userId);
+    const safeProjectData = isOrganizer
+      ? ProjectDTO.toOrganizerDetail(project, escrow)
+      : ProjectDTO.toPublicDetail(project, escrow);
+
+    return {
+      ...safeProjectData,
+      isFollowing,
+      isFollowingOrganizer
+    };
   }
 
   async getWorkspaceStats(organizerId) {
@@ -272,12 +277,13 @@ class ProjectService {
   }
 
   async getWorkspaceProjects(organizerId, queryParams) {
-    const { page = 1, limit = 10, status = "ALL" } = queryParams;
-    const skip = (Math.max(1, page) - 1) * Math.max(1, limit);
+    const { page, limit, status, sort } = queryParams;
+    const skip = (page - 1) * limit;
 
     const result = await this.projectRepository.findOrganizerProjects({
       organizerId,
       status,
+      sortType: sort,
       skip,
       limit,
     });
@@ -323,7 +329,7 @@ class ProjectService {
       projects: formattedProjects,
       pagination: {
         totalItems: result.total,
-        currentPage: Number(page),
+        currentPage: page,
         totalPages,
         hasNextPage: page < totalPages,
       },

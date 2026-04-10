@@ -34,7 +34,54 @@ class AdminRepository {
   }
 
   async findAllUsers() {
-    return await User.find().select("-password").sort({ createdAt: -1 });
+    return await User.find()
+      .select("fullName email avatar role status isActive createdAt")
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec();
+  }
+
+  async findUsers({ search = "", page = 1, limit = 20, role = "" } = {}) {
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.max(1, Math.min(50, Number(limit) || 20));
+    const skip = (safePage - 1) * safeLimit;
+
+    const filter = {};
+
+    if (role) {
+      filter.role = String(role).trim().toLowerCase();
+    }
+
+    if (String(search || "").trim()) {
+      const keyword = String(search).trim();
+
+      filter.$or = [
+        { fullName: { $regex: keyword, $options: "i" } },
+        { email: { $regex: keyword, $options: "i" } },
+        { username: { $regex: keyword, $options: "i" } },
+      ];
+    }
+
+    const [items, total] = await Promise.all([
+      User.find(filter)
+        .select("fullName email avatar role status isActive createdAt")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(safeLimit)
+        .lean()
+        .exec(),
+      User.countDocuments(filter),
+    ]);
+
+    return {
+      items,
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / safeLimit)),
+      },
+    };
   }
 
   async findUserById(id) {
@@ -101,4 +148,5 @@ class AdminRepository {
       .exec();
   }
 }
+
 export default AdminRepository;

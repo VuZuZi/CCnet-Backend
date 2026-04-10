@@ -28,6 +28,13 @@ class NotificationRepository {
     };
   }
 
+  async findByIdForRecipient({ id, recipientId }) {
+    return NotificationModel.findOne({
+      _id: id,
+      recipientId,
+    }).lean();
+  }
+
   async countUnread(recipientId) {
     return NotificationModel.countDocuments({ recipientId, isRead: false });
   }
