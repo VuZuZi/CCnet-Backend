@@ -223,7 +223,7 @@ export const projectCompleteSchema = z.object({
 
 export const exploreQuerySchema = z.object({
   page: z.coerce.number().int().min(1, "Page phải lớn hơn 0").optional().default(1),
-  limit: z.coerce.number().int().min(1).max(50, "Limit tối đa là 50").optional().default(9),
+  limit: z.coerce.number().int().min(1).max(100, "Limit tối đa là 100").optional().default(9),
   category: z.enum(Object.values(PROJECT_CATEGORY)).optional(),
   location: z.string().trim().max(100).optional(),
   sort: z.enum(['newest', 'trending', 'ending_soon']).optional().default('newest'),
@@ -231,7 +231,7 @@ export const exploreQuerySchema = z.object({
 
 export const workspaceQuerySchema = z.object({
   page: z.coerce.number().int().min(1, "Page phải lớn hơn 0").optional().default(1),
-  limit: z.coerce.number().int().min(1).max(50, "Limit tối đa là 50").optional().default(10),
+  limit: z.coerce.number().int().min(1).max(100, "Limit tối đa là 100").optional().default(10),
   status: z.enum([...Object.values(PROJECT_STATUS), 'ALL']).optional().default('ALL'),
   sort: z.enum(['newest', 'oldest']).optional().default('newest'),
 }).strict();

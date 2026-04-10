@@ -426,18 +426,12 @@ export default class HelpRequestService {
   }
 
   async getAssignedRequestsForOrganizer(organizerId, filters = {}, options = {}) {
-    console.log(`[QUERY-ASSIGNED] organizerId=${organizerId}, filters=`, filters);
-    
     const queryFilters = {
       ...filters,
       assignedOrganizerId: organizerId,
     };
-    console.log(`[QUERY-ASSIGNED] Final query filters:`, queryFilters);
-    
     const result = await this.getHelpRequests(queryFilters, options);
-    
-    console.log(`[QUERY-ASSIGNED] Found ${result.total || result.length || 0} requests for organizer`);
-    
+
     return result;
   }
 

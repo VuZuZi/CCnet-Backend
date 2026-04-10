@@ -47,7 +47,6 @@ export default class HelpRequestRepository {
       populate = [],
       select,
     } = options;
-    console.log(`[REPO-FIND] Query filter:`, filter);
 
     const skip = (page - 1) * limit;
     const query = HelpRequest.find(filter);
@@ -69,7 +68,6 @@ export default class HelpRequestRepository {
       query.exec(),
       HelpRequest.countDocuments(filter),
     ]);
-    console.log(`[REPO-FIND] Query result:`, { total, returned: data.length });
 
     return {
       data,
