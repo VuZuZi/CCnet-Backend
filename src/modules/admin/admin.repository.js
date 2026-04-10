@@ -103,19 +103,21 @@ class AdminRepository {
   // }
 
   async findAllProjects() {
-    return await Post.find()
-      .populate("author", "username email")
-      .sort({ createdAt: -1 });
+    return await Project.find()
+      .populate("organizerId", "fullName email kyc projectCount isVerified")
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec();
   }
 
   async deleteProject(id) {
-    return await Post.findByIdAndDelete(id);
+    return await Project.findByIdAndDelete(id);
   }
 
   async findProjectsForReview({ skip = 0, limit = 10 }) {
-    return await Project.find({ 
-        status: { $in: ['PENDING_APPROVAL', 'REVISION_REQUESTED'] } 
-      })
+    return await Project.find({
+      status: { $in: ['PENDING_APPROVAL', 'REVISION_REQUESTED'] }
+    })
       .populate("organizerId", "fullName email kyc")
       .sort({ updatedAt: 1 }) // Dự án nào đợi lâu nhất lên đầu
       .skip(skip)

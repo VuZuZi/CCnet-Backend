@@ -126,19 +126,26 @@ class AdminService {
 
     const normalized = String(targetStatus).trim().toUpperCase();
 
+    let mappedIntent = normalized;
+    if (normalized === "PENDING") mappedIntent = PROJECT_STATUS.PENDING_APPROVAL;
+    if (normalized === "APPROVED" || normalized === "ACTIVE") {
+      mappedIntent = "APPROVED_INTENT";
+    }
+
     return await this.transactionManager.runInTransaction(async (session) => {
       const project = await this.projectRepository.findById(projectId, session);
       if (!project) throw new AppError("Không tìm thấy dự án", 404);
 
-      // Chỉ cho phép duyệt các dự án đang chờ hoặc đang sửa
+      // Chỉ giới hạn các hành động review và từ chối khi dự án đang ở trạng thái review
       if (
+        [PROJECT_STATUS.REVISION_REQUESTED, PROJECT_STATUS.REJECTED].includes(mappedIntent) &&
         ![
           PROJECT_STATUS.PENDING_APPROVAL,
           PROJECT_STATUS.REVISION_REQUESTED,
         ].includes(project.status)
       ) {
         throw new AppError(
-          `Không thể duyệt dự án đang ở trạng thái ${project.status}`,
+          `Không thể xử lý hành động này khi dự án đang ở trạng thái ${project.status}`,
           400
         );
       }
@@ -146,12 +153,6 @@ class AdminService {
       let finalStatus = null;
       const updateData = {};
       let userUpdate = null;
-
-      let mappedIntent = normalized;
-      if (normalized === "PENDING") mappedIntent = PROJECT_STATUS.PENDING_APPROVAL;
-      if (normalized === "APPROVED" || normalized === "ACTIVE") {
-        mappedIntent = "APPROVED_INTENT";
-      }
 
       // Xử lý Yêu cầu chỉnh sửa
       if (mappedIntent === PROJECT_STATUS.REVISION_REQUESTED) {
@@ -219,240 +220,259 @@ class AdminService {
         updateData.status = finalStatus;
         updateData.approvedBy = adminId;
         updateData.approvedAt = new Date();
+      }
 
-        // Nếu dự án gây quỹ, tự động khởi tạo ví Escrow
-        if (project.projectType === PROJECT_TYPE.FUNDED) {
-          const existingEscrow = await this.escrowRepository.findByProjectId(projectId, session);
-          if (!existingEscrow) {
-            await this.escrowRepository.create({
-              projectId: projectId,
-              availableBalance: 0,
-              totalDeposited: 0,
-              pendingRefunds: 0,
-              completedRefunds: 0,
-              totalDisbursed: 0
-            }, session);
-          }
+      if (mappedIntent === PROJECT_STATUS.PAUSED) {
+        finalStatus = PROJECT_STATUS.PAUSED;
+        updateData.status = finalStatus;
+      }
+
+      if (mappedIntent === "COMPLETED") {
+        finalStatus = PROJECT_STATUS.COMPLETED_SUCCESSFULLY;
+        updateData.status = finalStatus;
+      }
+
+      if (mappedIntent === "CANCELLED") {
+        finalStatus = PROJECT_STATUS.CANCELLED_BY_PLATFORM;
+        updateData.status = finalStatus;
+      }
+
+      if (mappedIntent === PROJECT_STATUS.DRAFT) {
+        finalStatus = PROJECT_STATUS.DRAFT;
+        updateData.status = finalStatus;
+      }
+
+      if (mappedIntent === PROJECT_STATUS.PENDING_APPROVAL) {
+        finalStatus = PROJECT_STATUS.PENDING_APPROVAL;
+        updateData.status = finalStatus;
+      }
+
+      // Nếu dự án gây quỹ, tự động khởi tạo ví Escrow
+      if (project.projectType === PROJECT_TYPE.FUNDED) {
+        const existingEscrow = await this.escrowRepository.findByProjectId(projectId, session);
+        if (!existingEscrow) {
+          await this.escrowRepository.create({
+            projectId: projectId,
+            availableBalance: 0,
+            totalDeposited: 0,
+            pendingRefunds: 0,
+            completedRefunds: 0,
+            totalDisbursed: 0
+          }, session);
         }
       }
 
       if (!finalStatus) {
-        throw new AppError("Trạng thái điều hướng không hợp lệ", 400);
-      }
+      throw new AppError("Trạng thái điều hướng không hợp lệ", 400);
+    }
 
-      const updatedProject = await this.projectRepository.updateById(
-        projectId,
-        updateData,
+    const updatedProject = await this.projectRepository.updateById(
+      projectId,
+      updateData,
+      session
+    );
+
+    // Cập nhật thông tin User nếu có (cooling period)
+    if (userUpdate) {
+      await this.userRepository.updateById(
+        project.organizerId,
+        userUpdate,
         session
       );
+    }
 
-      // Cập nhật thông tin User nếu có (cooling period)
-      if (userUpdate) {
-        await this.userRepository.updateById(
-          project.organizerId,
-          userUpdate,
-          session
-        );
-      }
+    // Nếu trạng thái mới là ACTIVE, đồng bộ nhóm chat
+    if (String(updatedProject?.status) === PROJECT_STATUS.ACTIVE) {
+      await this._syncProjectConversationOnActive(updatedProject, adminId);
+    }
 
-      // Nếu trạng thái mới là ACTIVE, đồng bộ nhóm chat
-      if (String(updatedProject?.status) === PROJECT_STATUS.ACTIVE) {
-        await this._syncProjectConversationOnActive(updatedProject, adminId);
-      }
-
-      // Gửi thông báo cho Organizer qua Event Bus
-      this._emitProjectStatusUpdated({
-        project: updatedProject,
-        actorId: adminId,
-        feedback: updateData.rejectionReason,
-      });
-
-      return updatedProject;
+    // Gửi thông báo cho Organizer qua Event Bus
+    this._emitProjectStatusUpdated({
+      project: updatedProject,
+      actorId: adminId,
+      feedback: updateData.rejectionReason,
     });
+
+    return updatedProject;
+  });
+};
+
+deleteProject = async (projectId) => {
+  const project = await this.projectRepository.deleteById(projectId);
+  if (!project) throw new AppError("Không tìm thấy dự án", 404);
+  return project;
+};
+
+getDashboardStats = async () => {
+  return await this.adminRepository.getSystemStats();
+};
+
+getUsers = async (query = null) => {
+  if (query && (query.search || query.page || query.limit || query.role)) {
+    return await this.adminRepository.findUsers(query);
+  }
+  return await this.adminRepository.findAllUsers();
+};
+
+getProjects = async () => {
+  return await this.adminRepository.findAllProjects();
+};
+
+getReports = async () => {
+  return await this.adminRepository.findAllReports();
+};
+
+toggleUserBan = async (userId) => {
+  const user = await User.findById(userId);
+  if (!user) throw new Error("User not found");
+
+  const nextStatus = user.isActive ? "banned" : "active";
+  const updatedUser = await User.findByIdAndUpdate(
+    userId,
+    { $set: { isActive: !user.isActive, status: nextStatus } },
+    { new: true }
+  );
+  return updatedUser;
+};
+
+verifyUser = async (userId, isVerified) => {
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { $set: { isVerified: Boolean(isVerified) } },
+    { new: true }
+  );
+  if (!user) throw new Error("User not found");
+  return user;
+};
+
+updateUserStatus = async (userId, status) => {
+  const allowed = new Set(["active", "inactive", "banned"]);
+  if (!allowed.has(status)) {
+    throw new Error("Invalid user status");
+  }
+
+  const isActive = status !== "banned";
+  const updatedUser = await User.findByIdAndUpdate(
+    userId,
+    { $set: { status, isActive } },
+    { new: true }
+  );
+
+  if (!updatedUser) throw new Error("User not found");
+  return updatedUser;
+};
+
+resolveReportWithActions = async (reportId, actions, note) => {
+  const report = await Report.findById(reportId).populate("target_ref");
+  if (!report) throw new Error("Report not found");
+
+  if (actions.includes("delete_content")) {
+    if (report.target_type.toLowerCase() === "post" && report.target_ref) {
+      await Post.findByIdAndDelete(report.target_ref._id);
+    }
+  }
+
+  if (actions.includes("ban_user")) {
+    const authorId = report.target_ref?.author;
+    if (authorId) {
+      await this.toggleUserBan(authorId);
+    }
+  }
+
+  report.status = "resolved";
+  report.action = actions.length > 0 ? actions.join(",") : "none";
+  report.decision_note = note;
+  report.reviewed_at = new Date();
+
+  await report.save();
+  return report;
+};
+
+createSystemNotification = async ({
+  title,
+  message,
+  targetType = "all",
+  role = null,
+  roles = [],
+  userIds = [],
+  severity = "info",
+  actorId = null,
+  actorRole = null,
+}) => {
+  if (String(actorRole || "").toLowerCase() !== "admin") {
+    throw new Error("Only admin can create system notifications.");
+  }
+
+  const normalizedTitle = String(title || "").trim();
+  const normalizedMessage = String(message || "").trim();
+  const normalizedSeverity = String(severity || "info").trim().toLowerCase();
+  const normalizedTargetType = String(targetType || "all").trim().toLowerCase();
+
+  if (!normalizedTitle) throw new Error("Title is required");
+  if (!normalizedMessage) throw new Error("Message is required");
+  if (!["info", "success", "warning", "error"].includes(normalizedSeverity)) {
+    throw new Error("Invalid severity");
+  }
+  if (!["all", "role", "users", "custom"].includes(normalizedTargetType)) {
+    throw new Error("Invalid targetType");
+  }
+
+  if (!this.eventBus || typeof this.eventBus.emit !== "function") {
+    throw new Error("Notification event bus is not available");
+  }
+
+  const payload = {
+    title: normalizedTitle,
+    message: normalizedMessage,
+    severity: normalizedSeverity,
+    actorId,
   };
 
-  deleteProject = async (projectId) => {
-    const project = await this.projectRepository.deleteById(projectId);
-    if (!project) throw new AppError("Không tìm thấy dự án", 404);
-    return project;
-  };
+  if (normalizedTargetType === "role") {
+    const normalizedRole = String(role || "").trim().toLowerCase();
+    if (!normalizedRole) throw new Error("Role is required when targetType is role");
 
-  getDashboardStats = async () => {
-    return await this.adminRepository.getSystemStats();
-  };
+    await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
+      ...payload,
+      role: normalizedRole,
+    });
 
-  getUsers = async (query = null) => {
-    if (query && (query.search || query.page || query.limit || query.role)) {
-      return await this.adminRepository.findUsers(query);
-    }
-    return await this.adminRepository.findAllUsers();
-  };
+    return { success: true, targetType: "role", role: normalizedRole, title: normalizedTitle, message: normalizedMessage };
+  }
 
-  getProjects = async () => {
-    if (typeof this.adminRepository.findProjectsForReview === "function") {
-      return await this.adminRepository.findProjectsForReview({
-        skip: 0,
-        limit: 50,
-      });
-    }
-    return await this.adminRepository.findProjects();
-  };
+  if (normalizedTargetType === "users") {
+    const normalizedUserIds = [...new Set((userIds || []).map((id) => String(id).trim()).filter(Boolean))];
+    if (!normalizedUserIds.length) throw new Error("At least one userId is required when targetType is users");
 
-  getReports = async () => {
-    return await this.adminRepository.findAllReports();
-  };
+    await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
+      ...payload,
+      userIds: normalizedUserIds,
+    });
 
-  toggleUserBan = async (userId) => {
-    const user = await User.findById(userId);
-    if (!user) throw new Error("User not found");
+    return { success: true, targetType: "users", totalRecipients: normalizedUserIds.length, userIds: normalizedUserIds, title: normalizedTitle, message: normalizedMessage };
+  }
 
-    const nextStatus = user.isActive ? "banned" : "active";
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { $set: { isActive: !user.isActive, status: nextStatus } },
-      { new: true }
-    );
-    return updatedUser;
-  };
+  if (normalizedTargetType === "custom") {
+    const normalizedRoles = [...new Set((roles || []).map((item) => String(item).trim().toLowerCase()).filter(Boolean))].filter((item) => ["user", "organizer", "admin"].includes(item));
+    const normalizedUserIds = [...new Set((userIds || []).map((id) => String(id).trim()).filter(Boolean))];
 
-  verifyUser = async (userId, isVerified) => {
-    const user = await User.findByIdAndUpdate(
-      userId,
-      { $set: { isVerified: Boolean(isVerified) } },
-      { new: true }
-    );
-    if (!user) throw new Error("User not found");
-    return user;
-  };
-
-  updateUserStatus = async (userId, status) => {
-    const allowed = new Set(["active", "inactive", "banned"]);
-    if (!allowed.has(status)) {
-      throw new Error("Invalid user status");
+    if (!normalizedRoles.length && !normalizedUserIds.length) {
+      throw new Error("At least one role or one user is required for custom recipients");
     }
 
-    const isActive = status !== "banned";
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { $set: { status, isActive } },
-      { new: true }
-    );
+    await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
+      ...payload,
+      roles: normalizedRoles,
+      userIds: normalizedUserIds,
+    });
 
-    if (!updatedUser) throw new Error("User not found");
-    return updatedUser;
-  };
+    return { success: true, targetType: "custom", roles: normalizedRoles, userIds: normalizedUserIds, totalRoles: normalizedRoles.length, totalUsers: normalizedUserIds.length, title: normalizedTitle, message: normalizedMessage };
+  }
 
-  resolveReportWithActions = async (reportId, actions, note) => {
-    const report = await Report.findById(reportId).populate("target_ref");
-    if (!report) throw new Error("Report not found");
+  await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, { ...payload });
 
-    if (actions.includes("delete_content")) {
-      if (report.target_type.toLowerCase() === "post" && report.target_ref) {
-        await Post.findByIdAndDelete(report.target_ref._id);
-      }
-    }
-
-    if (actions.includes("ban_user")) {
-      const authorId = report.target_ref?.author;
-      if (authorId) {
-        await this.toggleUserBan(authorId);
-      }
-    }
-
-    report.status = "resolved";
-    report.action = actions.length > 0 ? actions.join(",") : "none";
-    report.decision_note = note;
-    report.reviewed_at = new Date();
-
-    await report.save();
-    return report;
-  };
-
-  createSystemNotification = async ({
-    title,
-    message,
-    targetType = "all",
-    role = null,
-    roles = [],
-    userIds = [],
-    severity = "info",
-    actorId = null,
-    actorRole = null,
-  }) => {
-    if (String(actorRole || "").toLowerCase() !== "admin") {
-      throw new Error("Only admin can create system notifications.");
-    }
-
-    const normalizedTitle = String(title || "").trim();
-    const normalizedMessage = String(message || "").trim();
-    const normalizedSeverity = String(severity || "info").trim().toLowerCase();
-    const normalizedTargetType = String(targetType || "all").trim().toLowerCase();
-
-    if (!normalizedTitle) throw new Error("Title is required");
-    if (!normalizedMessage) throw new Error("Message is required");
-    if (!["info", "success", "warning", "error"].includes(normalizedSeverity)) {
-      throw new Error("Invalid severity");
-    }
-    if (!["all", "role", "users", "custom"].includes(normalizedTargetType)) {
-      throw new Error("Invalid targetType");
-    }
-
-    if (!this.eventBus || typeof this.eventBus.emit !== "function") {
-      throw new Error("Notification event bus is not available");
-    }
-
-    const payload = {
-      title: normalizedTitle,
-      message: normalizedMessage,
-      severity: normalizedSeverity,
-      actorId,
-    };
-
-    if (normalizedTargetType === "role") {
-      const normalizedRole = String(role || "").trim().toLowerCase();
-      if (!normalizedRole) throw new Error("Role is required when targetType is role");
-
-      await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
-        ...payload,
-        role: normalizedRole,
-      });
-
-      return { success: true, targetType: "role", role: normalizedRole, title: normalizedTitle, message: normalizedMessage };
-    }
-
-    if (normalizedTargetType === "users") {
-      const normalizedUserIds = [...new Set((userIds || []).map((id) => String(id).trim()).filter(Boolean))];
-      if (!normalizedUserIds.length) throw new Error("At least one userId is required when targetType is users");
-
-      await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
-        ...payload,
-        userIds: normalizedUserIds,
-      });
-
-      return { success: true, targetType: "users", totalRecipients: normalizedUserIds.length, userIds: normalizedUserIds, title: normalizedTitle, message: normalizedMessage };
-    }
-
-    if (normalizedTargetType === "custom") {
-      const normalizedRoles = [...new Set((roles || []).map((item) => String(item).trim().toLowerCase()).filter(Boolean))].filter((item) => ["user", "organizer", "admin"].includes(item));
-      const normalizedUserIds = [...new Set((userIds || []).map((id) => String(id).trim()).filter(Boolean))];
-
-      if (!normalizedRoles.length && !normalizedUserIds.length) {
-        throw new Error("At least one role or one user is required for custom recipients");
-      }
-
-      await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
-        ...payload,
-        roles: normalizedRoles,
-        userIds: normalizedUserIds,
-      });
-
-      return { success: true, targetType: "custom", roles: normalizedRoles, userIds: normalizedUserIds, totalRoles: normalizedRoles.length, totalUsers: normalizedUserIds.length, title: normalizedTitle, message: normalizedMessage };
-    }
-
-    await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, { ...payload });
-
-    return { success: true, targetType: "all", title: normalizedTitle, message: normalizedMessage };
-  };
+  return { success: true, targetType: "all", title: normalizedTitle, message: normalizedMessage };
+};
 }
 
 export default AdminService;
