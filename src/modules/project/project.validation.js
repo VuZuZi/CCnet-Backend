@@ -226,7 +226,8 @@ export const exploreQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50, "Limit tối đa là 50").optional().default(9),
   category: z.enum(Object.values(PROJECT_CATEGORY)).optional(),
   location: z.string().trim().max(100).optional(),
-  sort: z.enum(['newest', 'trending', 'ending_soon']).optional().default('newest'),
+  sort: z.enum(["newest", "trending", "ending_soon"]).optional().default("newest"),
+  organizerScope: z.enum(["ALL", "FOLLOWED"]).optional().default("ALL"),
 }).strict();
 
 export const workspaceQuerySchema = z.object({

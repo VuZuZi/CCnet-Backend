@@ -18,7 +18,8 @@ class ProjectService {
     helprequestRepository,
     notificationRepository,
     userRepository,
-    eventBus
+    eventBus,
+    volunteerRepository,
   }) {
     this.projectRepository = projectRepository;
     this.escrowRepository = escrowRepository;
@@ -32,8 +33,315 @@ class ProjectService {
     this.notificationRepository = notificationRepository;
     this.userRepository = userRepository;
     this.eventBus = eventBus;
+    this.volunteerRepository = volunteerRepository;
   }
 
+  _normalizeText(value) {
+    return String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+  }
+
+  _extractKnownCity(value) {
+    const normalized = this._normalizeText(value);
+    const knownCities = [
+      "ha noi",
+      "hanoi",
+      "ho chi minh",
+      "tp hcm",
+      "tp.hcm",
+      "da nang",
+      "can tho",
+      "hai phong",
+      "nha trang",
+      "quang ninh",
+      "hue",
+    ];
+
+    return knownCities.find((token) => normalized.includes(token)) || "";
+  }
+
+  _getFundingProgress(project) {
+    const current = Number(
+      project?.financialDetail?.availableBalance ??
+      project?.currentAmount ??
+      0
+    );
+    const target = Number(project?.targetAmount || 0);
+    if (target <= 0) return 0;
+    return current / target;
+  }
+
+  _getVolunteerProgress(project) {
+    const current = Number(project?.stats?.currentVolunteers || 0);
+    const target = Number(project?.stats?.targetVolunteers || 0);
+    if (target <= 0) return 0;
+    return current / target;
+  }
+
+  _getDaysUntilEnd(project) {
+    if (!project?.endDate) return null;
+    const diff = new Date(project.endDate).getTime() - Date.now();
+    return Math.ceil(diff / (1000 * 60 * 60 * 24));
+  }
+
+  _extractUserSkillSet(user) {
+    if (!Array.isArray(user?.skills)) return new Set();
+    return new Set(
+      user.skills
+        .map((skill) => this._normalizeText(skill))
+        .filter(Boolean),
+    );
+  }
+
+  _getVolunteerSkillMatchScore(project, userSkillSet) {
+    if (!project?.needsVolunteers) return 0;
+    if (!(userSkillSet instanceof Set) || userSkillSet.size === 0) return 0;
+
+    const requiredSkills = new Set();
+
+    if (Array.isArray(project?.volunteerRoles)) {
+      project.volunteerRoles.forEach((role) => {
+        if (Array.isArray(role?.skillsRequired)) {
+          role.skillsRequired.forEach((skill) => {
+            const normalized = this._normalizeText(skill);
+            if (normalized) requiredSkills.add(normalized);
+          });
+        }
+      });
+    }
+
+    if (!requiredSkills.size) return 4;
+
+    let matchedCount = 0;
+    requiredSkills.forEach((skill) => {
+      if (userSkillSet.has(skill)) matchedCount += 1;
+    });
+
+    if (matchedCount === 0) return 0;
+    if (matchedCount >= 3) return 12;
+    if (matchedCount === 2) return 8;
+    return 5;
+  }
+
+  _buildFeaturedReasonList(project, context = {}) {
+    const reasons = [];
+    const {
+      userCity = "",
+      supportedCategorySet = new Set(),
+      appliedCategorySet = new Set(),
+      followedProjectIds = new Set(),
+      followedOrganizerIds = new Set(),
+      userSkillSet = new Set(),
+    } = context;
+
+    const projectId = String(project?._id || "");
+    const organizerId =
+      project?.organizerId?._id?.toString?.() ||
+      project?.organizerId?.toString?.() ||
+      "";
+
+    const projectCity = this._extractKnownCity(project?.location?.address || "");
+    const fundingProgress = this._getFundingProgress(project);
+    const volunteerProgress = this._getVolunteerProgress(project);
+    const daysLeft = this._getDaysUntilEnd(project);
+    const skillMatchScore = this._getVolunteerSkillMatchScore(project, userSkillSet);
+
+    if (userCity && projectCity && userCity === projectCity) {
+      reasons.push("Gần khu vực của bạn");
+    }
+
+    if (supportedCategorySet.has(project?.category)) {
+      reasons.push("Phù hợp lĩnh vực bạn từng tham gia");
+    } else if (appliedCategorySet.has(project?.category)) {
+      reasons.push("Cùng danh mục bạn từng quan tâm");
+    }
+
+    if (followedProjectIds.has(projectId)) {
+      reasons.push("Bạn đã theo dõi dự án này");
+    }
+
+    if (organizerId && followedOrganizerIds.has(organizerId)) {
+      reasons.push("Đến từ organizer bạn đang theo dõi");
+    }
+
+    if (project?.isUrgent) {
+      reasons.push("Dự án đang cần hỗ trợ gấp");
+    }
+
+    if (daysLeft !== null && daysLeft >= 0 && daysLeft <= 7) {
+      reasons.push("Sắp hết hạn kêu gọi");
+    }
+
+    if (fundingProgress >= 0.85 && fundingProgress < 1) {
+      reasons.push("Chỉ còn ít nữa là đạt mục tiêu gây quỹ");
+    } else if (fundingProgress >= 0.7 && fundingProgress < 0.85) {
+      reasons.push("Đang gần chạm mốc gây quỹ");
+    }
+
+    if (project?.needsVolunteers) {
+      if (volunteerProgress >= 0.65 && volunteerProgress < 1) {
+        reasons.push("Đang gần đủ đội ngũ tình nguyện");
+      } else if (volunteerProgress < 0.35) {
+        reasons.push("Đang cần thêm tình nguyện viên");
+      }
+
+      if (skillMatchScore >= 8) {
+        reasons.push("Kỹ năng của bạn khá phù hợp");
+      }
+    }
+
+    if (project?.stats?.viewCount > 300) {
+      reasons.push("Được cộng đồng quan tâm nhiều");
+    }
+
+    return reasons.slice(0, 3);
+  }
+
+    _scoreFeaturedProject(project, context = {}) {
+    const {
+      user = null,
+      followedProjectIds = new Set(),
+      supportedCategorySet = new Set(),
+      appliedCategorySet = new Set(),
+      followedOrganizerIds = new Set(),
+      userCity = "",
+      userSkillSet = new Set(),
+    } = context;
+
+    let score = 0;
+    if (!project?._id) return -Infinity;
+
+    const projectId = String(project?._id || "");
+    const organizerId =
+      project?.organizerId?._id?.toString?.() ||
+      project?.organizerId?.toString?.() ||
+      "";
+    const projectCity = this._extractKnownCity(project?.location?.address || "");
+    const fundingProgress = this._getFundingProgress(project);
+    const volunteerProgress = this._getVolunteerProgress(project);
+    const daysLeft = this._getDaysUntilEnd(project);
+    const followerCount = Number(project?.stats?.followerCount || 0);
+    const viewCount = Number(project?.stats?.viewCount || 0);
+
+    if (project?.isUrgent) score += 18;
+    if (project?.coverMedia?.url) score += 8;
+    if (project?.summary || project?.description) score += 4;
+    if (project?.needsVolunteers) score += 8;
+
+    if (userCity && projectCity && userCity === projectCity) {
+      score += 28;
+    }
+
+    if (supportedCategorySet.has(project?.category)) score += 22;
+    if (appliedCategorySet.has(project?.category)) score += 16;
+    if (followedProjectIds.has(projectId)) score += 40;
+
+    // Tăng mạnh tín hiệu từ organizer đang follow
+    if (organizerId && followedOrganizerIds.has(organizerId)) {
+      score += 120;
+    }
+
+    if (daysLeft !== null) {
+      if (daysLeft >= 0 && daysLeft <= 7) score += 12;
+      else if (daysLeft <= 14) score += 6;
+    }
+
+    if (fundingProgress >= 0.85 && fundingProgress < 1) score += 24;
+    else if (fundingProgress >= 0.7 && fundingProgress < 0.85) score += 20;
+    else if (fundingProgress >= 0.45 && fundingProgress < 0.7) score += 10;
+
+    if (project?.needsVolunteers) {
+      if (volunteerProgress >= 0.6 && volunteerProgress < 1) score += 18;
+      else if (volunteerProgress > 0 && volunteerProgress < 0.35) score += 10;
+
+      score += this._getVolunteerSkillMatchScore(project, userSkillSet);
+    }
+
+    score += Math.min(followerCount / 10, 8);
+    score += Math.min(viewCount / 100, 6);
+
+    if (
+      user &&
+      Array.isArray(user?.skills) &&
+      user.skills.length > 0 &&
+      project?.needsVolunteers
+    ) {
+      score += 2;
+    }
+
+    return score;
+  }
+_roundRobinByOrganizer(projects = []) {
+  const groups = new Map();
+  const orderedOrganizerIds = [];
+
+  for (const project of projects) {
+    const organizerId =
+      project?.organizerId?._id?.toString?.() ||
+      project?.organizerId?.toString?.() ||
+      "";
+
+    const key =
+      organizerId || `__no_org__:${project?._id?.toString?.() || Math.random()}`;
+
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      orderedOrganizerIds.push(key);
+    }
+
+    groups.get(key).push(project);
+  }
+
+  const result = [];
+  let hasRemaining = true;
+
+  while (hasRemaining) {
+    hasRemaining = false;
+
+    for (const organizerId of orderedOrganizerIds) {
+      const queue = groups.get(organizerId);
+
+      if (queue && queue.length > 0) {
+        result.push(queue.shift());
+        hasRemaining = true;
+      }
+    }
+  }
+
+  return result;
+}
+
+_rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
+  const followedSet = new Set((followedOrganizerIds || []).filter(Boolean));
+
+  const followedProjects = [];
+  const otherProjects = [];
+
+  for (const project of projects) {
+    const organizerId =
+      project?.organizerId?._id?.toString?.() ||
+      project?.organizerId?.toString?.() ||
+      "";
+
+    if (organizerId && followedSet.has(organizerId)) {
+      followedProjects.push(project);
+    } else {
+      otherProjects.push(project);
+    }
+  }
+
+  const followedBalanced = this._roundRobinByOrganizer(followedProjects);
+  const otherBalanced = this._roundRobinByOrganizer(otherProjects);
+
+  return {
+    followedProjects: followedBalanced,
+    otherProjects: otherBalanced,
+    merged: [...followedBalanced, ...otherBalanced],
+  };
+}
   async _enforceKycTierCaps(project, organizerId) {
     const user = await this.userRepository.findById(organizerId);
     if (!user) throw new AppError("Không tìm thấy thông tin Organizer.", 404);
@@ -184,51 +492,253 @@ class ProjectService {
     return updatedProject;
   }
 
-  async getFeaturedProjects() {
-    return await this.projectRepository.findFeaturedProjects(1);
-  }
+    async getFeaturedProjects(userId = null) {
+    const candidates = await this.projectRepository.findCandidateFeaturedProjects(24);
+
+    if (!Array.isArray(candidates) || candidates.length === 0) {
+      return [];
+    }
+
+    const enrichProject = (project, score = 0, reasons = []) => ({
+      ...project,
+      recommendationMeta: {
+        score,
+        reasons,
+      },
+    });
+
+    if (!userId) {
+      const fallback = await this.projectRepository.findFeaturedProjects(1);
+      const selected =
+        Array.isArray(fallback) && fallback.length > 0
+          ? fallback[0]
+          : candidates[0];
+
+      const reasons = this._buildFeaturedReasonList(selected, {});
+      return [
+        enrichProject(
+          selected,
+          0,
+          reasons.length ? reasons : ["Dự án nổi bật đang được quan tâm"]
+        ),
+      ];
+    }
+
+    const user = await this.userRepository.findById(userId).catch(() => null);
+    if (!user) {
+      const fallback = await this.projectRepository.findFeaturedProjects(1);
+      const selected =
+        Array.isArray(fallback) && fallback.length > 0
+          ? fallback[0]
+          : candidates[0];
+
+      const reasons = this._buildFeaturedReasonList(selected, {});
+      return [
+        enrichProject(
+          selected,
+          0,
+          reasons.length ? reasons : ["Dự án nổi bật đang được quan tâm"]
+        ),
+      ];
+    }
+
+    const [followedProjectsRaw, volunteerApplicationsRaw, followedUsersRaw] =
+      await Promise.all([
+        this.followRepository?.findFollowingProjects?.(userId, 100, null).catch(() => []),
+        this.volunteerRepository?.findByUserWithProject?.(userId).catch(() => []),
+        this.followRepository?.findFollowingUsers?.(userId, 100, null).catch(() => []),
+      ]);
+
+    const followedProjectIds = new Set(
+      (followedProjectsRaw || [])
+        .map(
+          (row) =>
+            row?.projectId?._id?.toString?.() ||
+            row?.projectId?.toString?.()
+        )
+        .filter(Boolean)
+    );
+
+    const followedOrganizerIds = new Set(
+      (followedUsersRaw || [])
+        .map(
+          (row) =>
+            row?.followingId?._id?.toString?.() ||
+            row?.followingId?.toString?.()
+        )
+        .filter(Boolean)
+    );
+
+    const appliedCategorySet = new Set(
+      (volunteerApplicationsRaw || [])
+        .map((row) => row?.opportunityId?.category)
+        .filter(Boolean)
+    );
+
+    const supportedCategorySet = new Set(
+      (volunteerApplicationsRaw || [])
+        .filter((row) => String(row?.status || "").toUpperCase() === "APPROVED")
+        .map((row) => row?.opportunityId?.category)
+        .filter(Boolean)
+    );
+
+    const userCity = this._extractKnownCity(user?.location || "");
+    const userSkillSet = this._extractUserSkillSet(user);
+
+    // Ưu tiên project từ organizer đang follow trước
+    const followedOrganizerProjects = candidates.filter((project) => {
+      const organizerId =
+        project?.organizerId?._id?.toString?.() ||
+        project?.organizerId?.toString?.() ||
+        "";
+
+      return organizerId && followedOrganizerIds.has(organizerId);
+    });
+
+    const rankingPool =
+      followedOrganizerProjects.length > 0
+        ? followedOrganizerProjects
+        : candidates;
+
+    const scored = rankingPool
+      .map((project) => {
+        const score = this._scoreFeaturedProject(project, {
+          user,
+          followedProjectIds,
+          supportedCategorySet,
+          appliedCategorySet,
+          followedOrganizerIds,
+          userCity,
+          userSkillSet,
+        });
+
+        const reasons = this._buildFeaturedReasonList(project, {
+          user,
+          followedProjectIds,
+          supportedCategorySet,
+          appliedCategorySet,
+          followedOrganizerIds,
+          userCity,
+          userSkillSet,
+        });
+
+        return {
+          project: enrichProject(project, score, reasons),
+          score,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    return scored.length > 0
+      ? [scored[0].project]
+      : [enrichProject(candidates[0], 0, [])];
+  } 
 
   async getVolunteerProjects() {
     return await this.projectRepository.findVolunteerProjects(4);
   }
 
-  async getExploreProjects(queryParams) {
-    const { page, limit, category, location, sort } = queryParams; 
-    const skip = (page - 1) * limit;
+  async getExploreProjects(queryParams, userId = null) {
+  const {
+    page,
+    limit,
+    category,
+    location,
+    sort,
+    organizerScope = "ALL",
+  } = queryParams;
 
-    if (skip > 5000) {
-      throw new AppError("Truy vấn quá sâu. Vui lòng sử dụng bộ lọc để có kết quả chính xác hơn.", 400);
-    }
+  const skip = (page - 1) * limit;
 
-    const filter = {};
-    
-    if (category) filter.category = category;
+  if (skip > 5000) {
+    throw new AppError(
+      "Truy vấn quá sâu. Vui lòng sử dụng bộ lọc để có kết quả chính xác hơn.",
+      400
+    );
+  }
 
-    if (sort === 'ending_soon') {
-        filter.endDate = { $gt: new Date() };
-        filter.status = { $in: [PROJECT_STATUS.FUNDING, PROJECT_STATUS.RECRUITING] };
-    }
+  let followedOrganizerIds = [];
 
-    const result = await this.projectRepository.findAllProjects({
-      filter,
-      skip,
-      limit,
-      sortType: sort,
-      textSearch: location || null,
-    });
+  if (userId) {
+    const followedUsersRaw =
+      await this.followRepository?.findFollowingUsers?.(userId, 200, null).catch(
+        () => []
+      );
 
-    const totalPages = Math.ceil(result.total / limit);
+    followedOrganizerIds = (followedUsersRaw || [])
+      .map(
+        (row) =>
+          row?.followingId?._id?.toString?.() ||
+          row?.followingId?.toString?.()
+      )
+      .filter(Boolean);
+  }
 
+  if (organizerScope === "FOLLOWED" && followedOrganizerIds.length === 0) {
     return {
-      projects: result.projects,
+      projects: [],
       pagination: {
-        totalItems: result.total,
+        totalItems: 0,
         currentPage: page,
-        totalPages,
-        hasNextPage: page < totalPages,
+        totalPages: 0,
+        hasNextPage: false,
       },
     };
   }
+
+  const filter = {};
+
+  if (category) {
+    filter.category = category;
+  }
+
+  if (organizerScope === "FOLLOWED") {
+    filter.organizerId = {
+      $in: followedOrganizerIds,
+    };
+  }
+
+  if (sort === "ending_soon") {
+    filter.endDate = { $gt: new Date() };
+    filter.status = {
+      $in: [PROJECT_STATUS.FUNDING, PROJECT_STATUS.RECRUITING],
+    };
+  }
+
+  // Lấy pool rộng hơn để rebalance theo organizer trước khi cắt page
+  const poolLimit = Math.min(Math.max(page * limit * 6, 60), 240);
+
+  const result = await this.projectRepository.findAllProjects({
+    filter,
+    skip: 0,
+    limit: poolLimit,
+    sortType: sort,
+    textSearch: location || null,
+  });
+
+  const rebalanced = this._rebalanceExploreProjects(
+    result.projects,
+    followedOrganizerIds
+  );
+
+  const rankedProjects =
+    organizerScope === "FOLLOWED"
+      ? rebalanced.followedProjects
+      : rebalanced.merged;
+
+  const pagedProjects = rankedProjects.slice(skip, skip + limit);
+  const totalPages = Math.ceil(result.total / limit);
+
+  return {
+    projects: pagedProjects,
+    pagination: {
+      totalItems: result.total,
+      currentPage: page,
+      totalPages,
+      hasNextPage: page < totalPages,
+    },
+  };
+}
 
   async getProjectDetail(projectId, userId = null) {
     const project = await this.projectRepository.findByIdWithDetails(projectId);
