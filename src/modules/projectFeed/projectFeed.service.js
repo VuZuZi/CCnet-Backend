@@ -16,7 +16,7 @@ class ProjectFeedService {
     return project;
   }
 
-  async _canInteract(project, userId) {
+  async _canPost(project, userId) {
     if (!userId) return false;
     if (String(project.organizerId) === String(userId)) return true;
     const application = await this.volunteerRepository.application({
@@ -24,6 +24,10 @@ class ProjectFeedService {
       opportunityId: project._id,
     });
     return Boolean(application && application.status === "APPROVED");
+  }
+
+  _canEngage(userId) {
+    return Boolean(userId);
   }
 
   async getPosts(projectId, { limit = 10, cursor = null, userId = null } = {}) {
@@ -79,7 +83,7 @@ class ProjectFeedService {
     });
 
     const project = await this._getProjectOrThrow(projectId);
-    const can = await this._canInteract(project, userId);
+    const can = await this._canPost(project, userId);
     if (!can)
       throw new AppError(
         "Chỉ nhà tổ chức hoặc tình nguyện viên đã được duyệt mới có thể đăng bài.",
@@ -144,10 +148,10 @@ class ProjectFeedService {
 
   async createComment(projectId, postId, { userId, content }) {
     const project = await this._getProjectOrThrow(projectId);
-    const can = await this._canInteract(project, userId);
+    const can = this._canEngage(userId);
     if (!can)
       throw new AppError(
-        "Chỉ nhà tổ chức hoặc tình nguyện viên đã được duyệt mới có thể bình luận.",
+        "Bạn cần đăng nhập để bình luận.",
         403,
       );
 
@@ -195,8 +199,8 @@ class ProjectFeedService {
 
   async togglePostLike(projectId, postId, userId) {
     const project = await this._getProjectOrThrow(projectId);
-    const can = await this._canInteract(project, userId);
-    if (!can) throw new AppError("Bạn không có quyền thả tim.", 403);
+    const can = this._canEngage(userId);
+    if (!can) throw new AppError("Bạn cần đăng nhập để thả tim.", 403);
 
     const result = await this.projectFeedRepository.togglePostLike(postId, userId);
     if (!result) throw new AppError("Không tìm thấy bài viết.", 404);
@@ -214,8 +218,8 @@ class ProjectFeedService {
 
   async toggleCommentLike(projectId, commentId, userId) {
     const project = await this._getProjectOrThrow(projectId);
-    const can = await this._canInteract(project, userId);
-    if (!can) throw new AppError("Bạn không có quyền thả tim.", 403);
+    const can = this._canEngage(userId);
+    if (!can) throw new AppError("Bạn cần đăng nhập để thả tim.", 403);
 
     const result = await this.projectFeedRepository.toggleCommentLike(
       commentId,
