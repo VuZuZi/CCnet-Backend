@@ -14,11 +14,11 @@ export class ProjectDTO {
 
         if (data.projectType === PROJECT_TYPE.VOLUNTEER_ONLY) {
             const financialFields = [
-                'targetAmount', 'currentAmount', 'mvpAmount', 
+                'targetAmount', 'currentAmount', 'mvpAmount',
                 'budgetBreakdown', 'surplusPolicy', 'carryOverProjectId'
             ];
             financialFields.forEach(f => delete data[f]);
-            
+
             if (data.milestones) {
                 data.milestones = data.milestones.map(m => {
                     const { targetAmount, ...rest } = m;
@@ -40,12 +40,12 @@ export class ProjectDTO {
     static toOrganizerDetail(project, escrow = null) {
         if (!project) return null;
         const data = ProjectDTO.toPublicDetail(project, escrow);
-        
+
         const internalData = typeof project.toObject === 'function' ? project.toObject() : { ...project };
         data.rejectionReason = internalData.rejectionReason;
         data.riskFlags = internalData.riskFlags;
         data.aiRiskScore = internalData.aiRiskScore;
-        
+
         return data;
     }
 }

@@ -73,7 +73,8 @@ class ProjectController {
 
   getFeatured = async (req, res, next) => {
     try {
-      const result = await this.projectService.getFeaturedProjects();
+      const userId = req.user?.userId || req.user?.id || null;
+      const result = await this.projectService.getFeaturedProjects(userId);
       return ApiResponse.success(
         res,
         result,
@@ -98,13 +99,14 @@ class ProjectController {
   };
 
   getExploreProjects = async (req, res, next) => {
-    try {
-      const result = await this.projectService.getExploreProjects(req.query);
-      return ApiResponse.success(res, result, "Lấy danh sách dự án thành công");
-    } catch (error) {
-      next(error);
-    }
-  };
+  try {
+    const userId = req.user?.userId || req.user?.id || null;
+    const result = await this.projectService.getExploreProjects(req.query, userId);
+    return ApiResponse.success(res, result, "Lấy danh sách dự án thành công");
+  } catch (error) {
+    next(error);
+  }
+};
 
   getDetail = async (req, res, next) => {
     try {

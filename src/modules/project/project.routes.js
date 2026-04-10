@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { getContainer } from "../../container/index.js";
 import {
   authenticate,
   authorize,
@@ -9,24 +8,21 @@ import { maybeAuthenticate } from "../../middlewares/maybeAuth.middleware.js";
 import {
   requireKycTier,
   ensureKycActive,
-  ensureKycValidFor
+  ensureKycValidFor,
 } from "../../middlewares/kyc.middleware.js";
 import { z } from "zod";
 import {
   createDraftSchema,
   updateDraftSchema,
   exploreQuerySchema,
-  workspaceQuerySchema
+  workspaceQuerySchema,
 } from "./project.validation.js";
-import { validateBody, validateQuery } from "../../middlewares/validate.middleware.js";
 import {
-  uploadFiles,
-  uploadMedia,
-  validateMagicBytes,
-} from "../../middlewares/upload.middleware.js";
-import { autoCleanupTempFiles } from "../../middlewares/cleanup.middleware.js";
+  validateBody,
+  validateQuery,
+} from "../../middlewares/validate.middleware.js";
+import { uploadFiles, uploadMedia } from "../../middlewares/upload.middleware.js";
 import { scopePerRequest } from "../../middlewares/di.middleware.js";
-import { parseJsonFields } from "../../middlewares/parseFormData.middleware.js";
 
 const router = Router();
 router.use(scopePerRequest);
@@ -35,16 +31,18 @@ const execute = (action) => (req, res, next) => {
   try {
     if (!req.scope) {
       throw new Error(
-        "Bắt buộc phải có req.scope. Kiểm tra lại di.middleware.",
+        "Bắt buộc phải có req.scope. Kiểm tra lại di.middleware."
       );
     }
+
     const controller = req.scope.resolve("projectController");
 
     if (typeof controller[action] !== "function") {
       throw new Error(
-        `Action [${action}] không tồn tại trong ProjectController.`,
+        `Action [${action}] không tồn tại trong ProjectController.`
       );
     }
+
     return controller[action](req, res, next);
   } catch (error) {
     next(error);
@@ -56,11 +54,12 @@ const projectUploads = uploadFiles.fields([
   { name: "documents", maxCount: 5 },
 ]);
 
-router.get("/featured", execute("getFeatured"));
+router.get("/featured", optionalAuthenticate, execute("getFeatured"));
 router.get("/volunteers-needed", execute("getVolunteerNeeded"));
 
 router.get(
   "/explore",
+  optionalAuthenticate,
   validateQuery(exploreQuerySchema),
   execute("getExploreProjects")
 );
@@ -69,7 +68,7 @@ router.get(
   "/organizer/stats",
   authenticate,
   authorize("Organizer"),
-  execute("getWorkspaceStats"),
+  execute("getWorkspaceStats")
 );
 
 router.get(
@@ -77,15 +76,36 @@ router.get(
   authenticate,
   authorize("Organizer"),
   validateQuery(workspaceQuerySchema),
-  execute("getWorkspaceProjects"),
+  execute("getWorkspaceProjects")
 );
 
 router.get("/:id/feed/posts", maybeAuthenticate, execute("getFeedPosts"));
-router.post("/:id/feed/posts", authenticate, uploadMedia.single("media"), execute("createFeedPost"));
-router.get("/:id/feed/posts/:postId/comments", maybeAuthenticate, execute("listFeedComments"));
-router.post("/:id/feed/posts/:postId/comments", authenticate, execute("createFeedComment"));
-router.post("/:id/feed/posts/:postId/like", authenticate, execute("toggleFeedPostLike"));
-router.post("/:id/feed/comments/:commentId/like", authenticate, execute("toggleFeedCommentLike"));
+router.post(
+  "/:id/feed/posts",
+  authenticate,
+  uploadMedia.single("media"),
+  execute("createFeedPost")
+);
+router.get(
+  "/:id/feed/posts/:postId/comments",
+  maybeAuthenticate,
+  execute("listFeedComments")
+);
+router.post(
+  "/:id/feed/posts/:postId/comments",
+  authenticate,
+  execute("createFeedComment")
+);
+router.post(
+  "/:id/feed/posts/:postId/like",
+  authenticate,
+  execute("toggleFeedPostLike")
+);
+router.post(
+  "/:id/feed/comments/:commentId/like",
+  authenticate,
+  execute("toggleFeedCommentLike")
+);
 
 router.get("/:id", optionalAuthenticate, execute("getDetail"));
 
@@ -96,7 +116,7 @@ router.post(
   requireKycTier(1),
   ensureKycActive,
   validateBody(createDraftSchema),
-  execute("createDraft"),
+  execute("createDraft")
 );
 
 router.put(
@@ -106,7 +126,7 @@ router.put(
   requireKycTier(1),
   ensureKycActive,
   validateBody(updateDraftSchema),
-  execute("updateDraft"),
+  execute("updateDraft")
 );
 
 router.post(
@@ -115,7 +135,7 @@ router.post(
   authorize("Organizer"),
   ensureKycActive,
   ensureKycValidFor(30),
-  execute("submitForApproval"),
+  execute("submitForApproval")
 );
 
 const reportProjectSchema = z.object({
@@ -134,7 +154,7 @@ router.post(
   "/:id/report",
   authenticate,
   validateBody(reportProjectSchema),
-  execute("reportProject"),
+  execute("reportProject")
 );
 
 export default router;
