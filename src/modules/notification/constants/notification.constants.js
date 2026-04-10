@@ -14,6 +14,11 @@ export const NOTIFICATION_TYPES = Object.freeze({
   KYC_EXPIRED: 'kyc.expired',
   KYC_GRACE_PERIOD_ENDED: 'kyc.gracePeriodEnded',
 
+  DONATION_SUCCESSFUL: 'donation_successful',
+
+  TRANSACTION_REFUNDED: 'transaction_refunded',
+  TRANSACTION_WITHDRAWAL_REQUESTED: 'transaction_withdrawal_requested',
+  TRANSACTION_FAILED: 'transaction_failed'
   POST_REACTED: 'post_reacted',
   POST_COMMENTED: 'post_commented',
 });

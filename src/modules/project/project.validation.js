@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PROJECT_CATEGORY, PROJECT_TYPE, SURPLUS_POLICY } from './project.constant.js';
+import { PROJECT_CATEGORY, PROJECT_STATUS, PROJECT_TYPE, SURPLUS_POLICY } from './project.constant.js';
 
 const objectIdSchema = z.string().regex(/^[0-9a-fA-F]{24}$/, "ID không đúng định dạng ObjectId");
 
@@ -220,3 +220,18 @@ export const projectCompleteSchema = z.object({
     }
   }
 });
+
+export const exploreQuerySchema = z.object({
+  page: z.coerce.number().int().min(1, "Page phải lớn hơn 0").optional().default(1),
+  limit: z.coerce.number().int().min(1).max(50, "Limit tối đa là 50").optional().default(9),
+  category: z.enum(Object.values(PROJECT_CATEGORY)).optional(),
+  location: z.string().trim().max(100).optional(),
+  sort: z.enum(['newest', 'trending', 'ending_soon']).optional().default('newest'),
+}).strict();
+
+export const workspaceQuerySchema = z.object({
+  page: z.coerce.number().int().min(1, "Page phải lớn hơn 0").optional().default(1),
+  limit: z.coerce.number().int().min(1).max(50, "Limit tối đa là 50").optional().default(10),
+  status: z.enum([...Object.values(PROJECT_STATUS), 'ALL']).optional().default('ALL'),
+  sort: z.enum(['newest', 'oldest']).optional().default('newest'),
+}).strict();

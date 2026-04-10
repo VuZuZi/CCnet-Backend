@@ -132,7 +132,7 @@ const projectSchema = new mongoose.Schema(
     aiRiskScore: { type: Number, min: 0, max: 100, default: null },
     riskFlags: [{ type: String }],
 
-    aapprovedBy: {
+    approvedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
@@ -177,7 +177,9 @@ projectSchema.index({ location: "2dsphere" });
 projectSchema.index({ projectType: 1, status: 1 });
 projectSchema.index({ status: 1, category: 1, createdAt: -1 });
 projectSchema.index({ status: 1, needsVolunteers: 1, isVolunteerFull: 1 });
-
+projectSchema.index({ status: 1, "stats.viewCount": -1 });
+projectSchema.index({ status: 1, endDate: 1 });
+projectSchema.index({ organizerId: 1, status: 1, createdAt: -1 });
 projectSchema.index(
   { title: "text", "location.address": "text", description: "text" },
   {

@@ -12,6 +12,7 @@ class AdminService {
     userRepository,
     reportRepository,
     postRepository,
+    escrowRepository,
     transactionManager,
     jobQueue,
     eventBus,
@@ -23,6 +24,7 @@ class AdminService {
     this.userRepository = userRepository;
     this.reportRepository = reportRepository;
     this.postRepository = postRepository;
+    this.escrowRepository = escrowRepository;
     this.transactionManager = transactionManager;
     this.jobQueue = jobQueue;
     this.eventBus = eventBus;
@@ -30,6 +32,9 @@ class AdminService {
     this.conversationService = conversationService;
   }
 
+  /**
+   * Helper: Xây dựng nội dung thông báo dựa trên trạng thái dự án
+   */
   _buildProjectStatusNotificationMessage(projectTitle, status, feedback = "") {
     if (
       [
@@ -43,27 +48,27 @@ class AdminService {
         message: `Dự án "${projectTitle}" của bạn đã được Ban quản trị phê duyệt và đang đi vào hoạt động (Trạng thái: ${status}).`,
       };
     }
-
     if (status === PROJECT_STATUS.REVISION_REQUESTED) {
       return {
         title: "Dự án cần chỉnh sửa",
         message: `Dự án "${projectTitle}" của bạn cần được chỉnh sửa. Lý do: ${feedback}. Bạn có 14 ngày để bổ sung.`,
       };
     }
-
     if (status === PROJECT_STATUS.REJECTED) {
       return {
         title: "Dự án bị từ chối",
-        message: `Dự án "${projectTitle}" đã bị từ chối. Lý do: ${feedback}. Tài khoản của bạn bị tạm ngưng tạo dự án mới trong 7 ngày.`,
+        message: `Dự án "${projectTitle}" đã bị từ chối. Lý do: ${feedback}. Tài khoản của bạn bị ngưng tạo dự án mới 7 ngày.`,
       };
     }
-
     return {
       title: "Cập nhật trạng thái dự án",
       message: `Trạng thái dự án "${projectTitle}" đã được cập nhật thành ${status}.`,
     };
   }
 
+  /**
+   * Helper: Phát sự kiện thông báo trạng thái dự án thay đổi
+   */
   _emitProjectStatusUpdated = ({ project, actorId, feedback }) => {
     if (!project?.organizerId) return;
     if (!this.eventBus || typeof this.eventBus.emit !== "function") return;
@@ -86,6 +91,9 @@ class AdminService {
     });
   };
 
+  /**
+   * Helper: Đồng bộ nhóm chat khi dự án chuyển sang trạng thái Active
+   */
   _syncProjectConversationOnActive = async (project, adminId = null) => {
     if (!project || String(project.status) !== PROJECT_STATUS.ACTIVE) return null;
     if (!this.conversationService || !this.volunteerRepository) return null;
@@ -108,6 +116,9 @@ class AdminService {
     });
   };
 
+  /**
+   * Cập nhật trạng thái dự án (Duyệt/Yêu cầu sửa/Từ chối)
+   */
   updateProjectStatus = async (projectId, targetStatus, feedback, adminId) => {
     if (!targetStatus) {
       throw new AppError("Trạng thái không được để trống", 400);
@@ -119,6 +130,7 @@ class AdminService {
       const project = await this.projectRepository.findById(projectId, session);
       if (!project) throw new AppError("Không tìm thấy dự án", 404);
 
+      // Chỉ cho phép duyệt các dự án đang chờ hoặc đang sửa
       if (
         ![
           PROJECT_STATUS.PENDING_APPROVAL,
@@ -141,6 +153,7 @@ class AdminService {
         mappedIntent = "APPROVED_INTENT";
       }
 
+      // Xử lý Yêu cầu chỉnh sửa
       if (mappedIntent === PROJECT_STATUS.REVISION_REQUESTED) {
         if (!feedback) {
           throw new AppError(
@@ -168,7 +181,7 @@ class AdminService {
                 "project-maintenance",
                 "check-revision-timeout",
                 { projectId },
-                { delay: 14 * 24 * 60 * 60 * 1000 }
+                { delay: 14 * 24 * 60 * 60 * 1000 } // 14 ngày
               )
               .catch((err) =>
                 console.error(
@@ -180,6 +193,7 @@ class AdminService {
         }
       }
 
+      // Xử lý Từ chối dự án
       if (mappedIntent === PROJECT_STATUS.REJECTED) {
         if (!feedback && !updateData.rejectionReason) {
           throw new AppError("Bắt buộc phải có lý do từ chối", 400);
@@ -189,11 +203,13 @@ class AdminService {
         updateData.status = finalStatus;
         updateData.rejectionReason = updateData.rejectionReason || feedback;
 
+        // Phạt tài khoản 7 ngày không được tạo dự án mới
         const coolingPeriodEnd = new Date();
         coolingPeriodEnd.setDate(coolingPeriodEnd.getDate() + 7);
         userUpdate = { coolingPeriodEnd };
       }
 
+      // Xử lý Duyệt dự án
       if (mappedIntent === "APPROVED_INTENT") {
         finalStatus =
           project.projectType === PROJECT_TYPE.FUNDED
@@ -203,10 +219,25 @@ class AdminService {
         updateData.status = finalStatus;
         updateData.approvedBy = adminId;
         updateData.approvedAt = new Date();
+
+        // Nếu dự án gây quỹ, tự động khởi tạo ví Escrow
+        if (project.projectType === PROJECT_TYPE.FUNDED) {
+          const existingEscrow = await this.escrowRepository.findByProjectId(projectId, session);
+          if (!existingEscrow) {
+            await this.escrowRepository.create({
+              projectId: projectId,
+              availableBalance: 0,
+              totalDeposited: 0,
+              pendingRefunds: 0,
+              completedRefunds: 0,
+              totalDisbursed: 0
+            }, session);
+          }
+        }
       }
 
       if (!finalStatus) {
-        throw new AppError("Trạng thái không hợp lệ", 400);
+        throw new AppError("Trạng thái điều hướng không hợp lệ", 400);
       }
 
       const updatedProject = await this.projectRepository.updateById(
@@ -215,6 +246,7 @@ class AdminService {
         session
       );
 
+      // Cập nhật thông tin User nếu có (cooling period)
       if (userUpdate) {
         await this.userRepository.updateById(
           project.organizerId,
@@ -223,10 +255,12 @@ class AdminService {
         );
       }
 
+      // Nếu trạng thái mới là ACTIVE, đồng bộ nhóm chat
       if (String(updatedProject?.status) === PROJECT_STATUS.ACTIVE) {
         await this._syncProjectConversationOnActive(updatedProject, adminId);
       }
 
+      // Gửi thông báo cho Organizer qua Event Bus
       this._emitProjectStatusUpdated({
         project: updatedProject,
         actorId: adminId,
@@ -251,7 +285,6 @@ class AdminService {
     if (query && (query.search || query.page || query.limit || query.role)) {
       return await this.adminRepository.findUsers(query);
     }
-
     return await this.adminRepository.findAllUsers();
   };
 
@@ -262,7 +295,6 @@ class AdminService {
         limit: 50,
       });
     }
-
     return await this.adminRepository.findProjects();
   };
 
@@ -280,7 +312,6 @@ class AdminService {
       { $set: { isActive: !user.isActive, status: nextStatus } },
       { new: true }
     );
-
     return updatedUser;
   };
 
@@ -290,7 +321,6 @@ class AdminService {
       { $set: { isVerified: Boolean(isVerified) } },
       { new: true }
     );
-
     if (!user) throw new Error("User not found");
     return user;
   };
@@ -358,18 +388,11 @@ class AdminService {
     const normalizedSeverity = String(severity || "info").trim().toLowerCase();
     const normalizedTargetType = String(targetType || "all").trim().toLowerCase();
 
-    if (!normalizedTitle) {
-      throw new Error("Title is required");
-    }
-
-    if (!normalizedMessage) {
-      throw new Error("Message is required");
-    }
-
+    if (!normalizedTitle) throw new Error("Title is required");
+    if (!normalizedMessage) throw new Error("Message is required");
     if (!["info", "success", "warning", "error"].includes(normalizedSeverity)) {
       throw new Error("Invalid severity");
     }
-
     if (!["all", "role", "users", "custom"].includes(normalizedTargetType)) {
       throw new Error("Invalid targetType");
     }
@@ -387,61 +410,31 @@ class AdminService {
 
     if (normalizedTargetType === "role") {
       const normalizedRole = String(role || "").trim().toLowerCase();
-
-      if (!normalizedRole) {
-        throw new Error("Role is required when targetType is role");
-      }
+      if (!normalizedRole) throw new Error("Role is required when targetType is role");
 
       await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
         ...payload,
         role: normalizedRole,
       });
 
-      return {
-        success: true,
-        targetType: "role",
-        role: normalizedRole,
-        title: normalizedTitle,
-        message: normalizedMessage,
-      };
+      return { success: true, targetType: "role", role: normalizedRole, title: normalizedTitle, message: normalizedMessage };
     }
 
     if (normalizedTargetType === "users") {
-      const normalizedUserIds = [
-        ...new Set((userIds || []).map((id) => String(id).trim()).filter(Boolean)),
-      ];
-
-      if (!normalizedUserIds.length) {
-        throw new Error("At least one userId is required when targetType is users");
-      }
+      const normalizedUserIds = [...new Set((userIds || []).map((id) => String(id).trim()).filter(Boolean))];
+      if (!normalizedUserIds.length) throw new Error("At least one userId is required when targetType is users");
 
       await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
         ...payload,
         userIds: normalizedUserIds,
       });
 
-      return {
-        success: true,
-        targetType: "users",
-        totalRecipients: normalizedUserIds.length,
-        userIds: normalizedUserIds,
-        title: normalizedTitle,
-        message: normalizedMessage,
-      };
+      return { success: true, targetType: "users", totalRecipients: normalizedUserIds.length, userIds: normalizedUserIds, title: normalizedTitle, message: normalizedMessage };
     }
 
     if (normalizedTargetType === "custom") {
-      const normalizedRoles = [
-        ...new Set(
-          (roles || [])
-            .map((item) => String(item).trim().toLowerCase())
-            .filter(Boolean)
-        ),
-      ].filter((item) => ["user", "organizer", "admin"].includes(item));
-
-      const normalizedUserIds = [
-        ...new Set((userIds || []).map((id) => String(id).trim()).filter(Boolean)),
-      ];
+      const normalizedRoles = [...new Set((roles || []).map((item) => String(item).trim().toLowerCase()).filter(Boolean))].filter((item) => ["user", "organizer", "admin"].includes(item));
+      const normalizedUserIds = [...new Set((userIds || []).map((id) => String(id).trim()).filter(Boolean))];
 
       if (!normalizedRoles.length && !normalizedUserIds.length) {
         throw new Error("At least one role or one user is required for custom recipients");
@@ -453,28 +446,12 @@ class AdminService {
         userIds: normalizedUserIds,
       });
 
-      return {
-        success: true,
-        targetType: "custom",
-        roles: normalizedRoles,
-        userIds: normalizedUserIds,
-        totalRoles: normalizedRoles.length,
-        totalUsers: normalizedUserIds.length,
-        title: normalizedTitle,
-        message: normalizedMessage,
-      };
+      return { success: true, targetType: "custom", roles: normalizedRoles, userIds: normalizedUserIds, totalRoles: normalizedRoles.length, totalUsers: normalizedUserIds.length, title: normalizedTitle, message: normalizedMessage };
     }
 
-    await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
-      ...payload,
-    });
+    await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, { ...payload });
 
-    return {
-      success: true,
-      targetType: "all",
-      title: normalizedTitle,
-      message: normalizedMessage,
-    };
+    return { success: true, targetType: "all", title: normalizedTitle, message: normalizedMessage };
   };
 }
 
