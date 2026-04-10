@@ -4,7 +4,13 @@ import Follow from "../follow/follow.model.js";
 import { DOMAIN_EVENTS } from "../notification/constants/notification.events.js";
 
 class PostService {
-  constructor({ postRepository, mediaService, userRepository, redis, eventBus }) {
+  constructor({
+    postRepository,
+    mediaService,
+    userRepository,
+    redis,
+    eventBus,
+  }) {
     Object.assign(this, {
       postRepository,
       mediaService,
@@ -67,7 +73,7 @@ class PostService {
       const uploaded = await this.mediaService.uploadMultiple(
         files,
         user.userId,
-        "post"
+        "post",
       );
       images = uploaded.map(this._formatImage);
     }
@@ -102,13 +108,13 @@ class PostService {
   }) {
     const post = await this.postRepository.findActivePostByIdAndAuthor(
       postId,
-      userId
+      userId,
     );
 
     if (!post) {
       throw new AppError(
         "Không tìm thấy bài viết hoặc bạn không có quyền",
-        404
+        404,
       );
     }
 
@@ -125,7 +131,7 @@ class PostService {
       const uploaded = await this.mediaService.uploadMultiple(
         newFiles,
         userId,
-        "post"
+        "post",
       );
       images.push(...uploaded.map(this._formatImage));
     }
@@ -143,7 +149,7 @@ class PostService {
     const updated = await this.postRepository.updatePost(
       postId,
       userId,
-      updateData
+      updateData,
     );
 
     this._invalidateCache(postId);
@@ -161,30 +167,32 @@ class PostService {
       throw new AppError("Content is required", 400);
     }
 
-    const newComment = await mongoose.connection.transaction(async (session) => {
-      const createdComment = await this.postRepository.createComment(
-        {
+    const newComment = await mongoose.connection.transaction(
+      async (session) => {
+        const createdComment = await this.postRepository.createComment(
+          {
+            postId,
+            author: user.userId,
+            content: trimmedContent,
+          },
+          session,
+        );
+
+        await this.postRepository.pushLatestCommentToPost(
           postId,
-          author: user.userId,
-          content: trimmedContent,
-        },
-        session
-      );
+          {
+            _id: createdComment._id,
+            content: createdComment.content,
+            createdAt: createdComment.createdAt || new Date(),
+            author: this._formatUserMini(user),
+          },
+          session,
+        );
 
-      await this.postRepository.pushLatestCommentToPost(
-        postId,
-        {
-          _id: createdComment._id,
-          content: createdComment.content,
-          createdAt: createdComment.createdAt || new Date(),
-          author: this._formatUserMini(user),
-        },
-        session
-      );
-
-      this.redis.del(`post:${postId}`).catch(() => null);
-      return createdComment;
-    });
+        this.redis.del(`post:${postId}`).catch(() => null);
+        return createdComment;
+      },
+    );
 
     const postOwnerId = this._resolvePostOwnerId(targetPost);
     const actorId = String(user.userId);
@@ -223,7 +231,7 @@ class PostService {
     const result = await mongoose.connection.transaction(async (session) => {
       const existingReaction = await this.postRepository.getReaction(
         { userId, postId },
-        session
+        session,
       );
 
       const oldType = existingReaction ? existingReaction.type : null;
@@ -233,7 +241,7 @@ class PostService {
       if (!existingReaction) {
         await this.postRepository.createReaction(
           { userId, postId, type },
-          session
+          session,
         );
 
         if (type === "like") {
@@ -250,7 +258,7 @@ class PostService {
       } else {
         await this.postRepository.updateReaction(
           { userId, postId, type },
-          session
+          session,
         );
         nextResult.action = "switched";
 
@@ -266,7 +274,7 @@ class PostService {
           postId,
           "likes",
           likeChange,
-          session
+          session,
         );
       }
 
@@ -294,7 +302,9 @@ class PostService {
     if (shouldNotify && this.eventBus) {
       console.log("[POST REACTION] emitting notification event");
 
-      const actor = await this.userRepository?.findById?.(userId).catch(() => null);
+      const actor = await this.userRepository
+        ?.findById?.(userId)
+        .catch(() => null);
 
       await this.eventBus.emit(DOMAIN_EVENTS.POST_REACTED, {
         recipientId: postOwnerId,
@@ -352,7 +362,8 @@ class PostService {
       return { data: [], paging: { nextCursor: null, hasMore: false } };
     }
 
-    const data = await this._attachUserReactions(posts, userId);
+    let data = await this._attachUserReactions(posts, userId);
+    data = await this._attachUserSavedState(data, userId);
 
     return {
       data,
@@ -377,11 +388,11 @@ class PostService {
 
     const reactions = await this.postRepository.getReactionsByUserAndTargets(
       userId,
-      posts.map((p) => p._id)
+      posts.map((p) => p._id),
     );
 
     const reactionsMap = new Map(
-      reactions.map((r) => [r.targetId.toString(), r.type])
+      reactions.map((r) => [r.targetId.toString(), r.type]),
     );
 
     return posts.map((p) => ({
@@ -400,7 +411,7 @@ class PostService {
         "MATCH",
         "feed:public:*",
         "COUNT",
-        100
+        100,
       );
       cursor = next;
       if (keys.length) await this.redis[deleteMethod](keys);
@@ -442,12 +453,81 @@ class PostService {
     if (!deleted) {
       throw new AppError(
         "Không tìm thấy bài viết hoặc bạn không có quyền xóa",
-        404
+        404,
       );
     }
 
     this._invalidateCache(postId);
     return { message: "Deleted" };
+  }
+  async toggleSavePost(postId, userId) {
+    const targetPost = await this.postRepository.findById(postId);
+    if (!targetPost) throw new AppError("Post not found", 404);
+
+    // Gọi xuống hàm Repository ta vừa tạo ở Bước 2
+    const result = await this.userRepository.toggleSavePost(userId, postId);
+    return result;
+  }
+
+  async getSavedPosts({ cursor, limit = 10, userId }) {
+    if (!userId) throw new AppError("Vui lòng đăng nhập", 401);
+
+    // 1. Lấy mảng ID bài viết user đã lưu
+    const user = await this.userRepository.findById(userId);
+    const savedPostIds = user?.savedPosts || [];
+
+    if (!savedPostIds.length) {
+      return { data: [], paging: { nextCursor: null, hasMore: false } };
+    }
+
+    // 2. Kéo dữ liệu thực tế của các bài viết đó từ Database
+    const filter = {
+      _id: { $in: savedPostIds },
+      status: "active",
+      isDeleted: false,
+    };
+    const posts = await this.postRepository.getPosts({
+      filter,
+      limit,
+      lastId: cursor,
+    });
+
+    if (!posts?.length) {
+      return { data: [], paging: { nextCursor: null, hasMore: false } };
+    }
+
+    // 3. Gắn thêm thông tin Like/Dislike và cờ isSaved = true
+    let data = await this._attachUserReactions(posts, userId);
+    data = data.map((p) => ({ ...p, isSaved: true }));
+    data = await this._attachUserSavedState(data, userId);
+
+    return {
+      data,
+      paging: {
+        nextCursor: data.length ? data[data.length - 1]._id : null,
+        hasMore: data.length === limit,
+      },
+    };
+  }
+  async _attachUserSavedState(posts, userId) {
+    if (!userId) return posts.map((p) => ({ ...p, isSaved: false }));
+    const user = await this.userRepository.findById(userId);
+
+    // Chuyển toàn bộ túi ID sang dạng chuỗi an toàn
+    const savedIdsArray = (user?.savedPosts || []).map((id) => id.toString());
+
+    return posts.map((p) => {
+      // Đề phòng trường hợp object có id thay vì _id
+      const postIdStr = p._id
+        ? p._id.toString()
+        : p.id
+          ? p.id.toString()
+          : null;
+      return {
+        ...p,
+        isSaved: postIdStr ? savedIdsArray.includes(postIdStr) : false,
+      };
+    });
   }
 }
 
