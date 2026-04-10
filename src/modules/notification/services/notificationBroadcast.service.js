@@ -17,6 +17,14 @@ function normalizeUserIds(userIds) {
   return [...new Set((userIds || []).map(String).filter(Boolean))];
 }
 
+function excludeActor(userIds, actorId) {
+  const normalized = normalizeUserIds(userIds);
+  if (!actorId) return normalized;
+
+  const actorIdStr = String(actorId);
+  return normalized.filter((id) => String(id) !== actorIdStr);
+}
+
 function collectSettledResults(results) {
   const fulfilled = [];
   const rejected = [];
@@ -68,8 +76,10 @@ export class NotificationBroadcastService {
     return collectSettledResults(results);
   }
 
-  async sendToUsers({ userIds, actorId = null, type, payload }) {
-    const recipients = normalizeUserIds(userIds);
+  async sendToUsers({ userIds, actorId = null, type, payload, excludeActorFromRecipients = true }) {
+    const recipients = excludeActorFromRecipients
+      ? excludeActor(userIds, actorId)
+      : normalizeUserIds(userIds);
 
     if (!recipients.length) {
       return [];
@@ -107,21 +117,35 @@ export class NotificationBroadcastService {
     return createdNotifications;
   }
 
-  async sendToAll({ actorId = null, type, payload }) {
+  async sendToAll({ actorId = null, type, payload, excludeActorFromRecipients = true }) {
     if (typeof this.resolveAllUserIds !== 'function') {
       throw new Error('resolveAllUserIds() is required for sendToAll');
     }
 
     const userIds = await this.resolveAllUserIds();
-    return this.sendToUsers({ userIds, actorId, type, payload });
+
+    return this.sendToUsers({
+      userIds,
+      actorId,
+      type,
+      payload,
+      excludeActorFromRecipients,
+    });
   }
 
-  async sendToRole({ role, actorId = null, type, payload }) {
+  async sendToRole({ role, actorId = null, type, payload, excludeActorFromRecipients = true }) {
     if (typeof this.resolveUserIdsByRole !== 'function') {
       throw new Error('resolveUserIdsByRole(role) is required for sendToRole');
     }
 
     const userIds = await this.resolveUserIdsByRole(role);
-    return this.sendToUsers({ userIds, actorId, type, payload });
+
+    return this.sendToUsers({
+      userIds,
+      actorId,
+      type,
+      payload,
+      excludeActorFromRecipients,
+    });
   }
 }

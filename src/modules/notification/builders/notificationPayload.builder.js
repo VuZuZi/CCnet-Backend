@@ -7,6 +7,20 @@ function ensureText(value, fallback) {
   return fallback;
 }
 
+function buildCommentPreview(value, maxLength = 80) {
+  const text = ensureText(value, '');
+
+  if (!text) {
+    return '';
+  }
+
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, maxLength).trim()}...`;
+}
+
 export function buildNotificationPayload(input) {
   const { type } = input;
 
@@ -79,13 +93,53 @@ export function buildNotificationPayload(input) {
       return {
         title: ensureText(input.title, 'System announcement'),
         message: ensureText(input.message, 'You have a new system notification.'),
-        actionUrl: ensureText(input.actionUrl, '/notifications'),
+        actionUrl: input.actionUrl ? String(input.actionUrl).trim() : null,
         entityType: 'system',
         entityId: input.entityId || null,
         metadata: {
           severity: input.severity || 'info',
         },
       };
+
+    case NOTIFICATION_TYPES.POST_REACTED:
+      return {
+        title: 'New reaction on your post',
+        message: `${ensureText(input.actorName, 'Someone')} liked your post.`,
+        actionUrl: ensureText(input.actionUrl, `/community/${input.postId || ''}`),
+        entityType: 'post',
+        entityId: input.postId || null,
+        metadata: {
+          postId: input.postId || null,
+          reactionType: input.reactionType || 'like',
+          actorName: input.actorName || null,
+          actorAvatar: input.actorAvatar || null,
+        },
+      };
+
+    case NOTIFICATION_TYPES.POST_COMMENTED: {
+      const actorName = ensureText(input.actorName, 'Someone');
+      const previewContent = buildCommentPreview(input.previewContent);
+
+      return {
+        title: 'New comment on your post',
+        message: previewContent
+          ? `${actorName} commented on your post: "${previewContent}"`
+          : `${actorName} commented on your post.`,
+        actionUrl: ensureText(
+          input.actionUrl,
+          `/community/${input.postId || ''}?commentId=${input.commentId || ''}`
+        ),
+        entityType: 'post_comment',
+        entityId: input.commentId || null,
+        metadata: {
+          postId: input.postId || null,
+          commentId: input.commentId || null,
+          actorName: input.actorName || null,
+          actorAvatar: input.actorAvatar || null,
+          previewContent: input.previewContent || null,
+        },
+      };
+    }
 
     default:
       throw new Error(`Unsupported notification type: ${type}`);

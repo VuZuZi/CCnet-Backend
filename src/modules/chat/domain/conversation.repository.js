@@ -67,6 +67,17 @@ class ConversationRepository {
     }
   }
 
+  async findGroupConversationByProjectId(projectId) {
+    if (!projectId || !mongoose.Types.ObjectId.isValid(projectId)) return null;
+
+    return await this.buildPopulatedQuery(
+      Conversation.findOne({
+        type: 'group',
+        projectId: new mongoose.Types.ObjectId(projectId),
+      })
+    ).lean();
+  }
+
   async create(payload) {
     return Conversation.create(payload);
   }

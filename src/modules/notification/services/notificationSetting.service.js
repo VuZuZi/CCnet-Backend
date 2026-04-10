@@ -6,6 +6,9 @@ const TYPE_TO_SETTING_KEY = Object.freeze({
   [NOTIFICATION_TYPES.ORGANIZER_REQUEST_SUBMITTED]: 'organizerRequestEnabled',
   [NOTIFICATION_TYPES.ORGANIZER_REQUEST_UPDATED]: 'organizerRequestEnabled',
   [NOTIFICATION_TYPES.SYSTEM_ANNOUNCEMENT]: 'systemEnabled',
+
+  [NOTIFICATION_TYPES.POST_REACTED]: 'postEnabled',
+  [NOTIFICATION_TYPES.POST_COMMENTED]: 'postEnabled',
 });
 
 const ALLOWED_SETTING_KEYS = new Set([
@@ -13,6 +16,7 @@ const ALLOWED_SETTING_KEYS = new Set([
   'followEnabled',
   'projectEnabled',
   'organizerRequestEnabled',
+  'postEnabled',
 ]);
 
 const DEFAULT_CACHE_TTL_MS = 60 * 1000;

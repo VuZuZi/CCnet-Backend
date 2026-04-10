@@ -10,6 +10,9 @@ import {
   updateConversationSchema,
   manageMembersSchema,
   leaveConversationSchema,
+  getPinnedMessagesSchema,
+  pinMessageSchema,
+  unpinMessageSchema,
 } from './chat.validation.js';
 import { CHAT_RESPONSE_MESSAGES } from './chat.messages.js';
 import {
@@ -53,7 +56,7 @@ export default class ChatController {
     conversationService,
     messageService,
     readService,
-  }) {
+  } = {}) {
     this.conversationService = conversationService;
     this.messageService = messageService;
     this.readService = readService;
@@ -198,6 +201,56 @@ export default class ChatController {
 
       const data = await this.messageService.getMessages(payload);
       return ok(res, data);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getPinnedMessages(req, res, next) {
+    try {
+      const validated = validateRequest(getPinnedMessagesSchema, {
+        id: req.params?.id,
+      });
+
+      const data = await this.messageService.getPinnedMessages(
+        this.withCurrentUser(req, validated)
+      );
+
+      return ok(res, data);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async pinMessage(req, res, next) {
+    try {
+      const validated = validateRequest(pinMessageSchema, {
+        id: req.params?.id,
+        messageId: req.body?.messageId,
+      });
+
+      const data = await this.messageService.pinMessage(
+        this.withCurrentUser(req, validated)
+      );
+
+      return created(res, data, CHAT_RESPONSE_MESSAGES.MESSAGE_PINNED);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async unpinMessage(req, res, next) {
+    try {
+      const validated = validateRequest(unpinMessageSchema, {
+        id: req.params?.id,
+        messageId: req.params?.messageId,
+      });
+
+      const data = await this.messageService.unpinMessage(
+        this.withCurrentUser(req, validated)
+      );
+
+      return ok(res, data, CHAT_RESPONSE_MESSAGES.MESSAGE_UNPINNED);
     } catch (error) {
       next(error);
     }

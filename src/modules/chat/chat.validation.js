@@ -105,3 +105,17 @@ export const manageMembersSchema = Joi.object({
 export const leaveConversationSchema = Joi.object({
   id: objectId.required(),
 });
+
+export const getPinnedMessagesSchema = Joi.object({
+  id: objectId.required(),
+});
+
+export const pinMessageSchema = Joi.object({
+  id: objectId.required(),
+  messageId: objectId.required(),
+});
+
+export const unpinMessageSchema = Joi.object({
+  id: objectId.required(),
+  messageId: objectId.required(),
+});

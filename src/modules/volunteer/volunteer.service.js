@@ -1,4 +1,5 @@
-import AppError from '../../core/AppError.js';
+import AppError from "../../core/AppError.js";
+import { PROJECT_STATUS } from "../project/project.constant.js";
 
 class VolunteerService {
   constructor({
@@ -6,224 +7,266 @@ class VolunteerService {
     userRepository,
     projectRepository,
     jobQueue,
+    conversationService,
   }) {
     this.volunteerRepository = volunteerRepository;
     this.userRepository = userRepository;
     this.projectRepository = projectRepository;
     this.jobQueue = jobQueue;
-  }
-  //  THÊM METHOD NÀY
-  async getProjectPendingApplications(projectId, limit = 20, cursor = null) {
-    // Kiểm tra project tồn tại (comment tạm thời nếu project chưa có)
-    try {
-      const volunteer = await this.volunteerRepository.findByProject(projectId);
-    return volunteer
-    } catch (error) {
-      return {
-        data: [],
-        nextCursor: null,
-        hasMore: false,
-        total: 0
-      };
-    }}
-
-    // check volunteer của Project
-  async getProjectApplications(projectId) {
-    const volunteer = await this.volunteerRepository.findByProject(projectId);
-    if (!volunteer) throw new AppError('volunteer not found', 404);
-    return volunteer;
+    this.conversationService = conversationService;
   }
 
-
-  // check user tồn tại
   async _ensureUserExists(userId) {
     const user = await this.userRepository.findById(userId);
-    if (!user) throw new AppError('User not found', 404);
+    if (!user) throw new AppError("User not found", 404);
     return user;
   }
 
-  // check project tồn tại
   async _ensureProjectExists(projectId) {
     const project = await this.projectRepository.findById(projectId);
-    if (!project) throw new AppError('Project not found', 404);
+    if (!project) throw new AppError("Project not found", 404);
     return project;
   }
 
-  // APPLY VOLUNTEER
+  async _ensureActorCanReviewProject(actorId, project) {
+    const actor = await this._ensureUserExists(actorId);
+    const actorRole = String(actor?.role || "").toLowerCase();
+    const isAdmin = actorRole === "admin";
+    const isProjectOwner =
+      String(project?.organizerId || "") === String(actorId);
+
+    if (!isAdmin && !isProjectOwner) {
+      throw new AppError("You do not have permission to review this application", 403);
+    }
+
+    return actor;
+  }
+
   async applyVolunteer(volunteerId, data) {
     const { opportunityId, changerId, skills, motivation, availability } = data;
+
     if (!opportunityId) {
-      throw new AppError('Missing opportunityId', 400);
+      throw new AppError("Missing opportunityId", 400);
     }
+
     await this._ensureUserExists(volunteerId);
-    await this._ensureProjectExists(opportunityId);
+    const project = await this._ensureProjectExists(opportunityId);
+
+    if (!project.needsVolunteers) {
+      throw new AppError("This project is not recruiting volunteers", 400);
+    }
+
+    if (project.isVolunteerFull) {
+      throw new AppError("This project has reached the volunteer limit", 400);
+    }
+
     try {
-      console.log("volunteerId:" + volunteerId,
-        "opportunityId:" + opportunityId,
-        "skills:" + skills,
-        "motivation:" + motivation,
-        "availabilit:" + availability
-      );
-      const application =
-        await this.volunteerRepository.create({
-          volunteerId,
-          opportunityId,
-          changerId,
-          skills,
-          motivation,
-          availability,
-        });
+      const application = await this.volunteerRepository.create({
+        volunteerId,
+        opportunityId,
+        changerId,
+        skills,
+        motivation,
+        availability,
+      });
+
       return application;
     } catch (e) {
-      // ❗ duplicate apply
       if (e?.code === 11000) {
-        throw new AppError('Already applied', 400);
+        throw new AppError("Already applied", 400);
       }
       throw e;
     }
   }
-  //  UPDATE application
-  async updateApplication(userId, id, updateData) { //id Project,
-    // Kiểm tra application tồn tại
+
+  async updateApplication(userId, id, updateData) {
     const application = await this.volunteerRepository.findById(id);
     if (!application) {
-      throw new AppError('Application not found', 404);
+      throw new AppError("Application not found", 404);
     }
-    // Cập nhật
-    const updated = await this.volunteerRepository.update(id, updateData, userId);
 
+    if (String(application.volunteerId) !== String(userId)) {
+      throw new AppError("You do not have permission to update this application", 403);
+    }
+
+    if (application.status !== "PENDING") {
+      throw new AppError("Only pending applications can be updated", 400);
+    }
+
+    const updated = await this.volunteerRepository.update(id, updateData, userId);
     return updated;
   }
 
   async cancelApplication(id, changerId) {
     const application = await this.volunteerRepository.findById(id);
     if (!application) {
-      throw new AppError('Application not found', 404);
+      throw new AppError("Application not found", 404);
     }
 
-    if (application.status !== 'PENDING') {
-      throw new AppError('Cannot cancel application that is not pending', 400);
+    if (String(application.volunteerId) !== String(changerId)) {
+      throw new AppError("You do not have permission to cancel this application", 403);
     }
 
-    const updated = await this.volunteerRepository.update(id, {
-      status: 'CANCELLED',
-      changerId: changerId,
+    if (application.status !== "PENDING") {
+      throw new AppError("Cannot cancel application that is not pending", 400);
+    }
+
+    const updated = await this.volunteerRepository.update(
+      id,
+      { status: "CANCELLED" },
+      changerId
+    );
+
+    return updated;
+  }
+
+  async application(volunteerId, data) {
+    const { opportunityId } = data;
+
+    if (!opportunityId) {
+      throw new AppError("Missing opportunityId", 400);
+    }
+
+    const application = await this.volunteerRepository.application({
+      volunteerId,
+      opportunityId
     });
 
-    return updated;
-  }
-
-
-  // checkStatus
-  async application(volunteerId, data) {
-    try {
-      //  Lấy từ data param truyền vào
-      const { opportunityId } = data;
-      if (!opportunityId) {
-        throw new AppError('Missing opportunityId', 400);
-      }
-      // Tìm application
-      const application = await this.volunteerRepository.application({
-        volunteerId,
-        opportunityId
-      });
-      if (!application) {
-        return {
-          hasApplied: false,
-          status: null
-        };
-      }
+    if (!application) {
       return {
-        hasApplied: true,
-        id: application.id,
-        status: application.status,
-        role: application.role,
-        skills: application.skills,
-        motivation: application.motivation,
-        availability: application.availability
+        hasApplied: false,
+        status: null
       };
-    } catch (e) {
-      throw e;
     }
+
+    return {
+      hasApplied: true,
+      id: application.id,
+      status: application.status,
+      role: application.role,
+      skills: application.skills,
+      motivation: application.motivation,
+      availability: application.availability
+    };
   }
-  // APPROVE
-  async approveVolunteer(applicationId, adminId) {
+
+  async approveVolunteer(applicationId, actorId) {
     const application = await this.volunteerRepository.findById(applicationId);
     if (!application) {
-      throw new AppError('Application not found', 404);
+      throw new AppError("Application not found", 404);
     }
 
-    if (application.status !== 'PENDING') {
-      throw new AppError('Can only approve pending applications', 400);
+    if (application.status !== "PENDING") {
+      throw new AppError("Can only approve pending applications", 400);
     }
 
-    //  Sử dụng hàm update để cập nhật status
+    const project = await this._ensureProjectExists(application.opportunityId);
+    await this._ensureActorCanReviewProject(actorId, project);
+
+    if (!project.needsVolunteers) {
+      throw new AppError("This project is not recruiting volunteers", 400);
+    }
+
+    if (project.isVolunteerFull) {
+      throw new AppError("This project has reached the volunteer limit", 400);
+    }
+
     const updated = await this.volunteerRepository.update(
-        applicationId,
-        { status: 'APPROVED' },  // updateData
-        adminId                   // changerId
+      applicationId,
+      { status: "APPROVED", rejectReason: null },
+      actorId
+    );
+
+    await this.projectRepository.incrementProjectStats(
+      project._id,
+      { "stats.currentVolunteers": 1 }
+    );
+
+    if (String(project.status) === PROJECT_STATUS.ACTIVE && this.conversationService) {
+      await this.conversationService.addMemberToProjectConversation({
+        projectId: project._id,
+        participantId: application.volunteerId,
+        actorId,
+      });
+    }
+
+    return updated;
+  }
+
+  async restoreVolunteer(applicationId, userId) {
+    const application = await this.volunteerRepository.findById(applicationId);
+    if (!application) {
+      throw new AppError("Application not found", 404);
+    }
+
+    const project = await this._ensureProjectExists(application.opportunityId);
+    await this._ensureActorCanReviewProject(userId, project);
+
+    const restored = await this.volunteerRepository.update(
+      applicationId,
+      { status: "PENDING" },
+      userId
+    );
+
+    return restored;
+  }
+
+  async rejectVolunteer(applicationId, actorId, rejectReason) {
+    const application = await this.volunteerRepository.findById(applicationId);
+
+    if (!application) {
+      throw new AppError("Application not found", 404);
+    }
+
+    if (application.status !== "PENDING") {
+      throw new AppError("Can only reject pending applications", 400);
+    }
+
+    const project = await this._ensureProjectExists(application.opportunityId);
+    await this._ensureActorCanReviewProject(actorId, project);
+
+    const updated = await this.volunteerRepository.update(
+      applicationId,
+      {
+        status: "REJECTED",
+        rejectReason: String(rejectReason || "").trim() || null,
+      },
+      actorId
     );
 
     return updated;
   }
-  // RESTORE
-  async restoreVolunteer(applicationId, userID) {
+
+  async pendingVolunteer(applicationId, userId) {
     const application = await this.volunteerRepository.findById(applicationId);
+
     if (!application) {
-      throw new AppError('Application not found', 404);
+      throw new AppError("Application not found", 404);
     }
-    const restore = await this.volunteerRepository.update(
-        applicationId,
-        { status: 'PENDING' },  // updateData
-        userID                   // changerId
+
+    const project = await this._ensureProjectExists(application.opportunityId);
+    await this._ensureActorCanReviewProject(userId, project);
+
+    const updated = await this.volunteerRepository.update(
+      applicationId,
+      { status: "PENDING" },
+      userId
     );
-    return restore;
+
+    return updated;
   }
 
-  // REJECT
-  async rejectVolunteer(applicationId, rejectReason) {
-    const application =
-      await this.volunteerRepository.findById(applicationId);
+  async getMyApplications(userId, limit = 10, cursor = null) {
+    const normalizedLimit = Math.min(Math.max(Number(limit) || 10, 1), 50);
 
-    if (!application) {
-      throw new AppError('Application not found', 404);
-    }
-
-    application.status = 'REJECTED';
-    application.rejectReason = rejectReason;
-
-    await application.save();
-
-    return application;
-  }
-
-  async pendingVolunteer(applicationId,userId) {
-    const application =
-        await this.volunteerRepository.findById(applicationId);
-
-    if (!application) {
-      throw new AppError('Application not found', 404);
-    }
-
-    application.status = 'PENDING';
-    application.changerId = userId;
-    await application.save();
-
-    return application;
-  }
-
-
-  // GET MY APPLICATIONS
-  async getMyApplications(userId, limit = 10, cursor) {
-    const applications =
-      await this.volunteerRepository.findByUser(
-        userId,
-        limit,
-        cursor
-      );
+    const applications = await this.volunteerRepository.findByUser(
+      userId,
+      normalizedLimit,
+      cursor
+    );
 
     const nextCursor =
-      applications.length === limit
+      applications.length === normalizedLimit
         ? applications[applications.length - 1]._id
         : null;
 
@@ -244,12 +287,13 @@ class VolunteerService {
 
     const applications = await this.volunteerRepository.findByUserWithProject(userId);
 
-    const normalizedSearch = search.trim().toLowerCase();
+    const normalizedSearch = String(search || "").trim().toLowerCase();
 
     const items = applications
       .map((application) => {
         const project = application.opportunityId || null;
         const isApproved = application.status === 'APPROVED';
+
         const derivedStatus = !project
           ? application.status
           : application.status === 'PENDING'
@@ -292,10 +336,11 @@ class VolunteerService {
         };
       })
       .filter((item) => {
-        const matchesSearch = !normalizedSearch
-          || item.project?.title?.toLowerCase().includes(normalizedSearch)
-          || item.project?.category?.toLowerCase().includes(normalizedSearch)
-          || item.project?.location?.address?.toLowerCase().includes(normalizedSearch);
+        const matchesSearch =
+          !normalizedSearch ||
+          item.project?.title?.toLowerCase().includes(normalizedSearch) ||
+          item.project?.category?.toLowerCase().includes(normalizedSearch) ||
+          item.project?.location?.address?.toLowerCase().includes(normalizedSearch);
 
         if (!matchesSearch) {
           return false;
@@ -305,9 +350,15 @@ class VolunteerService {
           case 'JOINED':
             return item.applicationStatus === 'APPROVED';
           case 'IN_PROGRESS':
-            return item.applicationStatus === 'APPROVED' && item.project?.status === 'IN_PROGRESS';
+            return (
+              item.applicationStatus === 'APPROVED' &&
+              item.project?.status === 'IN_PROGRESS'
+            );
           case 'COMPLETED':
-            return item.applicationStatus === 'APPROVED' && item.project?.status === 'COMPLETED';
+            return (
+              item.applicationStatus === 'APPROVED' &&
+              item.project?.status === 'COMPLETED'
+            );
           case 'PENDING':
             return item.applicationStatus === 'PENDING';
           case 'REJECTED':
@@ -329,8 +380,16 @@ class VolunteerService {
       totalApplications: applications.length,
       totalSupported: applications.filter((item) => item.status === 'APPROVED').length,
       joined: applications.filter((item) => item.status === 'APPROVED').length,
-      inProgress: applications.filter((item) => item.status === 'APPROVED' && item.opportunityId?.status === 'IN_PROGRESS').length,
-      completed: applications.filter((item) => item.status === 'APPROVED' && item.opportunityId?.status === 'COMPLETED').length,
+      inProgress: applications.filter(
+        (item) =>
+          item.status === 'APPROVED' &&
+          item.opportunityId?.status === 'IN_PROGRESS'
+      ).length,
+      completed: applications.filter(
+        (item) =>
+          item.status === 'APPROVED' &&
+          item.opportunityId?.status === 'COMPLETED'
+      ).length,
       pending: applications.filter((item) => item.status === 'PENDING').length,
       rejected: applications.filter((item) => item.status === 'REJECTED').length,
       cancelled: applications.filter((item) => item.status === 'CANCELLED').length,
@@ -354,19 +413,45 @@ class VolunteerService {
     };
   }
 
-  // GET PROJECT APPLICATIONS
-  async getProjectApplications(projectId, limit = 10, cursor) {
+  async getProjectPendingApplications(projectId, limit = 20, cursor = null) {
     await this._ensureProjectExists(projectId);
 
-    const applications =
-      await this.volunteerRepository.findByProject(
-        projectId,
-        limit,
-        cursor
-      );
+    const normalizedLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
+
+    const applications = await this.volunteerRepository.findByProject(
+      projectId,
+      "PENDING",
+      normalizedLimit,
+      cursor
+    );
 
     const nextCursor =
-      applications.length === limit
+      applications.length === normalizedLimit
+        ? applications[applications.length - 1]._id
+        : null;
+
+    return {
+      data: applications,
+      nextCursor,
+      hasMore: !!nextCursor,
+      total: applications.length,
+    };
+  }
+
+  async getProjectApplications(projectId, status = null, limit = 10, cursor = null) {
+    await this._ensureProjectExists(projectId);
+
+    const normalizedLimit = Math.min(Math.max(Number(limit) || 10, 1), 50);
+
+    const applications = await this.volunteerRepository.findByProject(
+      projectId,
+      status,
+      normalizedLimit,
+      cursor
+    );
+
+    const nextCursor =
+      applications.length === normalizedLimit
         ? applications[applications.length - 1]._id
         : null;
 
@@ -377,10 +462,8 @@ class VolunteerService {
     };
   }
 
-  // STATS
   async getStats(userId) {
-    const count =
-      await this.volunteerRepository.countByUser(userId);
+    const count = await this.volunteerRepository.countByUser(userId);
 
     return {
       totalApplications: count,

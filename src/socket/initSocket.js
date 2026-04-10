@@ -7,6 +7,8 @@ const CHAT_CHANNELS = {
   MESSAGE_UPDATED: 'chat:message:updated',
   MESSAGE_READ: 'chat:message:read',
   CONVERSATION_UPDATED: 'chat:conversation:updated',
+  MESSAGE_PINNED: 'chat:message:pinned',
+  MESSAGE_UNPINNED: 'chat:message:unpinned',
 };
 
 const SOCKET_EVENTS = {
@@ -14,6 +16,8 @@ const SOCKET_EVENTS = {
   MESSAGE_UPDATED: 'chat:message:updated',
   MESSAGE_READ: 'chat:message:read',
   CONVERSATION_UPDATED: 'chat:conversation:updated',
+  MESSAGE_PINNED: 'chat:message:pinned',
+  MESSAGE_UNPINNED: 'chat:message:unpinned',
   NOTIFY: 'chat:notify',
   USER_JOIN: 'user:join',
   JOIN: 'join',
@@ -25,6 +29,8 @@ const CHANNEL_EVENT_MAP = {
   [CHAT_CHANNELS.MESSAGE_UPDATED]: SOCKET_EVENTS.MESSAGE_UPDATED,
   [CHAT_CHANNELS.MESSAGE_READ]: SOCKET_EVENTS.MESSAGE_READ,
   [CHAT_CHANNELS.CONVERSATION_UPDATED]: SOCKET_EVENTS.CONVERSATION_UPDATED,
+  [CHAT_CHANNELS.MESSAGE_PINNED]: SOCKET_EVENTS.MESSAGE_PINNED,
+  [CHAT_CHANNELS.MESSAGE_UNPINNED]: SOCKET_EVENTS.MESSAGE_UNPINNED,
 };
 
 function emitToUserRooms(io, participantIds, eventName, payload) {
@@ -54,10 +60,8 @@ export function initSocket(server) {
     host: process.env.REDIS_HOST || '127.0.0.1',
     port: Number(process.env.REDIS_PORT || 6379),
     password: process.env.REDIS_PASSWORD || undefined,
+    maxRetriesPerRequest: null,
   });
-  const sub = new Redis(process.env.REDIS_URL, {
-    maxRetriesPerRequest: null
-  })
 
   subscribeChatChannels(subscriber);
 

@@ -9,4 +9,7 @@ export const DOMAIN_EVENTS = Object.freeze({
   ORGANIZER_REQUEST_UPDATED: 'organizerRequest.updated',
 
   SYSTEM_ANNOUNCEMENT_CREATED: 'systemAnnouncement.created',
+
+  POST_REACTED: 'post.reacted',
+  POST_COMMENTED: 'post.commented',
 });

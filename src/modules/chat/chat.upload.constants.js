@@ -4,6 +4,7 @@ import AppError from "../../core/AppError.js";
 export const CHAT_UPLOAD_LIMITS = {
   maxFiles: 10,
   maxImageSizeBytes: 10 * 1024 * 1024,
+  maxVideoSizeBytes: 20 * 1024 * 1024,
   maxFileSizeBytes: 25 * 1024 * 1024,
   maxGroupAvatarSizeBytes: 5 * 1024 * 1024,
 };
@@ -21,6 +22,9 @@ export const CHAT_UPLOAD_ALLOWED_EXTENSIONS = new Set([
   "webp",
   "bmp",
   "svg",
+  "mp4",
+  "webm",
+  "mov",
   "pdf",
   "doc",
   "docx",
@@ -32,6 +36,9 @@ export const CHAT_UPLOAD_ALLOWED_EXTENSIONS = new Set([
 ]);
 
 export const CHAT_UPLOAD_ALLOWED_MIME_TYPES = new Set([
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
   "application/pdf",
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -52,11 +59,15 @@ export function isImageMimeType(mimetype = "") {
   return String(mimetype || "").toLowerCase().startsWith("image/");
 }
 
+export function isVideoMimeType(mimetype = "") {
+  return String(mimetype || "").toLowerCase().startsWith("video/");
+}
+
 export function isAllowedChatUploadFile(file) {
   const extension = getFileExtension(file?.originalname || file?.filename || "");
   const mimeType = String(file?.mimetype || "").toLowerCase();
 
-  if (isImageMimeType(mimeType)) {
+  if (isImageMimeType(mimeType) || isVideoMimeType(mimeType)) {
     return true;
   }
 
@@ -101,7 +112,20 @@ export function assertValidChatUploadFiles(files = []) {
     }
 
     if (
+      isVideoMimeType(file?.mimetype) &&
+      Number(file?.size || 0) > CHAT_UPLOAD_LIMITS.maxVideoSizeBytes
+    ) {
+      throw new AppError(
+        `Video "${file.originalname}" exceeds ${Math.floor(
+          CHAT_UPLOAD_LIMITS.maxVideoSizeBytes / (1024 * 1024)
+        )}MB`,
+        400
+      );
+    }
+
+    if (
       !isImageMimeType(file?.mimetype) &&
+      !isVideoMimeType(file?.mimetype) &&
       Number(file?.size || 0) > CHAT_UPLOAD_LIMITS.maxFileSizeBytes
     ) {
       throw new AppError(

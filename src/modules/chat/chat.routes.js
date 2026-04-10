@@ -44,6 +44,14 @@ router.post('/conversations/:id/leave', authenticate, execute('leaveConversation
 
 router.get('/conversations/:id/assets', authenticate, execute('getAssets'));
 
+router.get('/conversations/:id/pins', authenticate, execute('getPinnedMessages'));
+router.post('/conversations/:id/pins', authenticate, execute('pinMessage'));
+router.delete(
+  '/conversations/:id/pins/:messageId',
+  authenticate,
+  execute('unpinMessage')
+);
+
 router.get('/messages/:id', authenticate, execute('getMessages'));
 router.post('/messages', authenticate, messageUpload, execute('sendMessage'));
 router.patch('/messages/:id/react', authenticate, execute('reactMessage'));

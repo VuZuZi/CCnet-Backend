@@ -11,7 +11,7 @@ export function registerSystemNotificationListener({
       const basePayload = {
         title: event.title,
         message: event.message,
-        actionUrl: event.actionUrl,
+        actionUrl: event.actionUrl || null,
         entityId: event.entityId,
         severity: event.severity,
       };
