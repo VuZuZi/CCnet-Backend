@@ -1,6 +1,15 @@
 import mongoose from 'mongoose';
 import Project from './project.model.js';
 import { PROJECT_STATUS } from './project.constant.js';
+const PUBLIC_STATUSES = [
+    PROJECT_STATUS.FUNDING,
+    PROJECT_STATUS.RECRUITING,
+    PROJECT_STATUS.EXECUTING,
+    PROJECT_STATUS.PAUSED,
+    PROJECT_STATUS.CANCELLATION_PENDING,
+    PROJECT_STATUS.COMPLETED_SUCCESSFULLY,
+    PROJECT_STATUS.COMPLETED_PARTIAL
+];
 
 const PROJECT_CARD_PROJECTION = {
     title: 1,
@@ -12,10 +21,20 @@ const PROJECT_CARD_PROJECTION = {
     isUrgent: 1,
     endDate: 1,
     stats: 1,
-    organizerId: 1
+    organizerId: 1,
+    projectType: 1,
+    needsVolunteers: 1
 };
 
 class ProjectRepository {
+
+    async incrementFunding(projectId, amount, session = null) {
+        return await Project.findByIdAndUpdate(
+            projectId,
+            { $inc: { currentAmount: amount } },
+            { new: true, session }
+        ).lean().exec();
+    }
 
     async create(projectData, session = null) {
         const docs = await Project.create([projectData], { session });
@@ -87,7 +106,7 @@ class ProjectRepository {
 
     async findFeaturedProjects(limit = 1) {
         return await Project.find({
-            status: PROJECT_STATUS.ACTIVE,
+            status: { $in: PUBLIC_STATUSES },
             isUrgent: true,
             endDate: { $gt: new Date() }
         })
@@ -100,7 +119,7 @@ class ProjectRepository {
 
     async findVolunteerProjects(limit = 4) {
         return await Project.find({
-            status: PROJECT_STATUS.ACTIVE,
+            status: { $in: PUBLIC_STATUSES },
             needsVolunteers: true,
             isVolunteerFull: false
         })
@@ -114,16 +133,29 @@ class ProjectRepository {
             .exec();
     }
 
-    async findAllProjects({ filter, skip = 0, limit = 10, sort = { createdAt: -1 }, textSearch = null }) {
-        const queryFilter = { ...filter, status: PROJECT_STATUS.ACTIVE };
+    async findAllProjects({ filter, skip = 0, limit = 9, sortType = 'newest', textSearch = null }) {
+        const queryFilter = { status: { $in: PUBLIC_STATUSES }, ...filter };
 
-        let finalSort = sort;
+        let finalSort = {};
         let projection = { ...PROJECT_CARD_PROJECTION };
+
+        if (sortType === 'trending') {
+            finalSort = { 'stats.viewCount': -1, createdAt: -1 };
+        } else if (sortType === 'ending_soon') {
+            finalSort = { endDate: 1, createdAt: -1 };
+        } else {
+            finalSort = { createdAt: -1 };
+        }
 
         if (textSearch) {
             queryFilter.$text = { $search: textSearch };
             projection.score = { $meta: "textScore" };
-            finalSort = { score: { $meta: "textScore" } };
+            
+            if (sortType === 'newest') {
+                finalSort = { score: { $meta: "textScore" } };
+            } else {
+                finalSort.score = { $meta: "textScore" };
+            }
         }
 
         const [projects, total] = await Promise.all([
@@ -137,7 +169,6 @@ class ProjectRepository {
                 .exec(),
             Project.find(queryFilter)
                 .limit(5000)
-                .maxTimeMS(2000)
                 .countDocuments()
                 .exec()
         ]);
@@ -147,11 +178,13 @@ class ProjectRepository {
 
     async findByIdWithDetails(projectId) {
         if (!mongoose.Types.ObjectId.isValid(projectId)) return null;
+
         return await Project.findById(projectId)
             .populate({
                 path: 'organizerId',
                 select: 'fullName avatar email isVerified'
             })
+            .populate('documents')
             .lean()
             .exec();
     }
@@ -164,10 +197,12 @@ class ProjectRepository {
                     _id: null,
                     totalFundsRaised: { $sum: "$currentAmount" },
                     activeProjects: {
-                        $sum: { $cond: [{ $eq: ["$status", PROJECT_STATUS.ACTIVE] }, 1, 0] }
+                        $sum: {
+                            $cond: [{ $in: ["$status", PUBLIC_STATUSES] }, 1, 0]
+                        }
                     },
                     pendingProjects: {
-                        $sum: { $cond: [{ $eq: ["$status", PROJECT_STATUS.PENDING_APPROVAL] }, 1, 0] }
+                        $sum: { $cond: [{ $eq: ["$status", PROJECT_STATUS.PENDING_APPROVAL] }, 1, 0] } 
                     }
                 }
             }
@@ -175,16 +210,18 @@ class ProjectRepository {
         return stats.length > 0 ? stats[0] : { totalFundsRaised: 0, activeProjects: 0, pendingProjects: 0 };
     }
 
-    async findOrganizerProjects({ organizerId, status, skip = 0, limit = 10 }) {
+    async findOrganizerProjects({ organizerId, status, sortType = 'newest', skip = 0, limit = 10 }) {
         const filter = { organizerId: new mongoose.Types.ObjectId(organizerId) };
         if (status && status !== 'ALL') {
             filter.status = status;
         }
 
+        const finalSort = sortType === 'oldest' ? { createdAt: 1 } : { createdAt: -1 };
+
         const [projects, total] = await Promise.all([
             Project.find(filter)
-                .select('title coverMedia category targetAmount currentAmount status milestones createdAt')
-                .sort({ createdAt: -1 })
+                .select('title coverMedia category targetAmount currentAmount status milestones createdAt projectType needsVolunteers')
+                .sort(finalSort)
                 .skip(skip)
                 .limit(limit)
                 .maxTimeMS(3000)
@@ -207,6 +244,18 @@ class ProjectRepository {
             { new: true, runValidators: true, session }
         ).lean().exec();
     }
+
+    async findExpiredFundingProjects(currentDate, limit = 50) {
+        return await Project.find({
+            status: PROJECT_STATUS.FUNDING,
+            endDate: { $lt: currentDate }
+        })
+        .select('_id title currentAmount targetAmount mvpAmount organizerId endDate status')
+        .limit(limit)
+        .lean()
+        .exec();
+    }
+
 }
 
 export default ProjectRepository;

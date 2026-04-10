@@ -6,14 +6,19 @@ import {
   optionalAuthenticate,
 } from "../../middlewares/auth.middleware.js";
 import { maybeAuthenticate } from "../../middlewares/maybeAuth.middleware.js";
-import { 
-  requireKycTier, 
-  ensureKycActive, 
-  ensureKycValidFor 
+import {
+  requireKycTier,
+  ensureKycActive,
+  ensureKycValidFor
 } from "../../middlewares/kyc.middleware.js";
 import { z } from "zod";
-import { createDraftSchema, updateDraftSchema } from "./project.validation.js";
-import { validateBody } from "../../middlewares/validate.middleware.js";
+import {
+  createDraftSchema,
+  updateDraftSchema,
+  exploreQuerySchema,
+  workspaceQuerySchema
+} from "./project.validation.js";
+import { validateBody, validateQuery } from "../../middlewares/validate.middleware.js";
 import {
   uploadFiles,
   uploadMedia,
@@ -53,7 +58,12 @@ const projectUploads = uploadFiles.fields([
 
 router.get("/featured", execute("getFeatured"));
 router.get("/volunteers-needed", execute("getVolunteerNeeded"));
-router.get("/explore", execute("getExploreProjects"));
+
+router.get(
+  "/explore",
+  validateQuery(exploreQuerySchema),
+  execute("getExploreProjects")
+);
 
 router.get(
   "/organizer/stats",
@@ -66,6 +76,7 @@ router.get(
   "/organizer/my-projects",
   authenticate,
   authorize("Organizer"),
+  validateQuery(workspaceQuerySchema),
   execute("getWorkspaceProjects"),
 );
 

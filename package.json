@@ -5,7 +5,7 @@
   "description": "",
   "main": "src/server.js",
   "scripts": {
-    "dev": "concurrently -n API,SOCKET \"nodemon src/server.js\" \"nodemon src/socket/socketServer.js\"",
+    "dev": "concurrently -n API,SOCKET,NGROK -c blue,magenta,green \"nodemon src/server.js\" \"nodemon src/socket/socketServer.js\" \"ngrok http 5000\"",
     "start": "node src/server.js"
   },
   "repository": {
@@ -20,6 +20,7 @@
   },
   "homepage": "https://github.com/VuZuZi/CCnet-Backend#readme",
   "dependencies": {
+    "@payos/node": "^2.0.5",
     "awilix": "^10.0.2",
     "bcryptjs": "^2.4.3",
     "blurhash": "^2.0.5",

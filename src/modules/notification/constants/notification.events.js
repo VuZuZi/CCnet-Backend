@@ -9,4 +9,9 @@ export const DOMAIN_EVENTS = Object.freeze({
   ORGANIZER_REQUEST_UPDATED: 'organizerRequest.updated',
 
   SYSTEM_ANNOUNCEMENT_CREATED: 'systemAnnouncement.created',
+  DONATION_SUCCESSFUL: "donation.successful",
+  
+  TRANSACTION_REFUNDED: 'transaction.refunded',
+  TRANSACTION_WITHDRAWAL_REQUESTED: 'transaction.withdrawalRequested',
+  TRANSACTION_FAILED: 'transaction.failed'
 });

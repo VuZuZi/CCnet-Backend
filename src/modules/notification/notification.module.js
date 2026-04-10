@@ -16,6 +16,7 @@ import { InMemoryStreamSessionStore } from './infrastructure/inMemoryStreamSessi
 import { InMemoryNotificationClientRegistry } from './infrastructure/inMemoryNotificationClientRegistry.js';
 import { RedisStreamSessionStore } from './infrastructure/redisStreamSessionStore.js';
 import { RedisNotificationRealtimeGateway } from './infrastructure/redisNotificationRealtimeGateway.js';
+import { registerTransactionNotificationListener } from './listeners/transaction.notification.listener.js';
 
 const registeredListenerBuses = new WeakSet();
 
@@ -141,6 +142,15 @@ function registerDomainListeners({
     notificationBroadcastService,
     logger,
   });
+
+  registerTransactionNotificationListener({
+    eventBus,
+    notificationService,
+    mailProvider,
+    userRepository,
+    logger,
+  });
+
 
   registeredListenerBuses.add(eventBus);
 }

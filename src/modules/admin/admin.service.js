@@ -1,7 +1,6 @@
 import AppError from "../../core/AppError.js";
 import { PROJECT_STATUS, PROJECT_TYPE } from "../project/project.constant.js";
 import { DOMAIN_EVENTS } from "../../config/notification.js";
-import User from "../user/user.model.js";
 
 class AdminService {
   constructor({
@@ -10,6 +9,7 @@ class AdminService {
     userRepository,
     reportRepository,
     postRepository,
+    escrowRepository,
     transactionManager,
     jobQueue,
     eventBus
@@ -19,34 +19,31 @@ class AdminService {
     this.userRepository = userRepository;
     this.reportRepository = reportRepository;
     this.postRepository = postRepository;
+    this.escrowRepository = escrowRepository;
     this.transactionManager = transactionManager;
     this.jobQueue = jobQueue; 
     this.eventBus = eventBus;
   }
 
-
-  _buildProjectStatusNotificationMessage(projectTitle, status, feedback) {
+_buildProjectStatusNotificationMessage(projectTitle, status, feedback) {
     if ([PROJECT_STATUS.FUNDING, PROJECT_STATUS.RECRUITING, PROJECT_STATUS.ACTIVE].includes(status)) {
       return {
         title: "Dự án đã được phê duyệt",
         message: `Dự án "${projectTitle}" của bạn đã được Ban quản trị phê duyệt và đang đi vào hoạt động (Trạng thái: ${status}).`,
       };
     }
-
     if (status === PROJECT_STATUS.REVISION_REQUESTED) {
       return {
         title: "Dự án cần chỉnh sửa",
         message: `Dự án "${projectTitle}" của bạn cần được chỉnh sửa. Lý do: ${feedback}. Bạn có 14 ngày để bổ sung.`,
       };
     }
-
     if (status === PROJECT_STATUS.REJECTED) {
       return {
         title: "Dự án bị từ chối",
-        message: `Dự án "${projectTitle}" đã bị từ chối. Lý do: ${feedback}. Tài khoản của bạn bị tạm ngưng tạo dự án mới trong 7 ngày.`,
+        message: `Dự án "${projectTitle}" đã bị từ chối. Lý do: ${feedback}. Tài khoản của bạn bị ngưng tạo dự án mới 7 ngày.`,
       };
     }
-
     return {
       title: "Cập nhật trạng thái dự án",
       message: `Trạng thái dự án "${projectTitle}" đã được cập nhật thành ${status}.`,
@@ -92,14 +89,12 @@ class AdminService {
       let updateData = {};
       let userUpdate = null;
 
-      // 1. Phân luồng Ý định (Intent) từ request
       let mappedIntent = normalized;
       if (normalized === "PENDING") mappedIntent = PROJECT_STATUS.PENDING_APPROVAL;
       if (normalized === "APPROVED" || normalized === "ACTIVE") mappedIntent = "APPROVED_INTENT";
 
-      // 2. Xử lý Logic Business theo Intent
       if (mappedIntent === PROJECT_STATUS.REVISION_REQUESTED) {
-        if (!feedback) throw new AppError("Bắt buộc phải cung cấp lý do (feedback) khi yêu cầu chỉnh sửa", 400);
+        if (!feedback) throw new AppError("Bắt buộc phải cung cấp lý do (feedback)", 400);
 
         const currentRevisions = project.revisionCount || 0;
         if (currentRevisions >= 2) {
@@ -112,22 +107,17 @@ class AdminService {
           updateData.rejectionReason = feedback;
           updateData.revisionRequestedAt = new Date();
 
-          // [WORKER] Bắn job delay 14 ngày đếm ngược Timeout Auto-Reject
           if (this.jobQueue) {
-            this.jobQueue.addJob(
-              "project-maintenance", 
-              "check-revision-timeout", 
-              { projectId }, 
-              { delay: 14 * 24 * 60 * 60 * 1000 } // 14 ngày
-            ).catch(err => console.error(`[Queue] Failed to schedule timeout for ${projectId}`, err.message));
+            this.jobQueue.addJob("project-maintenance", "check-revision-timeout", { projectId }, 
+              { delay: 14 * 24 * 60 * 60 * 1000 }
+            ).catch(err => console.error(`[Queue] Timeout config failed: ${projectId}`, err.message));
           }
         }
       }
 
       if (mappedIntent === PROJECT_STATUS.REJECTED) {
-        if (!feedback && !updateData.rejectionReason) {
-            throw new AppError("Bắt buộc phải có lý do từ chối", 400);
-        }
+        if (!feedback && !updateData.rejectionReason) throw new AppError("Bắt buộc phải có lý do từ chối", 400);
+        
         finalStatus = PROJECT_STATUS.REJECTED;
         updateData.status = finalStatus;
         updateData.rejectionReason = updateData.rejectionReason || feedback;
@@ -145,9 +135,23 @@ class AdminService {
         updateData.status = finalStatus;
         updateData.approvedBy = adminId;
         updateData.approvedAt = new Date();
+
+        if (project.projectType === PROJECT_TYPE.FUNDED) {
+            const existingEscrow = await this.escrowRepository.findByProjectId(projectId, session);
+            if (!existingEscrow) {
+                await this.escrowRepository.create({
+                    projectId: projectId,
+                    availableBalance: 0,
+                    totalDeposited: 0,
+                    pendingRefunds: 0,
+                    completedRefunds: 0,
+                    totalDisbursed: 0
+                }, session);
+            }
+        }
       }
 
-      if (!finalStatus) throw new AppError("Trạng thái không hợp lệ", 400);
+      if (!finalStatus) throw new AppError("Trạng thái điều hướng không hợp lệ", 400);
 
       const updatedProject = await this.projectRepository.updateById(projectId, updateData, session);
 
