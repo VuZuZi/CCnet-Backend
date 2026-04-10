@@ -1,38 +1,57 @@
-import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
+import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
 
 const userSchema = new mongoose.Schema(
   {
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+      index: true,
+    },
     password: { type: String, minlength: 6, select: false },
     googleId: { type: String, unique: true, sparse: true, select: false },
 
     avatar: {
       type: String,
-      default: 'https://www.gravatar.com/avatar/3b3be63a4c2a439b013787725dfce802?d=identicon'
+      default:
+        "https://www.gravatar.com/avatar/3b3be63a4c2a439b013787725dfce802?d=identicon",
     },
     avatarPublicId: { type: String, select: false },
-    coverPhoto: { type: String, default: '' },
+    coverPhoto: { type: String, default: "" },
     coverPhotoPublicId: { type: String, select: false },
 
     fullName: { type: String, required: true, trim: true },
-    phone: { type: String, trim: true, default: '' },
-    location: { type: String, trim: true, default: '' },
+    phone: { type: String, trim: true, default: "" },
+    location: { type: String, trim: true, default: "" },
 
-    headline: { type: String, trim: true, default: '' },
-    about: { type: String, trim: true, default: '' },
+    headline: { type: String, trim: true, default: "" },
+    about: { type: String, trim: true, default: "" },
     skills: [{ type: String, trim: true }],
+
+    savedPosts: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Post",
+      },
+    ],
 
     followersCount: { type: Number, default: 0 },
     followingCount: { type: Number, default: 0 },
     level: { type: Number, default: 1 },
-    title: { type: String, default: 'Advocate' },
+    title: { type: String, default: "Advocate" },
 
     isEmailVerified: { type: Boolean, default: false },
-    role: { type: String, enum: ['user', 'admin', 'organizer', 'Organizer'], default: 'user' },
+    role: {
+      type: String,
+      enum: ["user", "admin", "organizer", "Organizer"],
+      default: "user",
+    },
     coolingPeriodEnd: {
       type: Date,
-      default: null
+      default: null,
     },
     isActive: { type: Boolean, default: true },
 
@@ -40,29 +59,32 @@ const userSchema = new mongoose.Schema(
       tier: { type: Number, enum: [0, 1, 2, 3], default: 0 },
       status: {
         type: String,
-        enum: ['UNVERIFIED', 'PENDING', 'VERIFIED', 'EXPIRED', 'LOCKED'],
-        default: 'UNVERIFIED'
+        enum: ["UNVERIFIED", "PENDING", "VERIFIED", "EXPIRED", "LOCKED"],
+        default: "UNVERIFIED",
       },
       verifiedAt: { type: Date, default: null },
-      expiresAt: { type: Date, default: null }
-    }
+      expiresAt: { type: Date, default: null },
+    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
-userSchema.index({ 'kyc.status': 1, 'kyc.expiresAt': 1 });
+userSchema.index({ "kyc.status": 1, "kyc.expiresAt": 1 });
 
-userSchema.pre('validate', function (next) {
-  if (this.isNew || this.isModified('password')) {
+userSchema.pre("validate", function (next) {
+  if (this.isNew || this.isModified("password")) {
     if (!this.googleId && !this.password) {
-      this.invalidate('password', 'Password is required for email registration');
+      this.invalidate(
+        "password",
+        "Password is required for email registration",
+      );
     }
   }
   next();
 });
 
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password') || !this.password) return next();
+userSchema.pre("save", async function (next) {
+  if (!this.isModified("password") || !this.password) return next();
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
   next();
@@ -73,5 +95,5 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-const User = mongoose.model('User', userSchema);
+const User = mongoose.model("User", userSchema);
 export default User;

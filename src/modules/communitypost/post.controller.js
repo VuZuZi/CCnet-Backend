@@ -172,6 +172,37 @@ class PostController {
       next(error);
     }
   };
+  toggleSavePost = async (req, res, next) => {
+    try {
+      // req.params.id là ID bài viết
+      // req.user.userId là ID của người dùng đang thực hiện hành động
+      const result = await this.postService.toggleSavePost(
+        req.params.id,
+        req.user.userId,
+      );
+
+      return ApiResponse.success(res, result);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  getSavedPosts = async (req, res, next) => {
+    try {
+      const limit = parseInt(req.query.limit, 10) || 10;
+      const cursor = req.query.cursor || null;
+
+      const result = await this.postService.getSavedPosts({
+        cursor,
+        limit,
+        userId: req.user.userId,
+      });
+
+      return ApiResponse.success(res, result.data, result.paging);
+    } catch (error) {
+      next(error);
+    }
+  };
 }
 
 export default PostController;

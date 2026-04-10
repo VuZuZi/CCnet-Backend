@@ -1,7 +1,7 @@
 import User from "./user.model.js";
+import mongoose from "mongoose";
 
 class UserRepository {
-  
   async findByEmailWithPassword(email) {
     return await User.findOne({ email }).select("+password +googleId").exec();
   }
@@ -43,7 +43,9 @@ class UserRepository {
     }
 
     return await User.find(query)
-      .select("_id fullName email avatar role location headline about skills phone followersCount followingCount level title createdAt")
+      .select(
+        "_id fullName email avatar role location headline about skills phone followersCount followingCount level title createdAt",
+      )
       .lean()
       .exec();
   }
@@ -56,11 +58,7 @@ class UserRepository {
     const options = { new: true, runValidators: true };
     if (session) options.session = session;
 
-    return await User.findByIdAndUpdate(
-      id,
-      { $set: updateData },
-      options
-    )
+    return await User.findByIdAndUpdate(id, { $set: updateData }, options)
       .lean()
       .exec();
   }
@@ -93,8 +91,8 @@ class UserRepository {
     targetDateEnd.setUTCDate(targetDateEnd.getUTCDate() + 1);
 
     const query = {
-      'kyc.status': 'VERIFIED',
-      'kyc.expiresAt': { $gte: targetDateStart, $lt: targetDateEnd }
+      "kyc.status": "VERIFIED",
+      "kyc.expiresAt": { $gte: targetDateStart, $lt: targetDateEnd },
     };
 
     if (lastId) {
@@ -103,7 +101,7 @@ class UserRepository {
 
     return await User.find(query)
       .limit(batchSize)
-      .select('_id fullName email kyc.expiresAt')
+      .select("_id fullName email kyc.expiresAt")
       .sort({ _id: 1 })
       .lean()
       .exec();
@@ -112,8 +110,31 @@ class UserRepository {
   async updateKycStatusBatch(userIds, status) {
     return await User.updateMany(
       { _id: { $in: userIds } },
-      { $set: { 'kyc.status': status } }
+      { $set: { "kyc.status": status } },
     ).exec();
+  }
+  async toggleSavePost(userId, postId) {
+    const user = await User.findById(userId);
+    if (!user) throw new Error("User not found");
+
+    const savedPostsArray = user.savedPosts || [];
+    const isSaved = savedPostsArray.some(
+      (savedId) => savedId.toString() === postId.toString(),
+    );
+
+    const validPostId = new mongoose.Types.ObjectId(postId);
+
+    if (isSaved) {
+      await User.findByIdAndUpdate(userId, {
+        $pull: { savedPosts: validPostId },
+      });
+      return { isSaved: false, action: "unsaved" };
+    } else {
+      await User.findByIdAndUpdate(userId, {
+        $addToSet: { savedPosts: validPostId },
+      });
+      return { isSaved: true, action: "saved" };
+    }
   }
 }
 
