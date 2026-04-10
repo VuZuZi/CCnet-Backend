@@ -199,16 +199,6 @@ export default class HelpRequestController {
         sortOrder = 'desc',
       } = req.query;
 
-      console.log(`[CONTROLLER] GET assigned requests for organizer:`, {
-        organizerId: req.user.userId,
-        page,
-        limit,
-        status,
-        category,
-        urgencyLevel,
-        search,
-      });
-
       const filters = {};
       if (status) filters.status = status;
       if (category) filters.category = category;
@@ -221,18 +211,11 @@ export default class HelpRequestController {
         sort: { [sortBy]: sortOrder === 'desc' ? -1 : 1 },
       };
 
-      console.log(`[CONTROLLER] Calling service with:`, { filters, options });
-
       const result = await this.helpRequestService.getAssignedRequestsForOrganizer(
         req.user.userId,
         filters,
         options
       );
-
-      console.log(`[CONTROLLER] Result from service:`, {
-        total: result.total,
-        count: result.data?.length || result.items?.length || result.length || 0,
-      });
 
       return Response.success(res, result);
     } catch (error) {
