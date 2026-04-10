@@ -183,7 +183,7 @@ class ProjectRepository {
 
         const [projects, total] = await Promise.all([
             Project.find(filter)
-                .select('title coverMedia category targetAmount currentAmount status milestones createdAt')
+                .select('title coverMedia category projectType targetAmount currentAmount status milestones createdAt startDate endDate needsVolunteers volunteerRoles stats location isVolunteerFull')
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
