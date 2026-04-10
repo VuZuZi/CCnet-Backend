@@ -4,6 +4,7 @@ export const NOTIFICATION_TYPES = Object.freeze({
   ORGANIZER_REQUEST_SUBMITTED: 'organizer_request_submitted',
   ORGANIZER_REQUEST_UPDATED: 'organizer_request_updated',
   SYSTEM_ANNOUNCEMENT: 'system_announcement',
+
   HELP_REQUEST_ASSIGNED: 'help_request_assigned',
   HELP_REQUEST_VERIFIED: 'help_request_verified',
   HELP_REQUEST_COMPLETED: 'help_request_completed',
@@ -18,6 +19,8 @@ export const NOTIFICATION_TYPES = Object.freeze({
   TRANSACTION_REFUNDED: 'transaction_refunded',
   TRANSACTION_WITHDRAWAL_REQUESTED: 'transaction_withdrawal_requested',
   TRANSACTION_FAILED: 'transaction_failed'
+  POST_REACTED: 'post_reacted',
+  POST_COMMENTED: 'post_commented',
 });
 
 export const NOTIFICATION_CHANNELS = Object.freeze({
@@ -51,4 +54,5 @@ export const DEFAULT_NOTIFICATION_SETTINGS = Object.freeze({
   followEnabled: true,
   projectEnabled: true,
   organizerRequestEnabled: true,
+  postEnabled: true,
 });

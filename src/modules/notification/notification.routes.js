@@ -17,6 +17,9 @@ export function createNotificationRouter({
   router.get('/settings', controller.getSettings);
   router.patch('/settings', controller.updateSettings);
   router.patch('/read-all', controller.markAllAsRead);
+
+  router.get('/:id', controller.getNotificationById);
+
   router.patch('/:id/read', controller.markAsRead);
   router.delete('/:id', controller.deleteNotification);
 

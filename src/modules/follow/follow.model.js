@@ -23,11 +23,18 @@ const followSchema = new mongoose.Schema(
 
 followSchema.index(
   { followerId: 1, followingId: 1 },
-  { unique: true, sparse: true },
+  {
+    unique: true,
+    partialFilterExpression: { followingId: { $type: "objectId" } },
+  },
 );
+
 followSchema.index(
   { followerId: 1, projectId: 1 },
-  { unique: true, sparse: true },
+  {
+    unique: true,
+    partialFilterExpression: { projectId: { $type: "objectId" } },
+  },
 );
 
 const Follow = mongoose.models.Follow || mongoose.model("Follow", followSchema);

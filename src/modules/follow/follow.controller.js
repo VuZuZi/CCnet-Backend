@@ -52,12 +52,22 @@ class FollowController {
 
   getMyFollowing = async (req, res, next) => {
     try {
-      const { limit, cursor } = req.query;
+      const type = req.query.type || "user";
+      // 1. Ở đây biến tên là "limit"
+      const limit = parseInt(req.query.limit, 10) || 50;
+      const cursor = req.query.cursor;
+
+      console.log(
+        `🔥 [BACKEND LOG] Đang gọi API lấy danh sách cho Tab: ${type.toUpperCase()}`,
+      );
+
       const data = await this.followService.getMyFollowing(
         req.user.userId,
-        limit,
+        limit, // 🚨 2. SỬA LẠI CHỖ NÀY THÀNH "limit" (Xóa chữ normalizedLimit đi)
         cursor,
+        type,
       );
+
       return ApiResponse.success(res, data, "Following list retrieved");
     } catch (e) {
       next(e);

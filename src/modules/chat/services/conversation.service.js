@@ -160,8 +160,8 @@ export default class ConversationService {
 
     const normalizedParticipants = uniqueIds([currentUserId, ...(participantIds || [])]);
 
-    if (normalizedParticipants.length < 2) {
-      throw new AppError("A group conversation must have at least 2 participants", 400);
+    if (normalizedParticipants.length < 1) {
+      throw new AppError("A group conversation must have at least 1 participant", 400);
     }
 
     const groupAvatar = await this.uploadGroupAvatar(groupAvatarFile);
@@ -178,6 +178,150 @@ export default class ConversationService {
     });
 
     return this.reloadConversation(created._id);
+  }
+
+  async ensureProjectGroupConversation({
+    projectId,
+    organizerId,
+    participantIds = [],
+    groupName = "",
+  }) {
+    if (!projectId) {
+      throw new AppError("projectId is required", 400);
+    }
+
+    if (!organizerId) {
+      throw new AppError("organizerId is required", 400);
+    }
+
+    const normalizedParticipants = uniqueIds([organizerId, ...(participantIds || [])]);
+
+    if (normalizedParticipants.length < 1) {
+      throw new AppError("A project group conversation must have at least 1 participant", 400);
+    }
+
+    const existing =
+      await this.conversationRepository.findGroupConversationByProjectId(projectId);
+
+    if (!existing) {
+      const created = await this.conversationRepository.create({
+        type: "group",
+        projectId,
+        groupName: String(groupName || "").trim(),
+        groupAvatar: "",
+        participants: normalizedParticipants,
+        groupAdmins: [organizerId],
+        createdBy: organizerId,
+        unreadCounts: buildUnreadCounts(normalizedParticipants),
+      });
+
+      return this.reloadConversation(created._id);
+    }
+
+    const conversation = await this.conversationRepository.findById(existing._id);
+    if (!conversation) {
+      throw new AppError("Conversation not found", 404);
+    }
+
+    const currentParticipants = normalizeParticipantIds(conversation.participants || []);
+    const mergedParticipants = uniqueIds([...currentParticipants, ...normalizedParticipants]);
+
+    const currentAdmins = normalizeParticipantIds(conversation.groupAdmins || []);
+    const mergedAdmins = uniqueIds(
+      currentAdmins.length > 0 ? currentAdmins : [organizerId]
+    );
+
+    let shouldSave = false;
+
+    if (mergedParticipants.length !== currentParticipants.length) {
+      conversation.participants = mergedParticipants;
+      shouldSave = true;
+    }
+
+    if (!mergedAdmins.includes(String(organizerId))) {
+      conversation.groupAdmins = uniqueIds([...mergedAdmins, organizerId]);
+      shouldSave = true;
+    } else if (currentAdmins.length === 0) {
+      conversation.groupAdmins = uniqueIds([...mergedAdmins]);
+      shouldSave = true;
+    }
+
+    const safeGroupName = String(groupName || "").trim();
+    if (safeGroupName && safeGroupName !== String(conversation.groupName || "").trim()) {
+      conversation.groupName = safeGroupName;
+      shouldSave = true;
+    }
+
+    const unreadCounts = getConversationUnreadCountsMap(conversation);
+    mergedParticipants.forEach((uid) => {
+      unreadCounts.set(String(uid), Number(unreadCounts.get(String(uid)) || 0));
+    });
+    conversation.unreadCounts = unreadCounts;
+
+    if (shouldSave) {
+      await saveConversationDocument(this.conversationRepository, conversation, {
+        touchUpdatedAt: true,
+      });
+    }
+
+    return this.reloadConversation(conversation._id);
+  }
+
+  async addMemberToProjectConversation({
+    projectId,
+    participantId,
+    actorId = null,
+  }) {
+    if (!projectId || !participantId) {
+      throw new AppError("projectId and participantId are required", 400);
+    }
+
+    const existing =
+      await this.conversationRepository.findGroupConversationByProjectId(projectId);
+
+    if (!existing) return null;
+
+    const conversation = await this.conversationRepository.findById(existing._id);
+    if (!conversation) return null;
+
+    const existingIds = normalizeParticipantIds(conversation.participants || []);
+    const targetId = String(participantId);
+
+    if (existingIds.includes(targetId)) {
+      return this.reloadConversation(conversation._id);
+    }
+
+    const nextParticipantIds = uniqueIds([...existingIds, targetId]);
+    conversation.participants = nextParticipantIds;
+
+    const unreadCounts = getConversationUnreadCountsMap(conversation);
+    nextParticipantIds.forEach((uid) => {
+      unreadCounts.set(String(uid), Number(unreadCounts.get(String(uid)) || 0));
+    });
+    conversation.unreadCounts = unreadCounts;
+
+    await saveConversationDocument(this.conversationRepository, conversation, {
+      touchUpdatedAt: true,
+    });
+
+    const updated = await this.reloadConversation(conversation._id);
+
+    const addedUser = (updated?.participants || []).find(
+      (participant) => String(participant?._id || participant) === targetId
+    );
+
+    await this.emitSystemMessage({
+      conversation,
+      text: addedUser
+        ? `${getDisplayName(addedUser)} đã được thêm vào nhóm`
+        : "Thành viên đã được thêm vào nhóm",
+      action: CHAT_GROUP_ACTIONS.MEMBER_ADDED,
+      actorId: actorId || conversation.createdBy || null,
+      targetUserIds: [targetId],
+      extraParticipantIds: [targetId],
+    });
+
+    return this.reloadConversation(conversation._id);
   }
 
   async updateConversation(payload) {
@@ -324,9 +468,9 @@ export default class ConversationService {
       throw new AppError("Participant is not in this conversation", 400);
     }
 
-    if (existingIds.length <= 2) {
+    if (existingIds.length <= 1) {
       throw new AppError(
-        "Cannot remove member from a group with only 2 participants left",
+        "Cannot remove member from a group with only 1 participant left",
         400
       );
     }
@@ -387,8 +531,8 @@ export default class ConversationService {
       throw new AppError("You are not a participant of this conversation", 403);
     }
 
-    if (existingIds.length <= 2) {
-      throw new AppError("Cannot leave a group with only 2 participants left", 400);
+    if (existingIds.length <= 1) {
+      throw new AppError("Cannot leave a group when you are the last participant", 400);
     }
 
     const populatedBefore = await this.reloadConversation(conversation._id);

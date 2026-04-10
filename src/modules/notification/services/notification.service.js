@@ -1,18 +1,20 @@
 import { NOTIFICATION_SSE_EVENTS } from '../constants/notification.constants.js';
 
-export class NotificationService {
+export default class NotificationService {
   constructor({
     notificationRepository,
     notificationSettingService,
     notificationSSEService,
     notificationRealtimeGateway = null,
     logger = null,
+    createError = null,
   }) {
     this.notificationRepository = notificationRepository;
     this.notificationSettingService = notificationSettingService;
     this.notificationSSEService = notificationSSEService;
     this.notificationRealtimeGateway = notificationRealtimeGateway;
     this.logger = logger;
+    this.createError = createError;
   }
 
   serializeNotification(notification) {
@@ -21,6 +23,16 @@ export class NotificationService {
     return typeof notification.toObject === 'function'
       ? notification.toObject()
       : notification;
+  }
+
+  buildNotFoundError(message = 'Notification not found') {
+    if (typeof this.createError === 'function') {
+      return this.createError(message, 404);
+    }
+
+    const error = new Error(message);
+    error.status = 404;
+    return error;
   }
 
   async getUnreadCountValue(recipientId) {
@@ -111,6 +123,19 @@ export class NotificationService {
       page,
       limit,
     });
+  }
+
+  async getNotificationById({ id, recipientId }) {
+    const item = await this.notificationRepository.findByIdForRecipient({
+      id,
+      recipientId,
+    });
+
+    if (!item) {
+      throw this.buildNotFoundError('Notification not found');
+    }
+
+    return this.serializeNotification(item);
   }
 
   async getUnreadCount(recipientId) {

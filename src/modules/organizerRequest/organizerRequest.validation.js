@@ -15,8 +15,14 @@ const documentPayloadSchema = z
     fileName: z.string().min(1, "Tên file là bắt buộc"),
     mimeType: z.string().min(1, "Loại file là bắt buộc"),
     size: z.coerce.number().min(0).optional(),
-    url: z.string().url("URL file không hợp lệ").optional(),
-    dataUrl: z.string().min(1, "dataUrl không được rỗng").optional(),
+    url: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.string().url("URL file không hợp lệ").optional()
+    ),
+    dataUrl: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.string().min(1, "dataUrl không được rỗng").optional()
+    ),
   })
   .refine((data) => data.url || data.dataUrl, {
     message: "Document bắt buộc phải có url hoặc dataUrl",

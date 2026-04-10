@@ -1,6 +1,9 @@
 import AppError from "../../core/AppError.js";
 import { PROJECT_STATUS, PROJECT_TYPE } from "../project/project.constant.js";
 import { DOMAIN_EVENTS } from "../../config/notification.js";
+import User from "../user/user.model.js";
+import Report from "../report/report.model.js";
+import Post from "../communitypost/post.model.js";
 
 class AdminService {
   constructor({
@@ -12,7 +15,9 @@ class AdminService {
     escrowRepository,
     transactionManager,
     jobQueue,
-    eventBus
+    eventBus,
+    volunteerRepository,
+    conversationService,
   }) {
     this.adminRepository = adminRepository;
     this.projectRepository = projectRepository;
@@ -21,12 +26,23 @@ class AdminService {
     this.postRepository = postRepository;
     this.escrowRepository = escrowRepository;
     this.transactionManager = transactionManager;
-    this.jobQueue = jobQueue; 
+    this.jobQueue = jobQueue;
     this.eventBus = eventBus;
+    this.volunteerRepository = volunteerRepository;
+    this.conversationService = conversationService;
   }
 
-_buildProjectStatusNotificationMessage(projectTitle, status, feedback) {
-    if ([PROJECT_STATUS.FUNDING, PROJECT_STATUS.RECRUITING, PROJECT_STATUS.ACTIVE].includes(status)) {
+  /**
+   * Helper: Xây dựng nội dung thông báo dựa trên trạng thái dự án
+   */
+  _buildProjectStatusNotificationMessage(projectTitle, status, feedback = "") {
+    if (
+      [
+        PROJECT_STATUS.FUNDING,
+        PROJECT_STATUS.RECRUITING,
+        PROJECT_STATUS.ACTIVE,
+      ].includes(status)
+    ) {
       return {
         title: "Dự án đã được phê duyệt",
         message: `Dự án "${projectTitle}" của bạn đã được Ban quản trị phê duyệt và đang đi vào hoạt động (Trạng thái: ${status}).`,
@@ -50,6 +66,9 @@ _buildProjectStatusNotificationMessage(projectTitle, status, feedback) {
     };
   }
 
+  /**
+   * Helper: Phát sự kiện thông báo trạng thái dự án thay đổi
+   */
   _emitProjectStatusUpdated = ({ project, actorId, feedback }) => {
     if (!project?.organizerId) return;
     if (!this.eventBus || typeof this.eventBus.emit !== "function") return;
@@ -72,34 +91,83 @@ _buildProjectStatusNotificationMessage(projectTitle, status, feedback) {
     });
   };
 
+  /**
+   * Helper: Đồng bộ nhóm chat khi dự án chuyển sang trạng thái Active
+   */
+  _syncProjectConversationOnActive = async (project, adminId = null) => {
+    if (!project || String(project.status) !== PROJECT_STATUS.ACTIVE) return null;
+    if (!this.conversationService || !this.volunteerRepository) return null;
+
+    const approvedApplications = await this.volunteerRepository.findByProject(
+      project._id,
+      "APPROVED"
+    );
+
+    const approvedVolunteerIds = (approvedApplications || [])
+      .map((item) => String(item?.volunteerId?._id || item?.volunteerId || ""))
+      .filter(Boolean);
+
+    return this.conversationService.ensureProjectGroupConversation({
+      projectId: project._id,
+      organizerId: project.organizerId,
+      participantIds: approvedVolunteerIds,
+      groupName: project.title,
+      actorId: adminId,
+    });
+  };
+
+  /**
+   * Cập nhật trạng thái dự án (Duyệt/Yêu cầu sửa/Từ chối)
+   */
   updateProjectStatus = async (projectId, targetStatus, feedback, adminId) => {
-    if (!targetStatus) throw new AppError("Trạng thái không được để trống", 400);
+    if (!targetStatus) {
+      throw new AppError("Trạng thái không được để trống", 400);
+    }
 
     const normalized = String(targetStatus).trim().toUpperCase();
-    
+
     return await this.transactionManager.runInTransaction(async (session) => {
       const project = await this.projectRepository.findById(projectId, session);
       if (!project) throw new AppError("Không tìm thấy dự án", 404);
 
-      if (![PROJECT_STATUS.PENDING_APPROVAL, PROJECT_STATUS.REVISION_REQUESTED].includes(project.status)) {
-        throw new AppError(`Không thể duyệt dự án đang ở trạng thái ${project.status}`, 400);
+      // Chỉ cho phép duyệt các dự án đang chờ hoặc đang sửa
+      if (
+        ![
+          PROJECT_STATUS.PENDING_APPROVAL,
+          PROJECT_STATUS.REVISION_REQUESTED,
+        ].includes(project.status)
+      ) {
+        throw new AppError(
+          `Không thể duyệt dự án đang ở trạng thái ${project.status}`,
+          400
+        );
       }
 
       let finalStatus = null;
-      let updateData = {};
+      const updateData = {};
       let userUpdate = null;
 
       let mappedIntent = normalized;
       if (normalized === "PENDING") mappedIntent = PROJECT_STATUS.PENDING_APPROVAL;
-      if (normalized === "APPROVED" || normalized === "ACTIVE") mappedIntent = "APPROVED_INTENT";
+      if (normalized === "APPROVED" || normalized === "ACTIVE") {
+        mappedIntent = "APPROVED_INTENT";
+      }
 
+      // Xử lý Yêu cầu chỉnh sửa
       if (mappedIntent === PROJECT_STATUS.REVISION_REQUESTED) {
-        if (!feedback) throw new AppError("Bắt buộc phải cung cấp lý do (feedback)", 400);
+        if (!feedback) {
+          throw new AppError(
+            "Bắt buộc phải cung cấp lý do (feedback) khi yêu cầu chỉnh sửa",
+            400
+          );
+        }
 
         const currentRevisions = project.revisionCount || 0;
         if (currentRevisions >= 2) {
           finalStatus = PROJECT_STATUS.REJECTED;
-          updateData.rejectionReason = "Đã vượt quá giới hạn 2 lần yêu cầu sửa đổi. Dự án tự động bị từ chối.";
+          updateData.status = finalStatus;
+          updateData.rejectionReason =
+            "Đã vượt quá giới hạn 2 lần yêu cầu sửa đổi. Dự án tự động bị từ chối.";
         } else {
           finalStatus = PROJECT_STATUS.REVISION_REQUESTED;
           updateData.status = finalStatus;
@@ -108,57 +176,91 @@ _buildProjectStatusNotificationMessage(projectTitle, status, feedback) {
           updateData.revisionRequestedAt = new Date();
 
           if (this.jobQueue) {
-            this.jobQueue.addJob("project-maintenance", "check-revision-timeout", { projectId }, 
-              { delay: 14 * 24 * 60 * 60 * 1000 }
-            ).catch(err => console.error(`[Queue] Timeout config failed: ${projectId}`, err.message));
+            this.jobQueue
+              .addJob(
+                "project-maintenance",
+                "check-revision-timeout",
+                { projectId },
+                { delay: 14 * 24 * 60 * 60 * 1000 } // 14 ngày
+              )
+              .catch((err) =>
+                console.error(
+                  `[Queue] Failed to schedule timeout for ${projectId}`,
+                  err.message
+                )
+              );
           }
         }
       }
 
+      // Xử lý Từ chối dự án
       if (mappedIntent === PROJECT_STATUS.REJECTED) {
-        if (!feedback && !updateData.rejectionReason) throw new AppError("Bắt buộc phải có lý do từ chối", 400);
-        
+        if (!feedback && !updateData.rejectionReason) {
+          throw new AppError("Bắt buộc phải có lý do từ chối", 400);
+        }
+
         finalStatus = PROJECT_STATUS.REJECTED;
         updateData.status = finalStatus;
         updateData.rejectionReason = updateData.rejectionReason || feedback;
 
+        // Phạt tài khoản 7 ngày không được tạo dự án mới
         const coolingPeriodEnd = new Date();
         coolingPeriodEnd.setDate(coolingPeriodEnd.getDate() + 7);
         userUpdate = { coolingPeriodEnd };
       }
 
+      // Xử lý Duyệt dự án
       if (mappedIntent === "APPROVED_INTENT") {
-        finalStatus = project.projectType === PROJECT_TYPE.FUNDED 
-          ? PROJECT_STATUS.FUNDING 
-          : PROJECT_STATUS.RECRUITING;
+        finalStatus =
+          project.projectType === PROJECT_TYPE.FUNDED
+            ? PROJECT_STATUS.FUNDING
+            : PROJECT_STATUS.RECRUITING;
 
         updateData.status = finalStatus;
         updateData.approvedBy = adminId;
         updateData.approvedAt = new Date();
 
+        // Nếu dự án gây quỹ, tự động khởi tạo ví Escrow
         if (project.projectType === PROJECT_TYPE.FUNDED) {
-            const existingEscrow = await this.escrowRepository.findByProjectId(projectId, session);
-            if (!existingEscrow) {
-                await this.escrowRepository.create({
-                    projectId: projectId,
-                    availableBalance: 0,
-                    totalDeposited: 0,
-                    pendingRefunds: 0,
-                    completedRefunds: 0,
-                    totalDisbursed: 0
-                }, session);
-            }
+          const existingEscrow = await this.escrowRepository.findByProjectId(projectId, session);
+          if (!existingEscrow) {
+            await this.escrowRepository.create({
+              projectId: projectId,
+              availableBalance: 0,
+              totalDeposited: 0,
+              pendingRefunds: 0,
+              completedRefunds: 0,
+              totalDisbursed: 0
+            }, session);
+          }
         }
       }
 
-      if (!finalStatus) throw new AppError("Trạng thái điều hướng không hợp lệ", 400);
-
-      const updatedProject = await this.projectRepository.updateById(projectId, updateData, session);
-
-      if (userUpdate) {
-        await this.userRepository.updateById(project.organizerId, userUpdate, session);
+      if (!finalStatus) {
+        throw new AppError("Trạng thái điều hướng không hợp lệ", 400);
       }
 
+      const updatedProject = await this.projectRepository.updateById(
+        projectId,
+        updateData,
+        session
+      );
+
+      // Cập nhật thông tin User nếu có (cooling period)
+      if (userUpdate) {
+        await this.userRepository.updateById(
+          project.organizerId,
+          userUpdate,
+          session
+        );
+      }
+
+      // Nếu trạng thái mới là ACTIVE, đồng bộ nhóm chat
+      if (String(updatedProject?.status) === PROJECT_STATUS.ACTIVE) {
+        await this._syncProjectConversationOnActive(updatedProject, adminId);
+      }
+
+      // Gửi thông báo cho Organizer qua Event Bus
       this._emitProjectStatusUpdated({
         project: updatedProject,
         actorId: adminId,
@@ -179,12 +281,21 @@ _buildProjectStatusNotificationMessage(projectTitle, status, feedback) {
     return await this.adminRepository.getSystemStats();
   };
 
-  getUsers = async () => {
+  getUsers = async (query = null) => {
+    if (query && (query.search || query.page || query.limit || query.role)) {
+      return await this.adminRepository.findUsers(query);
+    }
     return await this.adminRepository.findAllUsers();
   };
 
   getProjects = async () => {
-    return await this.adminRepository.findProjectsForReview({ skip: 0, limit: 50 });
+    if (typeof this.adminRepository.findProjectsForReview === "function") {
+      return await this.adminRepository.findProjectsForReview({
+        skip: 0,
+        limit: 50,
+      });
+    }
+    return await this.adminRepository.findProjects();
   };
 
   getReports = async () => {
@@ -199,9 +310,8 @@ _buildProjectStatusNotificationMessage(projectTitle, status, feedback) {
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: { isActive: !user.isActive, status: nextStatus } },
-      { new: true },
+      { new: true }
     );
-
     return updatedUser;
   };
 
@@ -209,9 +319,8 @@ _buildProjectStatusNotificationMessage(projectTitle, status, feedback) {
     const user = await User.findByIdAndUpdate(
       userId,
       { $set: { isVerified: Boolean(isVerified) } },
-      { new: true },
+      { new: true }
     );
-
     if (!user) throw new Error("User not found");
     return user;
   };
@@ -226,7 +335,7 @@ _buildProjectStatusNotificationMessage(projectTitle, status, feedback) {
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: { status, isActive } },
-      { new: true },
+      { new: true }
     );
 
     if (!updatedUser) throw new Error("User not found");
@@ -257,6 +366,92 @@ _buildProjectStatusNotificationMessage(projectTitle, status, feedback) {
 
     await report.save();
     return report;
+  };
+
+  createSystemNotification = async ({
+    title,
+    message,
+    targetType = "all",
+    role = null,
+    roles = [],
+    userIds = [],
+    severity = "info",
+    actorId = null,
+    actorRole = null,
+  }) => {
+    if (String(actorRole || "").toLowerCase() !== "admin") {
+      throw new Error("Only admin can create system notifications.");
+    }
+
+    const normalizedTitle = String(title || "").trim();
+    const normalizedMessage = String(message || "").trim();
+    const normalizedSeverity = String(severity || "info").trim().toLowerCase();
+    const normalizedTargetType = String(targetType || "all").trim().toLowerCase();
+
+    if (!normalizedTitle) throw new Error("Title is required");
+    if (!normalizedMessage) throw new Error("Message is required");
+    if (!["info", "success", "warning", "error"].includes(normalizedSeverity)) {
+      throw new Error("Invalid severity");
+    }
+    if (!["all", "role", "users", "custom"].includes(normalizedTargetType)) {
+      throw new Error("Invalid targetType");
+    }
+
+    if (!this.eventBus || typeof this.eventBus.emit !== "function") {
+      throw new Error("Notification event bus is not available");
+    }
+
+    const payload = {
+      title: normalizedTitle,
+      message: normalizedMessage,
+      severity: normalizedSeverity,
+      actorId,
+    };
+
+    if (normalizedTargetType === "role") {
+      const normalizedRole = String(role || "").trim().toLowerCase();
+      if (!normalizedRole) throw new Error("Role is required when targetType is role");
+
+      await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
+        ...payload,
+        role: normalizedRole,
+      });
+
+      return { success: true, targetType: "role", role: normalizedRole, title: normalizedTitle, message: normalizedMessage };
+    }
+
+    if (normalizedTargetType === "users") {
+      const normalizedUserIds = [...new Set((userIds || []).map((id) => String(id).trim()).filter(Boolean))];
+      if (!normalizedUserIds.length) throw new Error("At least one userId is required when targetType is users");
+
+      await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
+        ...payload,
+        userIds: normalizedUserIds,
+      });
+
+      return { success: true, targetType: "users", totalRecipients: normalizedUserIds.length, userIds: normalizedUserIds, title: normalizedTitle, message: normalizedMessage };
+    }
+
+    if (normalizedTargetType === "custom") {
+      const normalizedRoles = [...new Set((roles || []).map((item) => String(item).trim().toLowerCase()).filter(Boolean))].filter((item) => ["user", "organizer", "admin"].includes(item));
+      const normalizedUserIds = [...new Set((userIds || []).map((id) => String(id).trim()).filter(Boolean))];
+
+      if (!normalizedRoles.length && !normalizedUserIds.length) {
+        throw new Error("At least one role or one user is required for custom recipients");
+      }
+
+      await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
+        ...payload,
+        roles: normalizedRoles,
+        userIds: normalizedUserIds,
+      });
+
+      return { success: true, targetType: "custom", roles: normalizedRoles, userIds: normalizedUserIds, totalRoles: normalizedRoles.length, totalUsers: normalizedUserIds.length, title: normalizedTitle, message: normalizedMessage };
+    }
+
+    await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, { ...payload });
+
+    return { success: true, targetType: "all", title: normalizedTitle, message: normalizedMessage };
   };
 }
 

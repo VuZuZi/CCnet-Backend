@@ -9,21 +9,23 @@ class OrganizerRequestRepository {
   }
 
   async findPendingByUserId(userId) {
-    return await OrganizerRequest.findOne({
+    return OrganizerRequest.findOne({
       userId,
       status: ORGANIZER_REQUEST_STATUS.PENDING,
-    }).lean().exec();
+    })
+      .lean()
+      .exec();
   }
 
   async findLatestByUserId(userId) {
-    return await OrganizerRequest.findOne({ userId })
+    return OrganizerRequest.findOne({ userId })
       .sort({ createdAt: -1 })
       .lean()
       .exec();
   }
 
   async findById(id) {
-    return await OrganizerRequest.findById(id)
+    return OrganizerRequest.findById(id)
       .populate('userId', 'fullName email avatar role phone location')
       .populate('reviewedBy', 'fullName email avatar role')
       .lean()
@@ -34,7 +36,7 @@ class OrganizerRequestRepository {
     const options = { new: true, runValidators: true };
     if (session) options.session = session;
 
-    return await OrganizerRequest.findByIdAndUpdate(
+    return OrganizerRequest.findByIdAndUpdate(
       id,
       { $set: updateData },
       options
@@ -46,58 +48,74 @@ class OrganizerRequestRepository {
   }
 
   async listForAdmin({ page = 1, limit = 10, search = '', status = '' }) {
-    const safePage = Math.max(1, Number(page) || 1);
-    const safeLimit = Math.max(1, Math.min(100, Number(limit) || 10));
-    const skip = (safePage - 1) * safeLimit;
+    try {
+      const safePage = Math.max(1, Number(page) || 1);
+      const safeLimit = Math.max(1, Math.min(100, Number(limit) || 10));
+      const skip = (safePage - 1) * safeLimit;
 
-    const filter = {};
+      const filter = {};
 
-    if (status) filter.status = String(status).toUpperCase();
+      if (status) {
+        filter.status = String(status).toUpperCase();
+      }
 
-    if (search?.trim()) {
-      const keyword = search.trim();
-      filter.$or = [
-        { fullNameSnapshot: { $regex: keyword, $options: 'i' } },
-        { emailSnapshot: { $regex: keyword, $options: 'i' } },
-        { organizationName: { $regex: keyword, $options: 'i' } },
-        { bankAccountName: { $regex: keyword, $options: 'i' } },
-      ];
+      if (search?.trim()) {
+        const keyword = search.trim();
+        filter.$or = [
+          { fullNameSnapshot: { $regex: keyword, $options: 'i' } },
+          { emailSnapshot: { $regex: keyword, $options: 'i' } },
+          { organizationName: { $regex: keyword, $options: 'i' } },
+          { bankAccountName: { $regex: keyword, $options: 'i' } },
+        ];
+      }
+
+      console.log('[OrganizerRequestRepository] filter =', filter);
+      console.log('[OrganizerRequestRepository] page/limit/skip =', safePage, safeLimit, skip);
+
+      const [items, total] = await Promise.all([
+        OrganizerRequest.find(filter)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(safeLimit)
+          .select(
+            'fullNameSnapshot emailSnapshot organizationName status submittedAt reviewedAt reviewReason createdAt'
+          )
+          .lean()
+          .exec(),
+        OrganizerRequest.countDocuments(filter),
+      ]);
+
+      console.log('[OrganizerRequestRepository] items length =', items.length, 'total =', total);
+
+      return {
+        items,
+        pagination: {
+          page: safePage,
+          limit: safeLimit,
+          total,
+          totalPages: Math.ceil(total / safeLimit) || 1,
+        },
+      };
+    } catch (error) {
+      console.error('[OrganizerRequestRepository] listForAdmin error =', error);
+      throw error;
     }
-
-    const [items, total] = await Promise.all([
-      OrganizerRequest.find(filter)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(safeLimit)
-        .select('fullNameSnapshot emailSnapshot organizationName status submittedAt reviewedAt reviewReason createdAt')
-        .lean()
-        .exec(),
-      OrganizerRequest.countDocuments(filter),
-    ]);
-
-    return {
-      items,
-      pagination: {
-        page: safePage,
-        limit: safeLimit,
-        total,
-        totalPages: Math.ceil(total / safeLimit) || 1,
-      },
-    };
   }
 
   async findActivePipelineByUserId(userId) {
-    return await OrganizerRequest.findOne({
+    return OrganizerRequest.findOne({
       userId,
       status: {
         $in: [
           ORGANIZER_REQUEST_STATUS.DRAFT_SUBMITTED,
           ORGANIZER_REQUEST_STATUS.SYSTEM_CHECKING,
           ORGANIZER_REQUEST_STATUS.AWAITING_MICRO_DEPOSIT,
-          ORGANIZER_REQUEST_STATUS.PENDING
-        ]
-      }
-    }).lean().exec();
+          ORGANIZER_REQUEST_STATUS.PENDING,
+        ],
+      },
+    })
+      .lean()
+      .exec();
   }
 }
 

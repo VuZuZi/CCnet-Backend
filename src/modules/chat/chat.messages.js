@@ -12,6 +12,9 @@ export const CHAT_RESPONSE_MESSAGES = {
   UNSEND_MESSAGE_FAILED: 'Failed to unsend message',
   MARK_AS_READ_FAILED: 'Failed to mark as read',
   DOWNLOAD_FILE_FAILED: 'Failed to download file',
+  LOAD_PINNED_MESSAGES_FAILED: 'Failed to load pinned messages',
+  PIN_MESSAGE_FAILED: 'Failed to pin message',
+  UNPIN_MESSAGE_FAILED: 'Failed to unpin message',
 
   CONVERSATION_CREATED: 'Conversation created',
   CONVERSATION_UPDATED: 'Conversation updated',
@@ -22,4 +25,6 @@ export const CHAT_RESPONSE_MESSAGES = {
   REACTED_TO_MESSAGE: 'Reacted to message',
   MESSAGE_UNSENT: 'Message unsent',
   MARKED_AS_READ: 'Marked as read',
+  MESSAGE_PINNED: 'Message pinned',
+  MESSAGE_UNPINNED: 'Message unpinned',
 };

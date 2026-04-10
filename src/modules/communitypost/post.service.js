@@ -1,14 +1,16 @@
 import mongoose from "mongoose";
 import AppError from "../../core/AppError.js";
-import Follow from "../follow/follow.model.js"; // Nên chuyển logic này vào FollowRepository
+import Follow from "../follow/follow.model.js";
+import { DOMAIN_EVENTS } from "../notification/constants/notification.events.js";
 
 class PostService {
-  constructor({ postRepository, mediaService, userRepository, redis }) {
+  constructor({ postRepository, mediaService, userRepository, redis, eventBus }) {
     Object.assign(this, {
       postRepository,
       mediaService,
       userRepository,
       redis,
+      eventBus,
     });
     this.TTL = { FEED: 60, POST: 300 };
   }
@@ -43,6 +45,16 @@ class PostService {
     };
   }
 
+  _resolvePostOwnerId(post) {
+    if (!post || !post.author) return null;
+
+    if (typeof post.author === "object" && post.author._id) {
+      return String(post.author._id);
+    }
+
+    return String(post.author);
+  }
+
   async _invalidateCache(postId) {
     const promises = [this._invalidateFeedCacheBackground()];
     if (postId) promises.push(this.redis.del(`post:${postId}`));
@@ -55,7 +67,7 @@ class PostService {
       const uploaded = await this.mediaService.uploadMultiple(
         files,
         user.userId,
-        "post",
+        "post"
       );
       images = uploaded.map(this._formatImage);
     }
@@ -76,7 +88,6 @@ class PostService {
       stats: { likes: 0, comments: 0, shares: 0, views: 0 },
     });
 
-    // Invalidate trang đầu của feed public
     this.redis.del(this._getFeedKey(null, 10)).catch(() => null);
     return newPost;
   }
@@ -91,27 +102,30 @@ class PostService {
   }) {
     const post = await this.postRepository.findActivePostByIdAndAuthor(
       postId,
-      userId,
+      userId
     );
-    if (!post)
+
+    if (!post) {
       throw new AppError(
         "Không tìm thấy bài viết hoặc bạn không có quyền",
-        404,
+        404
       );
+    }
 
-    let images = post.images.filter(
-      (img) => !removeFiles?.includes(img.publicId),
-    );
-
+    let images = post.images || [];
     if (removeFiles?.length) {
-      this.mediaService.deleteMultiple(removeFiles).catch(console.error);
+      images = images.filter((img) => !removeFiles.includes(img.publicId));
+
+      this.mediaService.deleteMultiple(removeFiles).catch((err) => {
+        console.error("🔥 Lỗi xóa ảnh thực tế:", err);
+      });
     }
 
     if (newFiles?.length) {
       const uploaded = await this.mediaService.uploadMultiple(
         newFiles,
         userId,
-        "post",
+        "post"
       );
       images.push(...uploaded.map(this._formatImage));
     }
@@ -129,68 +143,170 @@ class PostService {
     const updated = await this.postRepository.updatePost(
       postId,
       userId,
-      updateData,
+      updateData
     );
+
     this._invalidateCache(postId);
     return updated;
   }
 
   async addComment({ postId, user, content }) {
-    return mongoose.connection.transaction(async (session) => {
-      const newComment = await this.postRepository.createComment(
-        { postId, author: user.userId, content },
-        session,
+    const targetPost = await this.postRepository.findById(postId);
+    if (!targetPost) {
+      throw new AppError("Post not found", 404);
+    }
+
+    const trimmedContent = content?.trim();
+    if (!trimmedContent) {
+      throw new AppError("Content is required", 400);
+    }
+
+    const newComment = await mongoose.connection.transaction(async (session) => {
+      const createdComment = await this.postRepository.createComment(
+        {
+          postId,
+          author: user.userId,
+          content: trimmedContent,
+        },
+        session
       );
 
       await this.postRepository.pushLatestCommentToPost(
         postId,
         {
-          _id: newComment._id,
-          content,
-          createdAt: new Date(),
+          _id: createdComment._id,
+          content: createdComment.content,
+          createdAt: createdComment.createdAt || new Date(),
           author: this._formatUserMini(user),
         },
-        session,
+        session
       );
 
       this.redis.del(`post:${postId}`).catch(() => null);
-      return newComment;
+      return createdComment;
     });
+
+    const postOwnerId = this._resolvePostOwnerId(targetPost);
+    const actorId = String(user.userId);
+
+    console.log("[POST COMMENT] owner/actor", {
+      postId: String(postId),
+      postOwnerId,
+      actorId,
+      commentId: String(newComment._id),
+    });
+
+    if (postOwnerId && postOwnerId !== actorId && this.eventBus) {
+      console.log("[POST COMMENT] emitting notification event");
+
+      await this.eventBus.emit(DOMAIN_EVENTS.POST_COMMENTED, {
+        recipientId: postOwnerId,
+        actorId,
+        actorName: user.fullName || user.username || "Someone",
+        actorAvatar: user.avatar || null,
+        postId: String(postId),
+        commentId: String(newComment._id),
+        previewContent: newComment.content,
+        message: `${user.fullName || user.username || "Someone"} commented on your post.`,
+      });
+    }
+
+    return newComment;
   }
 
   async toggleReaction({ postId, userId, type }) {
-    return mongoose.connection.transaction(async (session) => {
-      const existing = await this.postRepository.upsertReaction(
-        { userId, postId, type },
-        session,
-      );
-      const isUpdate = existing?.lastErrorObject?.updatedExisting;
-      const result = { action: "created", type };
+    const targetPost = await this.postRepository.findById(postId);
+    if (!targetPost) {
+      throw new AppError("Post not found", 404);
+    }
 
-      if (!isUpdate) {
-        await this.postRepository.incrementPostStats(
-          postId,
-          "likes",
-          1,
-          session,
+    const result = await mongoose.connection.transaction(async (session) => {
+      const existingReaction = await this.postRepository.getReaction(
+        { userId, postId },
+        session
+      );
+
+      const oldType = existingReaction ? existingReaction.type : null;
+      const nextResult = { action: "created", type };
+      let likeChange = 0;
+
+      if (!existingReaction) {
+        await this.postRepository.createReaction(
+          { userId, postId, type },
+          session
         );
-      } else if (existing.value?.type === type) {
+
+        if (type === "like") {
+          likeChange = 1;
+        }
+      } else if (oldType === type) {
         await this.postRepository.deleteReaction({ userId, postId }, session);
+        nextResult.action = "removed";
+        nextResult.type = null;
+
+        if (oldType === "like") {
+          likeChange = -1;
+        }
+      } else {
+        await this.postRepository.updateReaction(
+          { userId, postId, type },
+          session
+        );
+        nextResult.action = "switched";
+
+        if (oldType === "like" && type === "dislike") {
+          likeChange = -1;
+        } else if (oldType === "dislike" && type === "like") {
+          likeChange = 1;
+        }
+      }
+
+      if (likeChange !== 0) {
         await this.postRepository.incrementPostStats(
           postId,
           "likes",
-          -1,
-          session,
+          likeChange,
+          session
         );
-        result.action = "removed";
-        result.type = null;
-      } else {
-        result.action = "switched";
       }
 
       this.redis.del(`post:${postId}`).catch(() => null);
-      return result;
+      return nextResult;
     });
+
+    const postOwnerId = this._resolvePostOwnerId(targetPost);
+    const actorId = String(userId);
+
+    console.log("[POST REACTION] owner/actor", {
+      postId: String(postId),
+      postOwnerId,
+      actorId,
+      type,
+      result,
+    });
+
+    const shouldNotify =
+      type === "like" &&
+      result.action !== "removed" &&
+      postOwnerId &&
+      postOwnerId !== actorId;
+
+    if (shouldNotify && this.eventBus) {
+      console.log("[POST REACTION] emitting notification event");
+
+      const actor = await this.userRepository?.findById?.(userId).catch(() => null);
+
+      await this.eventBus.emit(DOMAIN_EVENTS.POST_REACTED, {
+        recipientId: postOwnerId,
+        actorId,
+        actorName: actor?.fullName || actor?.username || "Someone",
+        actorAvatar: actor?.avatar || null,
+        postId: String(postId),
+        reactionType: type,
+      });
+    }
+
+    return result;
   }
 
   async getNewsFeed({ cursor, limit = 10, userId, type }) {
@@ -199,13 +315,17 @@ class PostService {
 
     if (type === "following") {
       if (!userId) throw new AppError("Vui lòng đăng nhập", 401);
+
       const followingDocs = await Follow.find({ followerId: userId })
         .select("followingId")
         .lean();
+
       const followingIds = followingDocs.map((d) => d.followingId);
 
-      if (!followingIds.length)
+      if (!followingIds.length) {
         return { data: [], paging: { nextCursor: null, hasMore: false } };
+      }
+
       filter["author._id"] = { $in: followingIds };
     } else {
       filter.privacy = "public";
@@ -220,6 +340,7 @@ class PostService {
         limit,
         lastId: cursor,
       });
+
       if (isPublicFeed && posts.length) {
         this.redis
           .set(cacheKey, JSON.stringify(posts), "EX", this.TTL.FEED)
@@ -227,10 +348,10 @@ class PostService {
       }
     }
 
-    if (!posts?.length)
+    if (!posts?.length) {
       return { data: [], paging: { nextCursor: null, hasMore: false } };
+    }
 
-    // Attach user reaction
     const data = await this._attachUserReactions(posts, userId);
 
     return {
@@ -253,13 +374,16 @@ class PostService {
 
   async _attachUserReactions(posts, userId) {
     if (!userId) return posts;
+
     const reactions = await this.postRepository.getReactionsByUserAndTargets(
       userId,
-      posts.map((p) => p._id),
+      posts.map((p) => p._id)
     );
+
     const reactionsMap = new Map(
-      reactions.map((r) => [r.targetId.toString(), r.type]),
+      reactions.map((r) => [r.targetId.toString(), r.type])
     );
+
     return posts.map((p) => ({
       ...p,
       userReaction: reactionsMap.get(p._id.toString()) || null,
@@ -269,18 +393,20 @@ class PostService {
   async _invalidateFeedCacheBackground() {
     let cursor = "0";
     const deleteMethod = this.redis.unlink ? "unlink" : "del";
+
     do {
       const [next, keys] = await this.redis.scan(
         cursor,
         "MATCH",
         "feed:public:*",
         "COUNT",
-        100,
+        100
       );
       cursor = next;
       if (keys.length) await this.redis[deleteMethod](keys);
     } while (cursor !== "0");
   }
+
   async getPostById(id) {
     const cacheKey = `post:${id}`;
     let post = await this._getCachedData(cacheKey);
@@ -293,18 +419,34 @@ class PostService {
           .catch(() => null);
       }
     }
+
     return post;
+  }
+
+  async getComments({ postId, page = 1, sort = "relevant" }) {
+    const limit = 10;
+    const skip = (page - 1) * limit;
+
+    const comments = await this.postRepository.getCommentsByPostId({
+      postId,
+      skip,
+      limit,
+      sort,
+    });
+
+    return { data: comments };
   }
 
   async deletePost({ postId, userId }) {
     const deleted = await this.postRepository.softDeletePost(postId, userId);
-    if (!deleted)
+    if (!deleted) {
       throw new AppError(
         "Không tìm thấy bài viết hoặc bạn không có quyền xóa",
-        404,
+        404
       );
+    }
 
-    this._invalidateCache(postId); // Đã bọc Promise.allSettled ở hàm helper nên chạy mượt hơn
+    this._invalidateCache(postId);
     return { message: "Deleted" };
   }
 }

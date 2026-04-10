@@ -1,8 +1,8 @@
-import NotificationRepository from './notification.repository.js';
+import NotificationRepository from './repositories/notification.repository.js';
 import { NotificationSettingRepository } from './repositories/notificationSetting.repository.js';
 import { NotificationSettingService } from './services/notificationSetting.service.js';
 import { NotificationSSEService } from './services/notificationSSE.service.js';
-import { NotificationService } from './services/notification.service.js';
+import NotificationService from './services/notification.service.js';
 import { NotificationBroadcastService } from './services/notificationBroadcast.service.js';
 import { NotificationController } from './notification.controller.js';
 import { createNotificationRouter } from './notification.routes.js';
@@ -11,6 +11,7 @@ import { registerProjectNotificationListener } from './listeners/project.notific
 import { registerOrganizerRequestSubmittedNotificationListener } from './listeners/organizerRequestSubmitted.notification.listener.js';
 import { registerOrganizerRequestNotificationListener } from './listeners/organizerRequest.notification.listener.js';
 import { registerSystemNotificationListener } from './listeners/system.notification.listener.js';
+import { registerPostNotificationListener } from './listeners/post.notification.listener.js';
 import { NOTIFICATION_DEFAULTS } from './constants/notification.constants.js';
 import { InMemoryStreamSessionStore } from './infrastructure/inMemoryStreamSessionStore.js';
 import { InMemoryNotificationClientRegistry } from './infrastructure/inMemoryNotificationClientRegistry.js';
@@ -108,15 +109,18 @@ function registerDomainListeners({
   logger,
 }) {
   if (registeredListenerBuses.has(eventBus)) {
+    logger?.info?.('[NotificationModule] Domain listeners already registered for this event bus');
     return;
   }
 
+  logger?.info?.('[NotificationModule] Registering follow notification listener');
   registerFollowNotificationListener({
     eventBus,
     notificationService,
     logger,
   });
 
+  logger?.info?.('[NotificationModule] Registering project notification listener');
   registerProjectNotificationListener({
     eventBus,
     notificationService,
@@ -125,18 +129,21 @@ function registerDomainListeners({
     logger,
   });
 
+  logger?.info?.('[NotificationModule] Registering organizer request submitted notification listener');
   registerOrganizerRequestSubmittedNotificationListener({
     eventBus,
     notificationBroadcastService,
     logger,
   });
 
+  logger?.info?.('[NotificationModule] Registering organizer request notification listener');
   registerOrganizerRequestNotificationListener({
     eventBus,
     notificationService,
     logger,
   });
 
+  logger?.info?.('[NotificationModule] Registering system notification listener');
   registerSystemNotificationListener({
     eventBus,
     notificationBroadcastService,
@@ -152,7 +159,15 @@ function registerDomainListeners({
   });
 
 
+  logger?.info?.('[NotificationModule] Registering post notification listener');
+  registerPostNotificationListener({
+    eventBus,
+    notificationService,
+    logger,
+  });
+
   registeredListenerBuses.add(eventBus);
+  logger?.info?.('[NotificationModule] All domain listeners registered successfully');
 }
 
 function resolveStreamSessionStore({ redis, streamSessionStore }) {
@@ -202,6 +217,8 @@ export async function createNotificationModule({
     throw new Error('createNotificationModule requires a shared eventBus instance');
   }
 
+  logger?.info?.('[NotificationModule] Starting notification module creation');
+
   const notificationRepository = new NotificationRepository();
   const notificationSettingRepository = new NotificationSettingRepository();
 
@@ -225,6 +242,7 @@ export async function createNotificationModule({
     notificationSSEService,
     notificationRealtimeGateway,
     logger,
+    createError,
   });
 
   const notificationBroadcastService = new NotificationBroadcastService({
@@ -260,6 +278,7 @@ export async function createNotificationModule({
   });
 
   if (notificationRealtimeGateway) {
+    logger?.info?.('[NotificationModule] Starting realtime gateway');
     await notificationRealtimeGateway.start({
       onUserEvent({ userId, eventName, payload }) {
         notificationSSEService.emitToUser(userId, eventName, payload);
@@ -275,6 +294,8 @@ export async function createNotificationModule({
     userRepository,
     logger,
   });
+
+  logger?.info?.('[NotificationModule] Notification module created successfully');
 
   return {
     router,
