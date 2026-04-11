@@ -1,5 +1,9 @@
 import AppError from "../../core/AppError.js";
-import { PROJECT_STATUS, MILESTONE_STATUS, PROJECT_TYPE } from "./project.constant.js";
+import {
+  PROJECT_STATUS,
+  MILESTONE_STATUS,
+  PROJECT_TYPE,
+} from "./project.constant.js";
 import { KYC_TIER_LIMITS } from "../user/kyc.constant.js";
 import { DOMAIN_EVENTS } from "../../config/notification.js";
 import { projectCompleteSchema } from "./project.validation.js";
@@ -66,8 +70,8 @@ class ProjectService {
   _getFundingProgress(project) {
     const current = Number(
       project?.financialDetail?.availableBalance ??
-      project?.currentAmount ??
-      0
+        project?.currentAmount ??
+        0
     );
     const target = Number(project?.targetAmount || 0);
     if (target <= 0) return 0;
@@ -75,8 +79,27 @@ class ProjectService {
   }
 
   _getVolunteerProgress(project) {
-    const current = Number(project?.stats?.currentVolunteers || 0);
-    const target = Number(project?.stats?.targetVolunteers || 0);
+    const current = Number(
+      project?.stats?.currentVolunteers ??
+        project?.stats?.volunteerJoined ??
+        0
+    );
+
+    const target =
+      Number(
+        project?.stats?.targetVolunteers ??
+          project?.stats?.volunteerNeeded ??
+          0
+      ) ||
+      Number(
+        Array.isArray(project?.volunteerRoles)
+          ? project.volunteerRoles.reduce(
+              (sum, role) => sum + Number(role?.quantity || 0),
+              0
+            )
+          : 0
+      );
+
     if (target <= 0) return 0;
     return current / target;
   }
@@ -87,12 +110,148 @@ class ProjectService {
     return Math.ceil(diff / (1000 * 60 * 60 * 24));
   }
 
+  _computeUrgencySignals(project) {
+    const manualUrgent = Boolean(project?.isUrgent);
+
+    const status = String(project?.status || "").toUpperCase();
+    const closedStatuses = new Set([
+      "COMPLETED",
+      "CLOSED",
+      "CANCELLED",
+      "COMPLETED_SUCCESSFULLY",
+      "COMPLETED_PARTIAL",
+    ]);
+
+    const isClosed = closedStatuses.has(status);
+
+    const daysLeft =
+      typeof this._getDaysUntilEnd === "function"
+        ? this._getDaysUntilEnd(project)
+        : null;
+
+    const hasExpired = typeof daysLeft === "number" ? daysLeft < 0 : false;
+    const isOpen = !isClosed && !hasExpired;
+
+    const category = String(project?.category || "").toUpperCase();
+    const isDisasterRelief = category === "THIEN_TAI";
+
+    const fundingProgress = this._getFundingProgress(project) * 100;
+    const volunteerProgress = this._getVolunteerProgress(project) * 100;
+
+    const isFundedProject =
+      String(project?.projectType || "").toUpperCase() === "FUNDED";
+
+    const needsVolunteers = Boolean(
+      project?.needsVolunteers ||
+        String(project?.projectType || "").toUpperCase() === "VOLUNTEER_ONLY"
+    );
+
+    let score = 0;
+    const reasons = [];
+
+    if (!isOpen) {
+      return {
+        score: 0,
+        isUrgent: false,
+        manualUrgent,
+        autoUrgent: false,
+        reasons: [],
+        daysLeft,
+      };
+    }
+
+    if (manualUrgent) {
+      score += 100;
+      reasons.push("Được đánh dấu khẩn cấp");
+    }
+
+    if (isDisasterRelief) {
+      score += 35;
+      reasons.push("Thuộc nhóm cứu trợ khẩn cấp");
+    }
+
+    if (typeof daysLeft === "number") {
+      if (daysLeft <= 3) {
+        score += 40;
+        reasons.push("Sắp hết hạn");
+      } else if (daysLeft <= 7) {
+        score += 25;
+        reasons.push("Thời hạn đang rất gần");
+      } else if (daysLeft <= 14) {
+        score += 10;
+      }
+    }
+
+    if (isFundedProject && typeof daysLeft === "number") {
+      if (daysLeft <= 7 && fundingProgress < 50) {
+        score += 25;
+        reasons.push("Tiến độ gây quỹ còn thấp so với thời hạn");
+      }
+
+      if (daysLeft <= 3 && fundingProgress < 35) {
+        score += 20;
+      }
+
+      if (daysLeft <= 7 && fundingProgress >= 70 && fundingProgress < 100) {
+        score += 15;
+        reasons.push("Gần đạt mục tiêu gây quỹ");
+      }
+    }
+
+    if (needsVolunteers && typeof daysLeft === "number") {
+      if (daysLeft <= 7 && volunteerProgress < 50) {
+        score += 20;
+        reasons.push("Đang thiếu tình nguyện viên so với thời hạn");
+      }
+
+      if (daysLeft <= 3 && volunteerProgress < 30) {
+        score += 20;
+      }
+
+      if (daysLeft <= 7 && volunteerProgress >= 70 && volunteerProgress < 100) {
+        score += 10;
+        reasons.push("Đang gần đủ đội ngũ tình nguyện");
+      }
+    }
+
+    const autoUrgent = score >= 60 && !manualUrgent;
+    const isUrgentEffective = manualUrgent || autoUrgent;
+
+    return {
+      score,
+      isUrgent: isUrgentEffective,
+      manualUrgent,
+      autoUrgent,
+      reasons: reasons.slice(0, 3),
+      daysLeft,
+    };
+  }
+
+  _decorateProjectUrgency(project) {
+    if (!project) return project;
+
+    const urgency = this._computeUrgencySignals(project);
+
+    return {
+      ...project,
+      isUrgentManual: urgency.manualUrgent,
+      isUrgentAuto: urgency.autoUrgent,
+      isUrgentEffective: urgency.isUrgent,
+      isUrgent: urgency.isUrgent,
+      urgencyMeta: {
+        score: urgency.score,
+        reasons: urgency.reasons,
+        daysLeft: urgency.daysLeft,
+      },
+    };
+  }
+
   _extractUserSkillSet(user) {
     if (!Array.isArray(user?.skills)) return new Set();
     return new Set(
       user.skills
         .map((skill) => this._normalizeText(skill))
-        .filter(Boolean),
+        .filter(Boolean)
     );
   }
 
@@ -147,7 +306,11 @@ class ProjectService {
     const fundingProgress = this._getFundingProgress(project);
     const volunteerProgress = this._getVolunteerProgress(project);
     const daysLeft = this._getDaysUntilEnd(project);
-    const skillMatchScore = this._getVolunteerSkillMatchScore(project, userSkillSet);
+    const skillMatchScore = this._getVolunteerSkillMatchScore(
+      project,
+      userSkillSet
+    );
+    const urgency = this._computeUrgencySignals(project);
 
     if (userCity && projectCity && userCity === projectCity) {
       reasons.push("Gần khu vực của bạn");
@@ -167,7 +330,7 @@ class ProjectService {
       reasons.push("Đến từ organizer bạn đang theo dõi");
     }
 
-    if (project?.isUrgent) {
+    if (urgency.isUrgent) {
       reasons.push("Dự án đang cần hỗ trợ gấp");
     }
 
@@ -200,7 +363,7 @@ class ProjectService {
     return reasons.slice(0, 3);
   }
 
-    _scoreFeaturedProject(project, context = {}) {
+  _scoreFeaturedProject(project, context = {}) {
     const {
       user = null,
       followedProjectIds = new Set(),
@@ -225,8 +388,9 @@ class ProjectService {
     const daysLeft = this._getDaysUntilEnd(project);
     const followerCount = Number(project?.stats?.followerCount || 0);
     const viewCount = Number(project?.stats?.viewCount || 0);
+    const urgency = this._computeUrgencySignals(project);
 
-    if (project?.isUrgent) score += 18;
+    if (urgency.isUrgent) score += 18;
     if (project?.coverMedia?.url) score += 8;
     if (project?.summary || project?.description) score += 4;
     if (project?.needsVolunteers) score += 8;
@@ -239,7 +403,6 @@ class ProjectService {
     if (appliedCategorySet.has(project?.category)) score += 16;
     if (followedProjectIds.has(projectId)) score += 40;
 
-    // Tăng mạnh tín hiệu từ organizer đang follow
     if (organizerId && followedOrganizerIds.has(organizerId)) {
       score += 120;
     }
@@ -274,74 +437,76 @@ class ProjectService {
 
     return score;
   }
-_roundRobinByOrganizer(projects = []) {
-  const groups = new Map();
-  const orderedOrganizerIds = [];
 
-  for (const project of projects) {
-    const organizerId =
-      project?.organizerId?._id?.toString?.() ||
-      project?.organizerId?.toString?.() ||
-      "";
+  _roundRobinByOrganizer(projects = []) {
+    const groups = new Map();
+    const orderedOrganizerIds = [];
 
-    const key =
-      organizerId || `__no_org__:${project?._id?.toString?.() || Math.random()}`;
+    for (const project of projects) {
+      const organizerId =
+        project?.organizerId?._id?.toString?.() ||
+        project?.organizerId?.toString?.() ||
+        "";
 
-    if (!groups.has(key)) {
-      groups.set(key, []);
-      orderedOrganizerIds.push(key);
+      const key =
+        organizerId || `__no_org__:${project?._id?.toString?.() || Math.random()}`;
+
+      if (!groups.has(key)) {
+        groups.set(key, []);
+        orderedOrganizerIds.push(key);
+      }
+
+      groups.get(key).push(project);
     }
 
-    groups.get(key).push(project);
-  }
+    const result = [];
+    let hasRemaining = true;
 
-  const result = [];
-  let hasRemaining = true;
+    while (hasRemaining) {
+      hasRemaining = false;
 
-  while (hasRemaining) {
-    hasRemaining = false;
+      for (const organizerId of orderedOrganizerIds) {
+        const queue = groups.get(organizerId);
 
-    for (const organizerId of orderedOrganizerIds) {
-      const queue = groups.get(organizerId);
-
-      if (queue && queue.length > 0) {
-        result.push(queue.shift());
-        hasRemaining = true;
+        if (queue && queue.length > 0) {
+          result.push(queue.shift());
+          hasRemaining = true;
+        }
       }
     }
+
+    return result;
   }
 
-  return result;
-}
+  _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
+    const followedSet = new Set((followedOrganizerIds || []).filter(Boolean));
 
-_rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
-  const followedSet = new Set((followedOrganizerIds || []).filter(Boolean));
+    const followedProjects = [];
+    const otherProjects = [];
 
-  const followedProjects = [];
-  const otherProjects = [];
+    for (const project of projects) {
+      const organizerId =
+        project?.organizerId?._id?.toString?.() ||
+        project?.organizerId?.toString?.() ||
+        "";
 
-  for (const project of projects) {
-    const organizerId =
-      project?.organizerId?._id?.toString?.() ||
-      project?.organizerId?.toString?.() ||
-      "";
-
-    if (organizerId && followedSet.has(organizerId)) {
-      followedProjects.push(project);
-    } else {
-      otherProjects.push(project);
+      if (organizerId && followedSet.has(organizerId)) {
+        followedProjects.push(project);
+      } else {
+        otherProjects.push(project);
+      }
     }
+
+    const followedBalanced = this._roundRobinByOrganizer(followedProjects);
+    const otherBalanced = this._roundRobinByOrganizer(otherProjects);
+
+    return {
+      followedProjects: followedBalanced,
+      otherProjects: otherBalanced,
+      merged: [...followedBalanced, ...otherBalanced],
+    };
   }
 
-  const followedBalanced = this._roundRobinByOrganizer(followedProjects);
-  const otherBalanced = this._roundRobinByOrganizer(otherProjects);
-
-  return {
-    followedProjects: followedBalanced,
-    otherProjects: otherBalanced,
-    merged: [...followedBalanced, ...otherBalanced],
-  };
-}
   async _enforceKycTierCaps(project, organizerId) {
     const user = await this.userRepository.findById(organizerId);
     if (!user) throw new AppError("Không tìm thấy thông tin Organizer.", 404);
@@ -350,7 +515,10 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
     const limits = KYC_TIER_LIMITS[tier];
 
     if (!limits || !limits.canCreateProject) {
-      throw new AppError(`Tài khoản Tier ${tier} không được phép tạo dự án. Vui lòng nâng cấp KYC.`, 403);
+      throw new AppError(
+        `Tài khoản Tier ${tier} không được phép tạo dự án. Vui lòng nâng cấp KYC.`,
+        403
+      );
     }
 
     const start = new Date(project.startDate);
@@ -358,12 +526,25 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
     const durationDays = (end - start) / (1000 * 60 * 60 * 24);
 
     if (limits.maxDurationDays !== null && durationDays > limits.maxDurationDays) {
-      throw new AppError(`Tier ${tier} chỉ được tạo dự án tối đa ${limits.maxDurationDays} ngày (Dự án của bạn: ${Math.ceil(durationDays)} ngày).`, 403);
+      throw new AppError(
+        `Tier ${tier} chỉ được tạo dự án tối đa ${limits.maxDurationDays} ngày (Dự án của bạn: ${Math.ceil(
+          durationDays
+        )} ngày).`,
+        403
+      );
     }
 
-    if (project.projectType === PROJECT_TYPE.FUNDED && limits.maxFundingCap !== null) {
+    if (
+      project.projectType === PROJECT_TYPE.FUNDED &&
+      limits.maxFundingCap !== null
+    ) {
       if (project.targetAmount > limits.maxFundingCap) {
-        throw new AppError(`Tier ${tier} chỉ được gọi vốn tối đa ${limits.maxFundingCap.toLocaleString('vi-VN')} VND.`, 403);
+        throw new AppError(
+          `Tier ${tier} chỉ được gọi vốn tối đa ${limits.maxFundingCap.toLocaleString(
+            "vi-VN"
+          )} VND.`,
+          403
+        );
       }
     }
 
@@ -372,7 +553,10 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
       const concurrent = stats.activeProjects + stats.pendingProjects;
 
       if (concurrent >= limits.maxConcurrentProjects) {
-        throw new AppError(`Tier ${tier} chỉ được phép chạy song song tối đa ${limits.maxConcurrentProjects} dự án.`, 403);
+        throw new AppError(
+          `Tier ${tier} chỉ được phép chạy song song tối đa ${limits.maxConcurrentProjects} dự án.`,
+          403
+        );
       }
     }
   }
@@ -392,7 +576,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
     if (idsToCheck.length > 0) {
       const ownedMedia = await this.mediaRepository.findManyByIdsAndOwner(
         idsToCheck,
-        organizerId,
+        organizerId
       );
       ownedMedia.forEach((m) => validMediaIds.add(m._id.toString()));
     }
@@ -402,7 +586,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
       const existingMedias =
         await this.mediaRepository.findManyByPublicIds(publicIds);
       const existingPublicIdMap = new Map(
-        existingMedias.map((m) => [m.publicId, m]),
+        existingMedias.map((m) => [m.publicId, m])
       );
 
       for (const item of newItemsToCheck) {
@@ -424,7 +608,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
             width: item.width || 0,
             height: item.height || 0,
             uploadedBy: organizerId,
-            context: context,
+            context,
           });
         }
       }
@@ -441,15 +625,24 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
     if (!project) throw new AppError("Không tìm thấy dự án.", 404);
 
     if (project.organizerId.toString() !== organizerId.toString()) {
-      throw new AppError("Bạn không có quyền thực hiện hành động này trên dự án của người khác.", 403);
+      throw new AppError(
+        "Bạn không có quyền thực hiện hành động này trên dự án của người khác.",
+        403
+      );
     }
 
     if (project.status !== PROJECT_STATUS.DRAFT) {
-      throw new AppError("Chỉ có thể Gửi duyệt dự án đang ở trạng thái Bản nháp (DRAFT).", 400);
+      throw new AppError(
+        "Chỉ có thể Gửi duyệt dự án đang ở trạng thái Bản nháp (DRAFT).",
+        400
+      );
     }
 
     if (!project.startDate || !project.endDate) {
-      throw new AppError("Bắt buộc phải cấu hình Ngày bắt đầu và Ngày kết thúc.", 400);
+      throw new AppError(
+        "Bắt buộc phải cấu hình Ngày bắt đầu và Ngày kết thúc.",
+        400
+      );
     }
 
     const projectObj = project.toObject ? project.toObject() : project;
@@ -457,9 +650,13 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
 
     if (!validationResult.success) {
       const issues = validationResult.error.issues || validationResult.error.errors;
-      const firstError = issues && issues.length > 0 ? issues[0].message : "Dữ liệu không hợp lệ";
+      const firstError =
+        issues && issues.length > 0 ? issues[0].message : "Dữ liệu không hợp lệ";
 
-      throw new AppError(`Dự án chưa đủ điều kiện gửi duyệt: ${firstError}`, 400);
+      throw new AppError(
+        `Dự án chưa đủ điều kiện gửi duyệt: ${firstError}`,
+        400
+      );
     }
 
     await this._enforceKycTierCaps(projectObj, organizerId);
@@ -471,74 +668,113 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
     );
 
     if (!updatedProject) {
-      throw new AppError("Xung đột hệ thống: Dự án đã bị đổi trạng thái bởi một phiên làm việc khác.", 409);
+      throw new AppError(
+        "Xung đột hệ thống: Dự án đã bị đổi trạng thái bởi một phiên làm việc khác.",
+        409
+      );
     }
 
-    this.jobQueue.addJob("project-ai-scan", "scan-risk", {
-      projectId: updatedProject._id,
-      title: updatedProject.title,
-      description: updatedProject.description,
-    }).catch(err => console.error(`[Queue Error] AI Scan failed for ${projectId}:`, err.message));
+    this.jobQueue
+      .addJob("project-ai-scan", "scan-risk", {
+        projectId: updatedProject._id,
+        title: updatedProject.title,
+        description: updatedProject.description,
+      })
+      .catch((err) =>
+        console.error(
+          `[Queue Error] AI Scan failed for ${projectId}:`,
+          err.message
+        )
+      );
 
     if (this.eventBus) {
       this.eventBus.emit(DOMAIN_EVENTS.PROJECT_SUBMITTED_FOR_APPROVAL, {
         projectId: updatedProject._id,
-        organizerId: organizerId,
+        organizerId,
         projectType: updatedProject.projectType,
         title: updatedProject.title,
       });
     }
 
-    return updatedProject;
+    return this._decorateProjectUrgency(updatedProject);
   }
 
-    async getFeaturedProjects(userId = null) {
+  async getFeaturedProjects(userId = null) {
     const candidates = await this.projectRepository.findCandidateFeaturedProjects(24);
 
     if (!Array.isArray(candidates) || candidates.length === 0) {
       return [];
     }
 
-    const enrichProject = (project, score = 0, reasons = []) => ({
-      ...project,
-      recommendationMeta: {
-        score,
-        reasons,
-      },
-    });
+    const enrichProject = (project, score = 0, reasons = []) => {
+      const decorated = this._decorateProjectUrgency(project);
+
+      return {
+        ...decorated,
+        recommendationMeta: {
+          score,
+          reasons,
+        },
+      };
+    };
 
     if (!userId) {
-      const fallback = await this.projectRepository.findFeaturedProjects(1);
-      const selected =
-        Array.isArray(fallback) && fallback.length > 0
-          ? fallback[0]
-          : candidates[0];
+      const scored = candidates
+        .map((project) => {
+          const score = this._scoreFeaturedProject(project, {});
+          const reasons = this._buildFeaturedReasonList(project, {});
 
-      const reasons = this._buildFeaturedReasonList(selected, {});
+          return {
+            project: enrichProject(project, score, reasons),
+            score,
+          };
+        })
+        .sort((a, b) => b.score - a.score);
+
+      const selected = scored[0]?.project || enrichProject(candidates[0], 0, []);
+
       return [
-        enrichProject(
-          selected,
-          0,
-          reasons.length ? reasons : ["Dự án nổi bật đang được quan tâm"]
-        ),
+        {
+          ...selected,
+          recommendationMeta: {
+            ...(selected.recommendationMeta || {}),
+            reasons:
+              selected.recommendationMeta?.reasons?.length > 0
+                ? selected.recommendationMeta.reasons
+                : ["Dự án nổi bật đang được quan tâm"],
+          },
+        },
       ];
     }
 
     const user = await this.userRepository.findById(userId).catch(() => null);
-    if (!user) {
-      const fallback = await this.projectRepository.findFeaturedProjects(1);
-      const selected =
-        Array.isArray(fallback) && fallback.length > 0
-          ? fallback[0]
-          : candidates[0];
 
-      const reasons = this._buildFeaturedReasonList(selected, {});
+    if (!user) {
+      const scored = candidates
+        .map((project) => {
+          const score = this._scoreFeaturedProject(project, {});
+          const reasons = this._buildFeaturedReasonList(project, {});
+
+          return {
+            project: enrichProject(project, score, reasons),
+            score,
+          };
+        })
+        .sort((a, b) => b.score - a.score);
+
+      const selected = scored[0]?.project || enrichProject(candidates[0], 0, []);
+
       return [
-        enrichProject(
-          selected,
-          0,
-          reasons.length ? reasons : ["Dự án nổi bật đang được quan tâm"]
-        ),
+        {
+          ...selected,
+          recommendationMeta: {
+            ...(selected.recommendationMeta || {}),
+            reasons:
+              selected.recommendationMeta?.reasons?.length > 0
+                ? selected.recommendationMeta.reasons
+                : ["Dự án nổi bật đang được quan tâm"],
+          },
+        },
       ];
     }
 
@@ -585,7 +821,6 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
     const userCity = this._extractKnownCity(user?.location || "");
     const userSkillSet = this._extractUserSkillSet(user);
 
-    // Ưu tiên project từ organizer đang follow trước
     const followedOrganizerProjects = candidates.filter((project) => {
       const organizerId =
         project?.organizerId?._id?.toString?.() ||
@@ -632,113 +867,116 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
     return scored.length > 0
       ? [scored[0].project]
       : [enrichProject(candidates[0], 0, [])];
-  } 
+  }
 
   async getVolunteerProjects() {
-    return await this.projectRepository.findVolunteerProjects(4);
+    const projects = await this.projectRepository.findVolunteerProjects(4);
+    return (projects || []).map((project) => this._decorateProjectUrgency(project));
   }
 
   async getExploreProjects(queryParams, userId = null) {
-  const {
-    page,
-    limit,
-    category,
-    location,
-    sort,
-    organizerScope = "ALL",
-  } = queryParams;
+    const {
+      page,
+      limit,
+      category,
+      location,
+      sort,
+      organizerScope = "ALL",
+    } = queryParams;
 
-  const skip = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
-  if (skip > 5000) {
-    throw new AppError(
-      "Truy vấn quá sâu. Vui lòng sử dụng bộ lọc để có kết quả chính xác hơn.",
-      400
-    );
-  }
-
-  let followedOrganizerIds = [];
-
-  if (userId) {
-    const followedUsersRaw =
-      await this.followRepository?.findFollowingUsers?.(userId, 200, null).catch(
-        () => []
+    if (skip > 5000) {
+      throw new AppError(
+        "Truy vấn quá sâu. Vui lòng sử dụng bộ lọc để có kết quả chính xác hơn.",
+        400
       );
+    }
 
-    followedOrganizerIds = (followedUsersRaw || [])
-      .map(
-        (row) =>
-          row?.followingId?._id?.toString?.() ||
-          row?.followingId?.toString?.()
-      )
-      .filter(Boolean);
-  }
+    let followedOrganizerIds = [];
 
-  if (organizerScope === "FOLLOWED" && followedOrganizerIds.length === 0) {
+    if (userId) {
+      const followedUsersRaw =
+        await this.followRepository?.findFollowingUsers?.(userId, 200, null).catch(
+          () => []
+        );
+
+      followedOrganizerIds = (followedUsersRaw || [])
+        .map(
+          (row) =>
+            row?.followingId?._id?.toString?.() ||
+            row?.followingId?.toString?.()
+        )
+        .filter(Boolean);
+    }
+
+    if (organizerScope === "FOLLOWED" && followedOrganizerIds.length === 0) {
+      return {
+        projects: [],
+        pagination: {
+          totalItems: 0,
+          currentPage: page,
+          totalPages: 0,
+          hasNextPage: false,
+        },
+      };
+    }
+
+    const filter = {};
+
+    if (category) {
+      filter.category = category;
+    }
+
+    if (organizerScope === "FOLLOWED") {
+      filter.organizerId = {
+        $in: followedOrganizerIds,
+      };
+    }
+
+    if (sort === "ending_soon") {
+      filter.endDate = { $gt: new Date() };
+      filter.status = {
+        $in: [PROJECT_STATUS.FUNDING, PROJECT_STATUS.RECRUITING],
+      };
+    }
+
+    const poolLimit = Math.min(Math.max(page * limit * 6, 60), 240);
+
+    const result = await this.projectRepository.findAllProjects({
+      filter,
+      skip: 0,
+      limit: poolLimit,
+      sortType: sort,
+      textSearch: location || null,
+    });
+
+    const rebalanced = this._rebalanceExploreProjects(
+      result.projects,
+      followedOrganizerIds
+    );
+
+    const rankedProjects =
+      organizerScope === "FOLLOWED"
+        ? rebalanced.followedProjects
+        : rebalanced.merged;
+
+    const pagedProjects = rankedProjects
+      .slice(skip, skip + limit)
+      .map((project) => this._decorateProjectUrgency(project));
+
+    const totalPages = Math.ceil(result.total / limit);
+
     return {
-      projects: [],
+      projects: pagedProjects,
       pagination: {
-        totalItems: 0,
+        totalItems: result.total,
         currentPage: page,
-        totalPages: 0,
-        hasNextPage: false,
+        totalPages,
+        hasNextPage: page < totalPages,
       },
     };
   }
-
-  const filter = {};
-
-  if (category) {
-    filter.category = category;
-  }
-
-  if (organizerScope === "FOLLOWED") {
-    filter.organizerId = {
-      $in: followedOrganizerIds,
-    };
-  }
-
-  if (sort === "ending_soon") {
-    filter.endDate = { $gt: new Date() };
-    filter.status = {
-      $in: [PROJECT_STATUS.FUNDING, PROJECT_STATUS.RECRUITING],
-    };
-  }
-
-  // Lấy pool rộng hơn để rebalance theo organizer trước khi cắt page
-  const poolLimit = Math.min(Math.max(page * limit * 6, 60), 240);
-
-  const result = await this.projectRepository.findAllProjects({
-    filter,
-    skip: 0,
-    limit: poolLimit,
-    sortType: sort,
-    textSearch: location || null,
-  });
-
-  const rebalanced = this._rebalanceExploreProjects(
-    result.projects,
-    followedOrganizerIds
-  );
-
-  const rankedProjects =
-    organizerScope === "FOLLOWED"
-      ? rebalanced.followedProjects
-      : rebalanced.merged;
-
-  const pagedProjects = rankedProjects.slice(skip, skip + limit);
-  const totalPages = Math.ceil(result.total / limit);
-
-  return {
-    projects: pagedProjects,
-    pagination: {
-      totalItems: result.total,
-      currentPage: page,
-      totalPages,
-      hasNextPage: page < totalPages,
-    },
-  };
-}
 
   async getProjectDetail(projectId, userId = null) {
     const project = await this.projectRepository.findByIdWithDetails(projectId);
@@ -751,7 +989,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
       escrow = await this.escrowRepository.findByProjectId(projectId);
     }
 
-    this.redis.incr(`project:${projectId}:views`).catch(() => { });
+    this.redis.incr(`project:${projectId}:views`).catch(() => {});
 
     const orgId = project.organizerId?._id || project.organizerId;
     let isFollowing = false;
@@ -760,7 +998,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
     if (userId) {
       [isFollowing, isFollowingOrganizer] = await Promise.all([
         this.followRepository.existsProjectFollow(userId, projectId),
-        orgId ? this.followRepository.exists(userId, orgId) : Promise.resolve(false)
+        orgId ? this.followRepository.exists(userId, orgId) : Promise.resolve(false),
       ]);
     }
 
@@ -769,10 +1007,12 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
       ? ProjectDTO.toOrganizerDetail(project, escrow)
       : ProjectDTO.toPublicDetail(project, escrow);
 
+    const decorated = this._decorateProjectUrgency(safeProjectData);
+
     return {
-      ...safeProjectData,
+      ...decorated,
       isFollowing,
-      isFollowingOrganizer
+      isFollowingOrganizer,
     };
   }
 
@@ -806,7 +1046,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
         const activeIndex = project.milestones.findIndex(
           (m) =>
             m.status === MILESTONE_STATUS.PROCESSING ||
-            m.status === MILESTONE_STATUS.PENDING,
+            m.status === MILESTONE_STATUS.PENDING
         );
 
         if (activeIndex !== -1) {
@@ -820,17 +1060,19 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
 
       delete project.milestones;
 
-      return {
+      const formattedProject = {
         ...project,
         currentMilestone: currentMilestone
           ? {
-            title: currentMilestone.title,
-            targetAmount: currentMilestone.targetAmount,
-            status: currentMilestone.status,
-            index: milestoneIndex,
-          }
+              title: currentMilestone.title,
+              targetAmount: currentMilestone.targetAmount,
+              status: currentMilestone.status,
+              index: milestoneIndex,
+            }
           : null,
       };
+
+      return this._decorateProjectUrgency(formattedProject);
     });
 
     const totalPages = Math.ceil(result.total / limit);
@@ -850,8 +1092,8 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
     const coverPayload = Array.isArray(projectData.coverMedia)
       ? projectData.coverMedia
       : projectData.coverMedia
-        ? [projectData.coverMedia]
-        : [];
+      ? [projectData.coverMedia]
+      : [];
 
     const docsPayload = Array.isArray(projectData.documents)
       ? projectData.documents
@@ -861,7 +1103,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
     if (projectData.needsVolunteers && projectData.volunteerRoles?.length > 0) {
       targetVolunteers = projectData.volunteerRoles.reduce(
         (acc, curr) => acc + (Number(curr.quantity) || 0),
-        0,
+        0
       );
     } else {
       projectData.needsVolunteers = false;
@@ -872,14 +1114,14 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
       await this._processMediaPayload(
         coverPayload,
         organizerId,
-        "project_cover",
+        "project_cover"
       );
 
     const { validMediaIds: validDocIds, newMediaToInsert: newDocMedia } =
       await this._processMediaPayload(
         docsPayload,
         organizerId,
-        "project_document",
+        "project_document"
       );
 
     const allNewMediaToInsert = [...newCoverMedia, ...newDocMedia];
@@ -894,7 +1136,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
           if (allNewMediaToInsert.length > 0) {
             const insertedMedia = await this.mediaRepository.createMany(
               allNewMediaToInsert,
-              session,
+              session
             );
 
             insertedMedia.forEach((media) => {
@@ -914,7 +1156,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
 
           if (!finalCoverMediaData && validCoverIds.length > 0) {
             const existingCover = await this.mediaRepository.findById(
-              validCoverIds[0],
+              validCoverIds[0]
             );
             if (existingCover) {
               finalCoverMediaData = {
@@ -940,12 +1182,14 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
 
           const createdProject = await this.projectRepository.create(
             newProjectData,
-            session,
+            session
           );
 
           if (projectData.fromHelpRequestId && this.helpRequestRepository) {
             try {
-              const linkedHelpRequest = await this.helpRequestRepository.findById(projectData.fromHelpRequestId);
+              const linkedHelpRequest = await this.helpRequestRepository.findById(
+                projectData.fromHelpRequestId
+              );
 
               await this.helpRequestRepository.updateById(
                 projectData.fromHelpRequestId,
@@ -954,33 +1198,37 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
               );
 
               if (linkedHelpRequest?.requesterId && this.notificationRepository) {
-                const organizerUser = await this.userRepository.findById(organizerId);
+                const organizerUser = await this.userRepository.findById(
+                  organizerId
+                );
 
                 await this.notificationRepository.create({
                   recipientId: linkedHelpRequest.requesterId,
                   actorId: organizerId,
-                  type: 'help_request_assignment_responded',
-                  title: `${organizerUser?.fullName || 'Organizer'} đã đồng ý host yêu cầu của bạn`,
+                  type: "help_request_assignment_responded",
+                  title: `${
+                    organizerUser?.fullName || "Organizer"
+                  } đã đồng ý host yêu cầu của bạn`,
                   message: `Yêu cầu "${linkedHelpRequest.title}" đã được chấp nhận và chuyển thành dự án.`,
                   actionUrl: `/projects/${createdProject._id}`,
                   metadata: {
                     helpRequestId: String(linkedHelpRequest._id),
                     projectId: String(createdProject._id),
                     organizerId: String(organizerId),
-                    action: 'hosted',
+                    action: "hosted",
                   },
                 });
               }
             } catch (err) {
               console.error(
                 "[Project Creation] Failed to link help request:",
-                err.message,
+                err.message
               );
             }
           }
 
           return createdProject;
-        },
+        }
       );
 
       return result;
@@ -993,8 +1241,8 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
           .catch((err) =>
             console.error(
               "[Queue Error] Lỗi đẩy job dọn rác rollback:",
-              err.message,
-            ),
+              err.message
+            )
           );
       }
 
@@ -1004,12 +1252,17 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
 
   async updateDraftProject(projectId, organizerId, updateData) {
     const existingProject = await this.projectRepository.findById(projectId);
-    if (!existingProject)
+    if (!existingProject) {
       throw new AppError("Không tìm thấy bản nháp dự án", 404);
-    if (existingProject.organizerId.toString() !== organizerId.toString())
+    }
+
+    if (existingProject.organizerId.toString() !== organizerId.toString()) {
       throw new AppError("Bạn không có quyền", 403);
-    if (existingProject.status !== PROJECT_STATUS.DRAFT)
+    }
+
+    if (existingProject.status !== PROJECT_STATUS.DRAFT) {
       throw new AppError("Chỉ có thể chỉnh sửa dự án Nháp.", 400);
+    }
 
     let {
       deletedDocumentIds,
@@ -1029,7 +1282,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
       finalUpdateData["stats.targetVolunteers"] =
         finalUpdateData.volunteerRoles.reduce(
           (acc, curr) => acc + (Number(curr.quantity) || 0),
-          0,
+          0
         );
     } else if (finalUpdateData.needsVolunteers === false) {
       finalUpdateData.volunteerRoles = [];
@@ -1039,8 +1292,8 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
     const coverPayload = Array.isArray(finalUpdateData.coverMedia)
       ? finalUpdateData.coverMedia
       : finalUpdateData.coverMedia
-        ? [finalUpdateData.coverMedia]
-        : [];
+      ? [finalUpdateData.coverMedia]
+      : [];
 
     const docsPayload = Array.isArray(finalUpdateData.documents)
       ? finalUpdateData.documents
@@ -1050,19 +1303,18 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
       await this._processMediaPayload(
         coverPayload,
         organizerId,
-        "project_cover",
+        "project_cover"
       );
 
     const { validMediaIds: validDocIds, newMediaToInsert: newDocMedia } =
       await this._processMediaPayload(
         docsPayload,
         organizerId,
-        "project_document",
+        "project_document"
       );
 
     const allNewMediaToInsert = [...newCoverMedia, ...newDocMedia];
     const publicIdsToRollback = allNewMediaToInsert.map((m) => m.publicId);
-
     const oldCloudinaryIdsToClean = [];
 
     try {
@@ -1074,7 +1326,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
           if (allNewMediaToInsert.length > 0) {
             const insertedMedia = await this.mediaRepository.createMany(
               allNewMediaToInsert,
-              session,
+              session
             );
 
             insertedMedia.forEach((media) => {
@@ -1094,7 +1346,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
 
           if (!finalCoverMediaData && validCoverIds.length > 0) {
             const existingCover = await this.mediaRepository.findById(
-              validCoverIds[0],
+              validCoverIds[0]
             );
 
             if (existingCover) {
@@ -1120,7 +1372,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
             finalUpdateData.coverMedia = finalCoverMediaData;
           } else if (validCoverIds.length > 0) {
             const existingCover = await this.mediaRepository.findById(
-              validCoverIds[0],
+              validCoverIds[0]
             );
             if (existingCover) {
               finalUpdateData.coverMedia = {
@@ -1138,7 +1390,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
               await this.mediaRepository.findManyByIdsAndOwner(
                 deletedDocumentIds,
                 organizerId,
-                session,
+                session
               );
 
             const actualIdsToDelete = mediaDocsToDelete.map((m) => m._id);
@@ -1149,14 +1401,14 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
             if (actualIdsToDelete.length > 0) {
               await Promise.all(
                 actualIdsToDelete.map((id) =>
-                  this.mediaRepository.deleteById(id, session),
-                ),
+                  this.mediaRepository.deleteById(id, session)
+                )
               );
             }
           }
 
           const existingDocIdsStr = (existingProject.documents || []).map((id) =>
-            id.toString(),
+            id.toString()
           );
 
           const docsToSave = [
@@ -1170,18 +1422,18 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
             projectId,
             organizerId,
             finalUpdateData,
-            session,
+            session
           );
 
           if (!resultDoc) {
             throw new AppError(
               "Xung đột hệ thống: Dự án đã đổi trạng thái hoặc bị khoá bởi luồng khác!",
-              409,
+              409
             );
           }
 
           return resultDoc;
-        },
+        }
       );
 
       if (oldCloudinaryIdsToClean.length > 0) {
@@ -1190,7 +1442,7 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
             publicIds: oldCloudinaryIdsToClean,
           })
           .catch((err) =>
-            console.error("[Queue Error] Lỗi đẩy job dọn ảnh cũ:", err.message),
+            console.error("[Queue Error] Lỗi đẩy job dọn ảnh cũ:", err.message)
           );
       }
 
@@ -1204,8 +1456,8 @@ _rebalanceExploreProjects(projects = [], followedOrganizerIds = []) {
           .catch((err) =>
             console.error(
               "[Queue Error] Lỗi đẩy job dọn rác rollback:",
-              err.message,
-            ),
+              err.message
+            )
           );
       }
 
