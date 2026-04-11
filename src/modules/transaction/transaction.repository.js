@@ -53,18 +53,60 @@ class TransactionRepository {
     async findWalletTransactions(userId, skip = 0, limit = 10) {
         const query = {
             donorRef: userId,
-            type: { 
+            type: {
                 $in: [
-                    'WALLET_DEPOSIT', 
-                    'WALLET_WITHDRAWAL', 
-                    'DONATION_FROM_WALLET', 
+                    'WALLET_DEPOSIT',
+                    'WALLET_WITHDRAWAL',
+                    'DONATION_FROM_WALLET',
                     'USER_REFUND_REQUEST'
-                ] 
+                ]
             }
         };
 
         const [transactions, total] = await Promise.all([
             Transaction.find(query)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean()
+                .exec(),
+            Transaction.countDocuments(query).exec()
+        ]);
+
+        return { transactions, total };
+    }
+
+    async findUserDonations(userId, skip = 0, limit = 10) {
+        const query = {
+            donorRef: userId,
+            type: { $in: ['DONATION', 'DONATION_FROM_WALLET'] },
+            status: 'COMPLETED'
+        };
+
+        const [transactions, total] = await Promise.all([
+            Transaction.find(query)
+                .populate('projectId', 'title status coverMedia')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .lean()
+                .exec(),
+            Transaction.countDocuments(query).exec()
+        ]);
+
+        return { transactions, total };
+    }
+
+    async findPublicDonorsByProject(projectId, skip = 0, limit = 10) {
+        const query = {
+            projectId,
+            type: { $in: ['DONATION', 'DONATION_FROM_WALLET'] },
+            status: 'COMPLETED'
+        };
+
+        const [transactions, total] = await Promise.all([
+            Transaction.find(query)
+                .populate('donorRef', 'fullName avatar')
                 .sort({ createdAt: -1 })
                 .skip(skip)
                 .limit(limit)
