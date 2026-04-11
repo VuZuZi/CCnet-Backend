@@ -46,7 +46,7 @@ class TransactionService {
     }
 
     async initiateDonation(donorId, payload) {
-        const { projectId, amount, paymentMethod, cancelUrl, returnUrl } = payload;
+        const { projectId, amount, paymentMethod, cancelUrl, returnUrl, isAnonymous } = payload;
 
         const project = await this.projectRepository.findById(projectId);
         if (!project) throw new AppError("Không tìm thấy dự án", 404);
@@ -67,7 +67,8 @@ class TransactionService {
                     amount,
                     projectId,
                     donorRef: donorId,
-                    status: 'COMPLETED'
+                    status: 'COMPLETED',
+                    isAnonymous // Thêm cờ ẩn danh
                 }, session);
 
                 const updatedEscrow = await this.escrowRepository.incrementBalance(projectId, amount, session);
@@ -86,8 +87,11 @@ class TransactionService {
             });
 
             if (this.eventBus) {
-                const donor = await this.userRepository.findById(donorId);
-                const donorName = donor ? (donor.fullName || "Nhà hảo tâm") : "Nhà hảo tâm ẩn danh";
+                let donorName = "Nhà hảo tâm ẩn danh";
+                if (!isAnonymous) {
+                    const donor = await this.userRepository.findById(donorId);
+                    if (donor) donorName = donor.fullName || "Nhà hảo tâm";
+                }
 
                 this.eventBus.emit(DOMAIN_EVENTS.DONATION_SUCCESSFUL, {
                     transactionId: String(result.tx._id),
@@ -128,7 +132,8 @@ class TransactionService {
             projectId,
             donorRef: donorId,
             gatewayTransactionId: String(orderCodeInt),
-            status: 'PENDING'
+            status: 'PENDING',
+            isAnonymous
         });
 
         const paymentLink = await this.paymentProvider.createPaymentLink({
@@ -147,9 +152,9 @@ class TransactionService {
         };
     }
 
-async handlePayosWebhook(webhookBody) {
+    async handlePayosWebhook(webhookBody) {
         const verifiedData = this.paymentProvider.verifyWebhookData(webhookBody);
-        
+
         const orderCode = verifiedData?.orderCode || webhookBody.data?.orderCode;
         const amount = verifiedData?.amount || webhookBody.data?.amount;
         const success = webhookBody.success !== undefined ? webhookBody.success : verifiedData?.success;
@@ -164,7 +169,7 @@ async handlePayosWebhook(webhookBody) {
             const failedTx = await this.transactionRepository.updateStatusIfPending(String(orderCode), 'FAILED', {
                 gatewayResponse: webhookBody
             });
-            
+
             if (failedTx && this.eventBus) {
                 this.eventBus.emit(DOMAIN_EVENTS.TRANSACTION_FAILED, {
                     userId: failedTx.donorRef ? String(failedTx.donorRef) : null,
@@ -207,7 +212,7 @@ async handlePayosWebhook(webhookBody) {
         if (result.status === 'success' && this.eventBus) {
             try {
                 let donorName = "Nhà hảo tâm ẩn danh";
-                if (result.tx.donorRef) {
+                if (result.tx.donorRef && !result.tx.isAnonymous) {
                     const donor = await this.userRepository.findById(result.tx.donorRef);
                     if (donor) donorName = donor.fullName || donor.username || "Nhà hảo tâm";
                 }
@@ -239,7 +244,6 @@ async handlePayosWebhook(webhookBody) {
 
     async processAutoRefundToWallet(projectId) {
         const donations = await this.transactionRepository.findCompletedDonationsByProject(projectId);
-        
         if (!donations || donations.length === 0) return { success: true, processedCount: 0 };
 
         let processedCount = 0;
@@ -285,7 +289,7 @@ async handlePayosWebhook(webhookBody) {
 
     async processUserRefundRequest(userId, transactionId) {
         const tx = await this.transactionRepository.findById(transactionId);
-        
+
         if (!tx || !tx.donorRef.equals(userId)) {
             throw new AppError("Giao dịch không hợp lệ hoặc không thuộc về bạn.", 403);
         }
@@ -403,6 +407,56 @@ async handlePayosWebhook(webhookBody) {
         }
 
         return result;
+    }
+
+    async getUserDonationHistory(userId, query) {
+        const page = parseInt(query?.page, 10) || 1;
+        const limit = parseInt(query?.limit, 10) || 10;
+        const skip = (page - 1) * limit;
+
+        const { transactions, total } = await this.transactionRepository.findUserDonations(
+            userId,
+            skip,
+            limit
+        );
+
+        return {
+            donations: transactions,
+            pagination: {
+                totalItems: total,
+                currentPage: page,
+                totalPages: Math.ceil(total / limit) || 1,
+                hasNextPage: page * limit < total
+            }
+        };
+    }
+
+    async getProjectDonors(projectId, query) {
+        const page = parseInt(query?.page, 10) || 1;
+        const limit = parseInt(query?.limit, 10) || 10;
+        const skip = (page - 1) * limit;
+
+        const { transactions, total } = await this.transactionRepository.findPublicDonorsByProject(projectId, skip, limit);
+
+        const formattedDonors = transactions.map(tx => {
+            if (tx.isAnonymous) {
+                return {
+                    ...tx,
+                    donorRef: { fullName: "Nhà hảo tâm ẩn danh", avatar: null }
+                };
+            }
+            return tx;
+        });
+
+        return {
+            donors: formattedDonors,
+            pagination: {
+                totalItems: total,
+                currentPage: page,
+                totalPages: Math.ceil(total / limit) || 1,
+                hasNextPage: page * limit < total
+            }
+        };
     }
 }
 

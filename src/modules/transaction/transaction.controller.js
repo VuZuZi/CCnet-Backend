@@ -53,6 +53,27 @@ class TransactionController {
             next(error);
         }
     };
+
+    getMyDonations = async (req, res, next) => {
+        try {
+            const userId = req.user.userId;
+            const result = await this.transactionService.getUserDonationHistory(userId, req.query);
+            
+            return ApiResponse.success(res, result, "Lấy danh sách lịch sử ủng hộ thành công");
+        } catch (error) {
+            next(error);
+        }
+    };
+
+    getProjectDonors = async (req, res, next) => {
+        try {
+            const projectId = req.params.projectId;
+            const result = await this.transactionService.getProjectDonors(projectId, req.query);
+            return ApiResponse.success(res, result, "Lấy danh sách nhà tài trợ thành công");
+        } catch (error) {
+            next(error);
+        }
+    };
 }
 
 export default TransactionController;

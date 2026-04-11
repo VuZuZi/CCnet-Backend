@@ -4,7 +4,7 @@ const transactionSchema = new mongoose.Schema({
     type: {
         type: String,
         enum: [
-            'DONATION', 'REFUND', 'DISBURSEMENT', 'PLATFORM_FEE', 
+            'DONATION', 'REFUND', 'DISBURSEMENT', 'PLATFORM_FEE',
             'SURPLUS_CARRYOVER', 'SURPLUS_DONATION', 'DISBURSEMENT_REVERSAL',
             'WALLET_DEPOSIT', 'WALLET_WITHDRAWAL', 'DONATION_FROM_WALLET', 'USER_REFUND_REQUEST'
         ],
@@ -17,8 +17,8 @@ const transactionSchema = new mongoose.Schema({
     projectId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Project',
-        required: function() {
-            return this.type !== 'WALLET_WITHDRAWAL'; 
+        required: function () {
+            return this.type !== 'WALLET_WITHDRAWAL';
         },
         index: true
     },
@@ -46,6 +46,11 @@ const transactionSchema = new mongoose.Schema({
         enum: ['PENDING', 'COMPLETED', 'FAILED', 'EXPIRED', 'TRANSFERRED'],
         default: 'PENDING',
         index: true
+    },
+
+    isAnonymous: {
+        type: Boolean,
+        default: false
     },
 
     deviceFingerprint: { type: String },

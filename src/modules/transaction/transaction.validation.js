@@ -9,6 +9,7 @@ export const donateSchema = z.object({
     paymentMethod: z.enum(Object.values(PAYMENT_METHODS)).default(PAYMENT_METHODS.PAYOS),
     cancelUrl: z.string().url("cancelUrl phải là một URL hợp lệ").optional(),
     returnUrl: z.string().url("returnUrl phải là một URL hợp lệ").optional(),
+    isAnonymous: z.boolean().optional().default(false)
 }).strict().refine(data => {
     if (data.paymentMethod === PAYMENT_METHODS.PAYOS && (!data.cancelUrl || !data.returnUrl)) {
         return false;
@@ -26,4 +27,13 @@ export const requestRefundSchema = z.object({
 export const withdrawSchema = z.object({
     amount: z.coerce.number().min(50000, "Số tiền rút tối thiểu là 50.000 VNĐ"),
     bankAccountId: objectIdSchema
+}).strict();
+
+export const getDonationsQuerySchema = z.object({
+    page: z.coerce.number().min(1, "Page phải lớn hơn hoặc bằng 1").optional().default(1),
+    limit: z.coerce.number().min(1, "Limit phải lớn hơn 0").max(50, "Limit tối đa là 50").optional().default(10)
+}).strict();
+
+export const projectIdParamSchema = z.object({
+    projectId: objectIdSchema
 }).strict();

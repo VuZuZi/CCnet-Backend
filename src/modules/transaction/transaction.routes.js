@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { scopePerRequest } from "../../middlewares/di.middleware.js";
 import { authenticate } from "../../middlewares/auth.middleware.js";
-import { validateBody } from "../../middlewares/validate.middleware.js";
-import { donateSchema, requestRefundSchema, withdrawSchema } from "./transaction.validation.js";
+import { validateBody, validateParams, validateQuery } from "../../middlewares/validate.middleware.js";
+import { donateSchema, getDonationsQuerySchema, projectIdParamSchema, requestRefundSchema, withdrawSchema } from "./transaction.validation.js";
 
 const router = Router();
 router.use(scopePerRequest);
@@ -21,6 +21,20 @@ router.post(
     authenticate,
     validateBody(donateSchema),
     execute("donate")
+);
+
+router.get(
+    "/project/:projectId/donations",
+    validateParams(projectIdParamSchema),
+    validateQuery(getDonationsQuerySchema),
+    execute("getProjectDonors")
+);
+
+router.get(
+    "/me/donations",
+    authenticate,
+    validateQuery(getDonationsQuerySchema),
+    execute("getMyDonations")
 );
 
 router.post(
