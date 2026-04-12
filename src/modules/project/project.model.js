@@ -5,7 +5,6 @@ import {
   PROJECT_CATEGORY,
   MILESTONE_STATUS,
   PROJECT_TYPE,
-  SURPLUS_POLICY,
 } from "./project.constant.js";
 
 const milestoneSchema = new mongoose.Schema(
@@ -15,6 +14,7 @@ const milestoneSchema = new mongoose.Schema(
     description: { type: String, required: true, trim: true, maxlength: 500 },
     targetAmount: { type: Number, default: 0, min: 0 },
     deliverables: { type: String, trim: true },
+    startDate: { type: Date, default: null },
     endDate: { type: Date, default: null },
     status: {
       type: String,
@@ -49,6 +49,12 @@ const projectSchema = new mongoose.Schema(
       default: uuidv4,
       unique: true,
       index: true,
+    },
+    slug: {
+      type: String,
+      unique: true,
+      sparse: true,
+      index: true
     },
     projectType: {
       type: String,
@@ -100,16 +106,6 @@ const projectSchema = new mongoose.Schema(
         note: { type: String },
       }
     ],
-    surplusPolicy: {
-      type: String,
-      enum: Object.values(SURPLUS_POLICY),
-      default: SURPLUS_POLICY.DONATE_TO_PLATFORM,
-    },
-    carryOverProjectId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Project",
-      default: null,
-    },
 
     milestones: [milestoneSchema],
 
@@ -127,6 +123,10 @@ const projectSchema = new mongoose.Schema(
     endDate: { type: Date, default: null },
 
     isUrgent: { type: Boolean, default: false, index: true },
+
+    isOverFunded: { type: Boolean, default: false },
+    isLocked: { type: Boolean, default: false },
+
     pauseReason: { type: String, default: null },
 
     aiRiskScore: { type: Number, min: 0, max: 100, default: null },

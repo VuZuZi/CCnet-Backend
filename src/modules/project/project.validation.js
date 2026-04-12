@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PROJECT_CATEGORY, PROJECT_STATUS, PROJECT_TYPE, SURPLUS_POLICY } from './project.constant.js';
+import { PROJECT_CATEGORY, PROJECT_STATUS, PROJECT_TYPE } from './project.constant.js';
 
 const objectIdSchema = z.string().regex(/^[0-9a-fA-F]{24}$/, "ID không đúng định dạng ObjectId");
 
@@ -44,7 +44,8 @@ const milestoneSchema = z.object({
   description: z.string().max(500, "Mô tả mốc tối đa 500 ký tự"),
   targetAmount: z.coerce.number().min(0, "Số tiền không được âm").optional().default(0),
   deliverables: z.string().max(1000, "Kết quả nghiệm thu quá dài").optional(),
-  endDate: z.string().datetime({ offset: true }).or(z.date()).optional() // [THÊM MỚI]
+  startDate: z.union([z.string().datetime({ offset: true }), z.date()]).nullable().optional(),
+  endDate: z.union([z.string().datetime({ offset: true }), z.date()]).nullable().optional()
 });
 
 const volunteerRoleSchema = z.object({
@@ -66,8 +67,6 @@ const projectBaseSchema = {
   targetAmount: z.coerce.number().min(0, "Mục tiêu ngân sách không được âm").optional().default(0),
   mvpAmount: z.coerce.number().min(0, "Ngưỡng MVP không được âm").optional().default(0),
   budgetBreakdown: z.array(budgetItemSchema).max(50, "Tối đa 50 hạng mục ngân sách").optional(),
-  surplusPolicy: z.enum(Object.values(SURPLUS_POLICY)).optional(),
-  carryOverProjectId: objectIdSchema.nullable().optional(),
 
   startDate: z.union([z.string().datetime({ offset: true }), z.date()]).nullable().optional(),
   endDate: z.union([z.string().datetime({ offset: true }), z.date()]).nullable().optional(),
@@ -124,14 +123,6 @@ const lifecycleRefinement = (data, ctx) => {
       });
     }
   }
-
-  if (data.surplusPolicy === SURPLUS_POLICY.CARRY_OVER && !data.carryOverProjectId) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Phải chọn dự án đích (Target Project) khi sử dụng chính sách CARRY_OVER (Kết chuyển)",
-      path: ["carryOverProjectId"]
-    });
-  }
 };
 
 export const createDraftSchema = z.object(projectBaseSchema)
@@ -169,12 +160,13 @@ export const projectCompleteSchema = z.object({
   beneficiaryInfo: z.object({
     details: z.string().min(1, "Thiếu chi tiết người thụ hưởng (Block 1)")
   }),
+  startDate: z.union([z.string().datetime({ offset: true }), z.date()]).optional(),
+  endDate: z.union([z.string().datetime({ offset: true }), z.date()]).optional(),
   coverMedia: z.any().optional(),
   documents: z.array(z.any()).optional(),
   targetAmount: z.number().optional(),
   mvpAmount: z.number().optional(),
   budgetBreakdown: z.array(z.any()).optional(),
-  surplusPolicy: z.string().optional(),
   milestones: z.array(z.any()).min(1, "Dự án bắt buộc phải có ít nhất 1 Mốc hoạt động (Block 4)"),
   needsVolunteers: z.boolean().optional(),
   volunteerRoles: z.array(z.any()).optional()
@@ -195,9 +187,6 @@ export const projectCompleteSchema = z.object({
     if (!data.budgetBreakdown || data.budgetBreakdown.length === 0) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Dự án FUNDED bắt buộc phải có Giải trình ngân sách (Block 3)", path: ["budgetBreakdown"] });
     }
-    if (!data.surplusPolicy) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Dự án FUNDED bắt buộc chọn Chính sách xử lý tiền thừa (Block 3)", path: ["surplusPolicy"] });
-    }
 
     const sumMilestones = data.milestones.reduce((acc, curr) => acc + (curr.targetAmount || 0), 0);
     if (sumMilestones !== data.targetAmount) {
@@ -205,12 +194,36 @@ export const projectCompleteSchema = z.object({
     }
   }
 
+  const projStart = data.startDate ? new Date(data.startDate).getTime() : null;
+  const projEnd = data.endDate ? new Date(data.endDate).getTime() : null;
+
   data.milestones.forEach((m, index) => {
     if (!m.deliverables) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Mốc "${m.title}" thiếu Kết quả nghiệm thu thực tế (Deliverables).`, path: [`milestones[${index}]`] });
     }
-    if (data.projectType === PROJECT_TYPE.FUNDED && !m.endDate) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Mốc "${m.title}" của dự án FUNDED bắt buộc phải có Deadline (endDate).`, path: [`milestones[${index}]`] });
+
+    if (data.projectType === PROJECT_TYPE.FUNDED) {
+      if (!m.startDate) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Mốc "${m.title}" bắt buộc phải có Ngày bắt đầu (startDate).`, path: [`milestones[${index}]`] });
+      }
+      if (!m.endDate) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Mốc "${m.title}" bắt buộc phải có Deadline (endDate).`, path: [`milestones[${index}]`] });
+      }
+    }
+
+    const mStart = m.startDate ? new Date(m.startDate).getTime() : null;
+    const mEnd = m.endDate ? new Date(m.endDate).getTime() : null;
+
+    if (mStart && mEnd && mStart >= mEnd) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Mốc "${m.title}": Ngày kết thúc phải sau ngày bắt đầu.`, path: [`milestones[${index}]`] });
+    }
+
+    if (projStart && mStart && mStart < projStart) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Mốc "${m.title}": Không được bắt đầu trước ngày khởi công dự án.`, path: [`milestones[${index}]`] });
+    }
+
+    if (projEnd && mEnd && mEnd > projEnd) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Mốc "${m.title}": Không được kết thúc sau ngày hoàn thành dự án.`, path: [`milestones[${index}]`] });
     }
   });
 

@@ -15,7 +15,7 @@ export class ProjectDTO {
         if (data.projectType === PROJECT_TYPE.VOLUNTEER_ONLY) {
             const financialFields = [
                 'targetAmount', 'currentAmount', 'mvpAmount',
-                'budgetBreakdown', 'surplusPolicy', 'carryOverProjectId'
+                'budgetBreakdown'
             ];
             financialFields.forEach(f => delete data[f]);
 
