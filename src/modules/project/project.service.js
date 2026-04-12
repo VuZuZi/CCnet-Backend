@@ -70,8 +70,8 @@ class ProjectService {
   _getFundingProgress(project) {
     const current = Number(
       project?.financialDetail?.availableBalance ??
-        project?.currentAmount ??
-        0
+      project?.currentAmount ??
+      0
     );
     const target = Number(project?.targetAmount || 0);
     if (target <= 0) return 0;
@@ -81,22 +81,22 @@ class ProjectService {
   _getVolunteerProgress(project) {
     const current = Number(
       project?.stats?.currentVolunteers ??
-        project?.stats?.volunteerJoined ??
-        0
+      project?.stats?.volunteerJoined ??
+      0
     );
 
     const target =
       Number(
         project?.stats?.targetVolunteers ??
-          project?.stats?.volunteerNeeded ??
-          0
+        project?.stats?.volunteerNeeded ??
+        0
       ) ||
       Number(
         Array.isArray(project?.volunteerRoles)
           ? project.volunteerRoles.reduce(
-              (sum, role) => sum + Number(role?.quantity || 0),
-              0
-            )
+            (sum, role) => sum + Number(role?.quantity || 0),
+            0
+          )
           : 0
       );
 
@@ -143,7 +143,7 @@ class ProjectService {
 
     const needsVolunteers = Boolean(
       project?.needsVolunteers ||
-        String(project?.projectType || "").toUpperCase() === "VOLUNTEER_ONLY"
+      String(project?.projectType || "").toUpperCase() === "VOLUNTEER_ONLY"
     );
 
     let score = 0;
@@ -989,7 +989,7 @@ class ProjectService {
       escrow = await this.escrowRepository.findByProjectId(projectId);
     }
 
-    this.redis.incr(`project:${projectId}:views`).catch(() => {});
+    this.redis.incr(`project:${projectId}:views`).catch(() => { });
 
     const orgId = project.organizerId?._id || project.organizerId;
     let isFollowing = false;
@@ -1064,11 +1064,11 @@ class ProjectService {
         ...project,
         currentMilestone: currentMilestone
           ? {
-              title: currentMilestone.title,
-              targetAmount: currentMilestone.targetAmount,
-              status: currentMilestone.status,
-              index: milestoneIndex,
-            }
+            title: currentMilestone.title,
+            targetAmount: currentMilestone.targetAmount,
+            status: currentMilestone.status,
+            index: milestoneIndex,
+          }
           : null,
       };
 
@@ -1092,8 +1092,8 @@ class ProjectService {
     const coverPayload = Array.isArray(projectData.coverMedia)
       ? projectData.coverMedia
       : projectData.coverMedia
-      ? [projectData.coverMedia]
-      : [];
+        ? [projectData.coverMedia]
+        : [];
 
     const docsPayload = Array.isArray(projectData.documents)
       ? projectData.documents
@@ -1178,6 +1178,8 @@ class ProjectService {
             documents: [...new Set(finalDocumentIds)],
             status: PROJECT_STATUS.DRAFT,
             currentAmount: 0,
+            isOverFunded: false,
+            isLocked: false,
           };
 
           const createdProject = await this.projectRepository.create(
@@ -1206,9 +1208,8 @@ class ProjectService {
                   recipientId: linkedHelpRequest.requesterId,
                   actorId: organizerId,
                   type: "help_request_assignment_responded",
-                  title: `${
-                    organizerUser?.fullName || "Organizer"
-                  } đã đồng ý host yêu cầu của bạn`,
+                  title: `${organizerUser?.fullName || "Organizer"
+                    } đã đồng ý host yêu cầu của bạn`,
                   message: `Yêu cầu "${linkedHelpRequest.title}" đã được chấp nhận và chuyển thành dự án.`,
                   actionUrl: `/projects/${createdProject._id}`,
                   metadata: {
@@ -1266,52 +1267,37 @@ class ProjectService {
 
     let {
       deletedDocumentIds,
-      coverMedia: _,
-      documents: __,
+      coverMedia,
+      documents,
       ...finalUpdateData
     } = updateData;
 
-    if (!Array.isArray(deletedDocumentIds)) {
-      deletedDocumentIds = deletedDocumentIds ? [deletedDocumentIds] : [];
+    if (
+      finalUpdateData.projectType === PROJECT_TYPE.VOLUNTEER_ONLY ||
+      (!finalUpdateData.projectType && existingProject.projectType === PROJECT_TYPE.VOLUNTEER_ONLY)
+    ) {
+      finalUpdateData.targetAmount = 0;
+      finalUpdateData.mvpAmount = 0;
+      finalUpdateData.budgetBreakdown = [];
     }
 
-    if (
-      finalUpdateData.needsVolunteers &&
-      finalUpdateData.volunteerRoles?.length > 0
-    ) {
-      finalUpdateData["stats.targetVolunteers"] =
-        finalUpdateData.volunteerRoles.reduce(
-          (acc, curr) => acc + (Number(curr.quantity) || 0),
-          0
-        );
+    if (finalUpdateData.needsVolunteers && finalUpdateData.volunteerRoles?.length > 0) {
+      finalUpdateData["stats.targetVolunteers"] = finalUpdateData.volunteerRoles.reduce(
+        (acc, curr) => acc + (Number(curr.quantity) || 0), 0
+      );
     } else if (finalUpdateData.needsVolunteers === false) {
       finalUpdateData.volunteerRoles = [];
       finalUpdateData["stats.targetVolunteers"] = 0;
     }
 
-    const coverPayload = Array.isArray(finalUpdateData.coverMedia)
-      ? finalUpdateData.coverMedia
-      : finalUpdateData.coverMedia
-      ? [finalUpdateData.coverMedia]
-      : [];
-
-    const docsPayload = Array.isArray(finalUpdateData.documents)
-      ? finalUpdateData.documents
-      : [];
+    const coverPayload = Array.isArray(coverMedia) ? coverMedia : (coverMedia ? [coverMedia] : []);
+    const docsPayload = Array.isArray(documents) ? documents : [];
 
     const { validMediaIds: validCoverIds, newMediaToInsert: newCoverMedia } =
-      await this._processMediaPayload(
-        coverPayload,
-        organizerId,
-        "project_cover"
-      );
+      await this._processMediaPayload(coverPayload, organizerId, "project_cover");
 
     const { validMediaIds: validDocIds, newMediaToInsert: newDocMedia } =
-      await this._processMediaPayload(
-        docsPayload,
-        organizerId,
-        "project_document"
-      );
+      await this._processMediaPayload(docsPayload, organizerId, "project_document");
 
     const allNewMediaToInsert = [...newCoverMedia, ...newDocMedia];
     const publicIdsToRollback = allNewMediaToInsert.map((m) => m.publicId);
@@ -1324,19 +1310,13 @@ class ProjectService {
           const finalDocumentIds = new Set(validDocIds);
 
           if (allNewMediaToInsert.length > 0) {
-            const insertedMedia = await this.mediaRepository.createMany(
-              allNewMediaToInsert,
-              session
-            );
-
+            const insertedMedia = await this.mediaRepository.createMany(allNewMediaToInsert, session);
             insertedMedia.forEach((media) => {
               if (media.context === "project_cover") {
                 finalCoverMediaData = {
                   url: media.url,
                   publicId: media.publicId,
-                  mediaType: media.mimetype.startsWith("video")
-                    ? "video"
-                    : "image",
+                  mediaType: media.mimetype.startsWith("video") ? "video" : "image",
                 };
               } else {
                 finalDocumentIds.add(media._id.toString());
@@ -1344,79 +1324,57 @@ class ProjectService {
             });
           }
 
-          if (!finalCoverMediaData && validCoverIds.length > 0) {
-            const existingCover = await this.mediaRepository.findById(
-              validCoverIds[0]
-            );
-
-            if (existingCover) {
-              finalCoverMediaData = {
-                url: existingCover.url,
-                publicId: existingCover.publicId,
-                mediaType: existingCover.mimetype.startsWith("video")
-                  ? "video"
-                  : "image",
-              };
-            }
-          }
-
-          if (
-            finalCoverMediaData &&
-            existingProject.coverMedia?.publicId &&
-            existingProject.coverMedia.publicId !== finalCoverMediaData.publicId
-          ) {
-            oldCloudinaryIdsToClean.push(existingProject.coverMedia.publicId);
-          }
-
           if (finalCoverMediaData) {
             finalUpdateData.coverMedia = finalCoverMediaData;
           } else if (validCoverIds.length > 0) {
-            const existingCover = await this.mediaRepository.findById(
-              validCoverIds[0]
-            );
+            const existingCover = await this.mediaRepository.findById(validCoverIds[0]);
             if (existingCover) {
               finalUpdateData.coverMedia = {
                 url: existingCover.url,
                 publicId: existingCover.publicId,
-                mediaType: existingCover.mimetype.startsWith("video")
-                  ? "video"
-                  : "image",
+                mediaType: existingCover.mimetype.startsWith("video") ? "video" : "image",
               };
+            }
+          } else if (coverMedia && Array.isArray(coverMedia) && coverMedia.length === 0) {
+            finalUpdateData.coverMedia = { url: null, publicId: null, mediaType: "image" };
+          }
+
+          if (existingProject.coverMedia?.publicId) {
+            const isChanged = finalUpdateData.coverMedia && finalUpdateData.coverMedia.publicId !== existingProject.coverMedia.publicId;
+            const isDeleted = finalUpdateData.coverMedia && finalUpdateData.coverMedia.url === null;
+            if (isChanged || isDeleted) {
+              oldCloudinaryIdsToClean.push(existingProject.coverMedia.publicId);
             }
           }
 
-          if (deletedDocumentIds.length > 0) {
-            const mediaDocsToDelete =
-              await this.mediaRepository.findManyByIdsAndOwner(
-                deletedDocumentIds,
-                organizerId,
-                session
-              );
+          const docsToSave = Array.from(finalDocumentIds);
+          finalUpdateData.documents = docsToSave;
 
+          const existingDocIdsStr = (existingProject.documents || []).map((id) => id.toString());
+          const orphanedIds = existingDocIdsStr.filter(id => !docsToSave.includes(id));
+
+          if (Array.isArray(deletedDocumentIds)) {
+            deletedDocumentIds.forEach(id => {
+              if (!orphanedIds.includes(id) && existingDocIdsStr.includes(id)) {
+                orphanedIds.push(id);
+              }
+            });
+          }
+
+          if (orphanedIds.length > 0) {
+            const mediaDocsToDelete = await this.mediaRepository.findManyByIdsAndOwner(orphanedIds, organizerId, session);
             const actualIdsToDelete = mediaDocsToDelete.map((m) => m._id);
+
             mediaDocsToDelete.forEach((media) => {
               if (media.publicId) oldCloudinaryIdsToClean.push(media.publicId);
             });
 
             if (actualIdsToDelete.length > 0) {
               await Promise.all(
-                actualIdsToDelete.map((id) =>
-                  this.mediaRepository.deleteById(id, session)
-                )
+                actualIdsToDelete.map((id) => this.mediaRepository.deleteById(id, session))
               );
             }
           }
-
-          const existingDocIdsStr = (existingProject.documents || []).map((id) =>
-            id.toString()
-          );
-
-          const docsToSave = [
-            ...existingDocIdsStr,
-            ...Array.from(finalDocumentIds),
-          ].filter((id) => !deletedDocumentIds.includes(id));
-
-          finalUpdateData.documents = [...new Set(docsToSave)];
 
           const resultDoc = await this.projectRepository.updateDraftAtomic(
             projectId,
@@ -1426,10 +1384,7 @@ class ProjectService {
           );
 
           if (!resultDoc) {
-            throw new AppError(
-              "Xung đột hệ thống: Dự án đã đổi trạng thái hoặc bị khoá bởi luồng khác!",
-              409
-            );
+            throw new AppError("Xung đột hệ thống: Dự án đã đổi trạng thái hoặc bị khoá bởi luồng khác!", 409);
           }
 
           return resultDoc;
@@ -1437,28 +1392,17 @@ class ProjectService {
       );
 
       if (oldCloudinaryIdsToClean.length > 0) {
-        this.jobQueue
-          .addJob("project-maintenance", "cleanup-old-media", {
-            publicIds: oldCloudinaryIdsToClean,
-          })
-          .catch((err) =>
-            console.error("[Queue Error] Lỗi đẩy job dọn ảnh cũ:", err.message)
-          );
+        this.jobQueue.addJob("project-maintenance", "cleanup-old-media", {
+          publicIds: oldCloudinaryIdsToClean,
+        }).catch((err) => console.error("[Queue Error] Lỗi đẩy job dọn ảnh cũ:", err.message));
       }
 
       return updatedProject;
     } catch (error) {
       if (publicIdsToRollback.length > 0) {
-        this.jobQueue
-          .addJob("project-maintenance", "cleanup-old-media", {
-            publicIds: publicIdsToRollback,
-          })
-          .catch((err) =>
-            console.error(
-              "[Queue Error] Lỗi đẩy job dọn rác rollback:",
-              err.message
-            )
-          );
+        this.jobQueue.addJob("project-maintenance", "cleanup-old-media", {
+          publicIds: publicIdsToRollback,
+        }).catch((err) => console.error("[Queue Error] Lỗi đẩy job dọn rác rollback:", err.message));
       }
 
       if (error instanceof AppError) throw error;
