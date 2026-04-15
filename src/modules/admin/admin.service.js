@@ -5,6 +5,32 @@ import User from "../user/user.model.js";
 import Report from "../report/report.model.js";
 import Post from "../communitypost/post.model.js";
 
+const APPROVED_PROJECT_STATUSES = [
+  PROJECT_STATUS.FUNDING,
+  PROJECT_STATUS.RECRUITING,
+  PROJECT_STATUS.ACTIVE,
+  PROJECT_STATUS.EXECUTING,
+];
+
+const COMPLETED_PROJECT_STATUSES = [
+  PROJECT_STATUS.COMPLETED_SUCCESSFULLY,
+  PROJECT_STATUS.COMPLETED_PARTIAL,
+  PROJECT_STATUS.COMPLETED, // legacy compatibility
+];
+
+const CANCELLED_PROJECT_STATUSES = [
+  PROJECT_STATUS.CANCELLED_BY_PLATFORM,
+  PROJECT_STATUS.CANCELLED_BY_ORGANIZER,
+  PROJECT_STATUS.CANCELLED_FRAUD,
+  PROJECT_STATUS.CANCELLED, // legacy compatibility
+];
+
+const REVIEWABLE_PROJECT_STATUSES = [
+  PROJECT_STATUS.PENDING_APPROVAL,
+  PROJECT_STATUS.REVISION_REQUESTED,
+  PROJECT_STATUS.UNDER_REVIEW,
+];
+
 class AdminService {
   constructor({
     adminRepository,
@@ -30,43 +56,118 @@ class AdminService {
     this.conversationService = conversationService;
   }
 
+  _ensureReason(reason) {
+    const normalizedReason = String(reason || "").trim();
+
+    if (!normalizedReason) {
+      throw new AppError("Reason is required for this action.", 400);
+    }
+
+    return normalizedReason;
+  }
+
+  _normalizeProjectStatus(status) {
+    return String(status || "").trim().toUpperCase();
+  }
+
+  _extractObjectId(value) {
+    if (!value) return null;
+    return typeof value === "object" ? value?._id || null : value;
+  }
+
+  async _logAdminAction({
+    actorId,
+    actorRole = "admin",
+    targetType,
+    targetId,
+    action,
+    reason,
+    previousState = null,
+    nextState = null,
+    metadata = null,
+  }) {
+    if (!this.adminRepository?.createAdminActionLog || !actorId || !targetId) {
+      return null;
+    }
+
+    return this.adminRepository.createAdminActionLog({
+      actorId,
+      actorRole,
+      targetType,
+      targetId,
+      action,
+      reason,
+      previousState,
+      nextState,
+      metadata,
+    });
+  }
+
   _buildProjectStatusNotificationMessage(projectTitle, status, feedback = "") {
-    if (
-      [
-        PROJECT_STATUS.FUNDING,
-        PROJECT_STATUS.RECRUITING,
-        PROJECT_STATUS.ACTIVE,
-      ].includes(status)
-    ) {
+    if (APPROVED_PROJECT_STATUSES.includes(status)) {
       return {
-        title: "Dự án đã được phê duyệt",
-        message: `Dự án "${projectTitle}" của bạn đã được Ban quản trị phê duyệt và đang đi vào hoạt động (Trạng thái: ${status}).`,
+        title: "Project approved",
+        message: `Your project "${projectTitle}" has been approved and is now active with status ${status}.`,
       };
     }
 
     if (status === PROJECT_STATUS.REVISION_REQUESTED) {
       return {
-        title: "Dự án cần chỉnh sửa",
-        message: `Dự án "${projectTitle}" của bạn cần được chỉnh sửa. Lý do: ${feedback}. Bạn có 14 ngày để bổ sung.`,
+        title: "Project revision requested",
+        message: `Your project "${projectTitle}" requires revision. Reason: ${feedback}. You have 14 days to update it.`,
       };
     }
 
     if (status === PROJECT_STATUS.REJECTED) {
       return {
-        title: "Dự án bị từ chối",
-        message: `Dự án "${projectTitle}" đã bị từ chối. Lý do: ${feedback}. Tài khoản của bạn bị tạm ngưng tạo dự án mới trong 7 ngày.`,
+        title: "Project rejected",
+        message: `Your project "${projectTitle}" has been rejected. Reason: ${feedback}. Your account is blocked from creating new projects for 7 days.`,
+      };
+    }
+
+    if (status === PROJECT_STATUS.PAUSED) {
+      return {
+        title: "Project paused",
+        message: `Your project "${projectTitle}" has been paused. Reason: ${feedback || "No reason provided"}.`,
+      };
+    }
+
+    if (COMPLETED_PROJECT_STATUSES.includes(status)) {
+      return {
+        title: "Project completed",
+        message: `Your project "${projectTitle}" has been marked as completed. Note: ${feedback || "No note provided"}.`,
+      };
+    }
+
+    if (CANCELLED_PROJECT_STATUSES.includes(status)) {
+      return {
+        title: "Project cancelled",
+        message: `Your project "${projectTitle}" has been cancelled. Reason: ${feedback || "No reason provided"}.`,
+      };
+    }
+
+    if (
+      status === PROJECT_STATUS.PENDING_APPROVAL ||
+      status === PROJECT_STATUS.UNDER_REVIEW
+    ) {
+      return {
+        title: "Project submitted for review",
+        message: `Your project "${projectTitle}" has been moved to review status. Note: ${feedback || "No note provided"}.`,
       };
     }
 
     return {
-      title: "Cập nhật trạng thái dự án",
-      message: `Trạng thái dự án "${projectTitle}" đã được cập nhật thành ${status}.`,
+      title: "Project status updated",
+      message: `The status of project "${projectTitle}" has been updated to ${status}.`,
     };
   }
 
-  _emitProjectStatusUpdated = ({ project, actorId, feedback }) => {
+  _emitProjectStatusUpdated({ project, actorId, feedback }) {
     if (!project?.organizerId) return;
     if (!this.eventBus || typeof this.eventBus.emit !== "function") return;
+
+    const organizerId = this._extractObjectId(project.organizerId);
+    if (!organizerId) return;
 
     const { title, message } = this._buildProjectStatusNotificationMessage(
       project.title,
@@ -75,7 +176,7 @@ class AdminService {
     );
 
     this.eventBus.emit(DOMAIN_EVENTS.PROJECT_STATUS_UPDATED, {
-      recipientIds: [String(project.organizerId)],
+      recipientIds: [String(organizerId)],
       actorId,
       projectId: project._id,
       projectName: project.title,
@@ -84,10 +185,17 @@ class AdminService {
       message,
       actionUrl: `/projects/${project._id}`,
     });
-  };
+  }
 
-  _syncProjectConversationOnActive = async (project, adminId = null) => {
-    if (!project || String(project.status) !== PROJECT_STATUS.ACTIVE) return null;
+  _shouldEnsureProjectConversation(status) {
+    return APPROVED_PROJECT_STATUSES.includes(
+      this._normalizeProjectStatus(status)
+    );
+  }
+
+  async _syncProjectConversation(project, adminId = null) {
+    if (!project) return null;
+    if (!this._shouldEnsureProjectConversation(project.status)) return null;
     if (!this.conversationService || !this.volunteerRepository) return null;
 
     const approvedApplications = await this.volunteerRepository.findByProject(
@@ -101,112 +209,227 @@ class AdminService {
 
     return this.conversationService.ensureProjectGroupConversation({
       projectId: project._id,
-      organizerId: project.organizerId,
+      organizerId: this._extractObjectId(project.organizerId),
       participantIds: approvedVolunteerIds,
       groupName: project.title,
       actorId: adminId,
     });
-  };
+  }
 
-  updateProjectStatus = async (projectId, targetStatus, feedback, adminId) => {
-    if (!targetStatus) {
-      throw new AppError("Trạng thái không được để trống", 400);
+  _getApprovedStatusForProject(project) {
+    return project.projectType === PROJECT_TYPE.FUNDED
+      ? PROJECT_STATUS.FUNDING
+      : PROJECT_STATUS.RECRUITING;
+  }
+
+  _getResumeStatusForProject(project) {
+    return project.projectType === PROJECT_TYPE.FUNDED
+      ? PROJECT_STATUS.FUNDING
+      : PROJECT_STATUS.RECRUITING;
+  }
+
+  _mapIncomingProjectStatus(project, rawStatus) {
+    const normalized = this._normalizeProjectStatus(rawStatus);
+
+    if (normalized === "PENDING") {
+      return PROJECT_STATUS.PENDING_APPROVAL;
     }
 
-    const normalized = String(targetStatus).trim().toUpperCase();
+    if (normalized === "APPROVED" || normalized === "ACTIVE") {
+      return this._getApprovedStatusForProject(project);
+    }
 
-    return await this.transactionManager.runInTransaction(async (session) => {
-      const project = await this.projectRepository.findById(projectId, session);
-      if (!project) throw new AppError("Không tìm thấy dự án", 404);
+    if (normalized === "COMPLETED") {
+      return PROJECT_STATUS.COMPLETED_SUCCESSFULLY;
+    }
 
-      if (
-        ![
-          PROJECT_STATUS.PENDING_APPROVAL,
+    if (normalized === "CANCELLED") {
+      return PROJECT_STATUS.CANCELLED_BY_PLATFORM;
+    }
+
+    return normalized;
+  }
+
+  _getAllowedProjectTransitions(project) {
+    const currentStatus = this._normalizeProjectStatus(project.status);
+
+    switch (currentStatus) {
+      case PROJECT_STATUS.PENDING_APPROVAL:
+      case PROJECT_STATUS.REVISION_REQUESTED:
+      case PROJECT_STATUS.UNDER_REVIEW:
+        return [
+          this._getApprovedStatusForProject(project),
           PROJECT_STATUS.REVISION_REQUESTED,
-        ].includes(project.status)
-      ) {
+          PROJECT_STATUS.REJECTED,
+        ];
+
+      case PROJECT_STATUS.FUNDING:
+      case PROJECT_STATUS.RECRUITING:
+      case PROJECT_STATUS.ACTIVE:
+      case PROJECT_STATUS.EXECUTING:
+        return [
+          PROJECT_STATUS.PAUSED,
+          PROJECT_STATUS.COMPLETED_SUCCESSFULLY,
+          PROJECT_STATUS.CANCELLED_BY_PLATFORM,
+        ];
+
+      case PROJECT_STATUS.PAUSED:
+        return [
+          this._getResumeStatusForProject(project),
+          PROJECT_STATUS.COMPLETED_SUCCESSFULLY,
+          PROJECT_STATUS.CANCELLED_BY_PLATFORM,
+        ];
+
+      default:
+        return [];
+    }
+  }
+
+  _buildProjectActionName(fromStatus, toStatus) {
+    const normalizedFrom = this._normalizeProjectStatus(fromStatus);
+    const normalizedTo = this._normalizeProjectStatus(toStatus);
+
+    if (
+      REVIEWABLE_PROJECT_STATUSES.includes(normalizedFrom) &&
+      [PROJECT_STATUS.FUNDING, PROJECT_STATUS.RECRUITING].includes(normalizedTo)
+    ) {
+      return "APPROVE_PROJECT";
+    }
+
+    if (normalizedTo === PROJECT_STATUS.REVISION_REQUESTED) {
+      return "REQUEST_PROJECT_REVISION";
+    }
+
+    if (normalizedTo === PROJECT_STATUS.REJECTED) {
+      return "REJECT_PROJECT";
+    }
+
+    if (normalizedTo === PROJECT_STATUS.PAUSED) {
+      return "PAUSE_PROJECT";
+    }
+
+    if (
+      [PROJECT_STATUS.FUNDING, PROJECT_STATUS.RECRUITING].includes(normalizedTo) &&
+      normalizedFrom === PROJECT_STATUS.PAUSED
+    ) {
+      return "RESUME_PROJECT";
+    }
+
+    if (COMPLETED_PROJECT_STATUSES.includes(normalizedTo)) {
+      return "COMPLETE_PROJECT";
+    }
+
+    if (CANCELLED_PROJECT_STATUSES.includes(normalizedTo)) {
+      return "CANCEL_PROJECT";
+    }
+
+    return "UPDATE_PROJECT_STATUS";
+  }
+
+  _buildProjectUpdateData(project, finalStatus, feedback, adminId) {
+    const updateData = {
+      status: finalStatus,
+    };
+
+    if (
+      [PROJECT_STATUS.FUNDING, PROJECT_STATUS.RECRUITING].includes(finalStatus)
+    ) {
+      updateData.approvedBy = adminId;
+      updateData.approvedAt = new Date();
+      updateData.rejectionReason = null;
+    }
+
+    if (finalStatus === PROJECT_STATUS.REVISION_REQUESTED) {
+      updateData.revisionCount = Number(project.revisionCount || 0) + 1;
+      updateData.rejectionReason = feedback;
+      updateData.revisionRequestedAt = new Date();
+    }
+
+    if (finalStatus === PROJECT_STATUS.REJECTED) {
+      updateData.rejectionReason = feedback;
+    }
+
+    if (
+      [
+        PROJECT_STATUS.PENDING_APPROVAL,
+        PROJECT_STATUS.UNDER_REVIEW,
+        PROJECT_STATUS.PAUSED,
+        PROJECT_STATUS.COMPLETED_SUCCESSFULLY,
+        PROJECT_STATUS.CANCELLED_BY_PLATFORM,
+      ].includes(finalStatus)
+    ) {
+      updateData.rejectionReason = feedback || null;
+    }
+
+    return updateData;
+  }
+
+  _isApproveAction(currentStatus, finalStatus) {
+    return (
+      REVIEWABLE_PROJECT_STATUSES.includes(
+        this._normalizeProjectStatus(currentStatus)
+      ) &&
+      [PROJECT_STATUS.FUNDING, PROJECT_STATUS.RECRUITING].includes(
+        this._normalizeProjectStatus(finalStatus)
+      )
+    );
+  }
+
+  async updateProjectStatus(projectId, targetStatus, feedback, adminId) {
+    if (!targetStatus) {
+      throw new AppError("Project status is required.", 400);
+    }
+
+    return this.transactionManager.runInTransaction(async (session) => {
+      const project = await this.projectRepository.findById(projectId, session);
+
+      if (!project) {
+        throw new AppError("Project not found.", 404);
+      }
+
+      const currentStatus = this._normalizeProjectStatus(project.status);
+      const finalStatus = this._mapIncomingProjectStatus(project, targetStatus);
+      const allowedTransitions = this._getAllowedProjectTransitions(project);
+
+      if (currentStatus === finalStatus) {
+        return project;
+      }
+
+      if (!allowedTransitions.includes(finalStatus)) {
         throw new AppError(
-          `Không thể duyệt dự án đang ở trạng thái ${project.status}`,
+          `Cannot transition project from ${currentStatus} to ${finalStatus}`,
           400
         );
       }
 
-      let finalStatus = null;
-      const updateData = {};
+      const isApproveAction = this._isApproveAction(currentStatus, finalStatus);
+      const normalizedFeedback = isApproveAction
+        ? String(feedback || "").trim()
+        : this._ensureReason(feedback);
+
+      if (
+        finalStatus === PROJECT_STATUS.REVISION_REQUESTED &&
+        Number(project.revisionCount || 0) >= 2
+      ) {
+        throw new AppError(
+          "The project has exceeded the maximum of 2 revision requests.",
+          400
+        );
+      }
+
+      const updateData = this._buildProjectUpdateData(
+        project,
+        finalStatus,
+        normalizedFeedback,
+        adminId
+      );
+
       let userUpdate = null;
 
-      let mappedIntent = normalized;
-      if (normalized === "PENDING") mappedIntent = PROJECT_STATUS.PENDING_APPROVAL;
-      if (normalized === "APPROVED" || normalized === "ACTIVE") {
-        mappedIntent = "APPROVED_INTENT";
-      }
-
-      if (mappedIntent === PROJECT_STATUS.REVISION_REQUESTED) {
-        if (!feedback) {
-          throw new AppError(
-            "Bắt buộc phải cung cấp lý do (feedback) khi yêu cầu chỉnh sửa",
-            400
-          );
-        }
-
-        const currentRevisions = project.revisionCount || 0;
-        if (currentRevisions >= 2) {
-          finalStatus = PROJECT_STATUS.REJECTED;
-          updateData.status = finalStatus;
-          updateData.rejectionReason =
-            "Đã vượt quá giới hạn 2 lần yêu cầu sửa đổi. Dự án tự động bị từ chối.";
-        } else {
-          finalStatus = PROJECT_STATUS.REVISION_REQUESTED;
-          updateData.status = finalStatus;
-          updateData.revisionCount = currentRevisions + 1;
-          updateData.rejectionReason = feedback;
-          updateData.revisionRequestedAt = new Date();
-
-          if (this.jobQueue) {
-            this.jobQueue
-              .addJob(
-                "project-maintenance",
-                "check-revision-timeout",
-                { projectId },
-                { delay: 14 * 24 * 60 * 60 * 1000 }
-              )
-              .catch((err) =>
-                console.error(
-                  `[Queue] Failed to schedule timeout for ${projectId}`,
-                  err.message
-                )
-              );
-          }
-        }
-      }
-
-      if (mappedIntent === PROJECT_STATUS.REJECTED) {
-        if (!feedback && !updateData.rejectionReason) {
-          throw new AppError("Bắt buộc phải có lý do từ chối", 400);
-        }
-
-        finalStatus = PROJECT_STATUS.REJECTED;
-        updateData.status = finalStatus;
-        updateData.rejectionReason = updateData.rejectionReason || feedback;
-
+      if (finalStatus === PROJECT_STATUS.REJECTED) {
         const coolingPeriodEnd = new Date();
         coolingPeriodEnd.setDate(coolingPeriodEnd.getDate() + 7);
         userUpdate = { coolingPeriodEnd };
-      }
-
-      if (mappedIntent === "APPROVED_INTENT") {
-        finalStatus =
-          project.projectType === PROJECT_TYPE.FUNDED
-            ? PROJECT_STATUS.FUNDING
-            : PROJECT_STATUS.RECRUITING;
-
-        updateData.status = finalStatus;
-        updateData.approvedBy = adminId;
-        updateData.approvedAt = new Date();
-      }
-
-      if (!finalStatus) {
-        throw new AppError("Trạng thái không hợp lệ", 400);
       }
 
       const updatedProject = await this.projectRepository.updateById(
@@ -215,17 +438,65 @@ class AdminService {
         session
       );
 
+      if (!updatedProject) {
+        throw new AppError("Failed to update project status.", 500);
+      }
+
       if (userUpdate) {
         await this.userRepository.updateById(
-          project.organizerId,
+          this._extractObjectId(project.organizerId),
           userUpdate,
           session
         );
       }
 
-      if (String(updatedProject?.status) === PROJECT_STATUS.ACTIVE) {
-        await this._syncProjectConversationOnActive(updatedProject, adminId);
+      if (finalStatus === PROJECT_STATUS.REVISION_REQUESTED && this.jobQueue) {
+        this.jobQueue
+          .addJob(
+            "project-maintenance",
+            "check-revision-timeout",
+            { projectId },
+            { delay: 14 * 24 * 60 * 60 * 1000 }
+          )
+          .catch((err) =>
+            console.error(
+              `[Queue] Failed to schedule timeout for ${projectId}`,
+              err.message
+            )
+          );
       }
+
+      if (this._shouldEnsureProjectConversation(updatedProject?.status)) {
+        await this._syncProjectConversation(updatedProject, adminId);
+      }
+
+      await this._logAdminAction({
+        actorId: adminId,
+        actorRole: "admin",
+        targetType: "project",
+        targetId: updatedProject._id,
+        action: this._buildProjectActionName(currentStatus, finalStatus),
+        reason:
+          normalizedFeedback ||
+          (isApproveAction
+            ? `Approve project to ${finalStatus}`
+            : `Change status to ${finalStatus}`),
+        previousState: {
+          status: currentStatus,
+          projectType: project.projectType,
+          title: project.title,
+        },
+        nextState: {
+          status: finalStatus,
+          projectType: updatedProject.projectType,
+          title: updatedProject.title,
+        },
+        metadata: {
+          projectTitle: updatedProject.title,
+          projectType: updatedProject.projectType,
+          organizerId: this._extractObjectId(updatedProject.organizerId),
+        },
+      });
 
       this._emitProjectStatusUpdated({
         project: updatedProject,
@@ -235,97 +506,220 @@ class AdminService {
 
       return updatedProject;
     });
-  };
+  }
 
-  deleteProject = async (projectId) => {
-    const project = await this.projectRepository.deleteById(projectId);
-    if (!project) throw new AppError("Không tìm thấy dự án", 404);
-    return project;
-  };
+  async deleteProject(projectId, reason, adminId = null) {
+    const normalizedReason = this._ensureReason(reason);
 
-  getDashboardStats = async () => {
-    return await this.adminRepository.getSystemStats();
-  };
-
-  getUsers = async (query = null) => {
-    if (query && (query.search || query.page || query.limit || query.role)) {
-      return await this.adminRepository.findUsers(query);
+    const project = await this.projectRepository.findById(projectId);
+    if (!project) {
+      throw new AppError("Project not found.", 404);
     }
 
-    return await this.adminRepository.findAllUsers();
-  };
+    const deletedProject = await this.projectRepository.deleteById(projectId);
+    if (!deletedProject) {
+      throw new AppError("Failed to delete project.", 500);
+    }
 
-  getProjects = async () => {
+    await this._logAdminAction({
+      actorId: adminId,
+      actorRole: "admin",
+      targetType: "project",
+      targetId: project._id,
+      action: "DELETE_PROJECT",
+      reason: normalizedReason,
+      previousState: {
+        status: project.status,
+        projectType: project.projectType,
+        title: project.title,
+      },
+      nextState: {
+        status: "DELETED",
+        projectType: project.projectType,
+        title: project.title,
+      },
+      metadata: {
+        projectTitle: project.title,
+        projectType: project.projectType,
+        organizerId: this._extractObjectId(project.organizerId),
+      },
+    });
+
+    return deletedProject;
+  }
+
+  async getDashboardStats() {
+    return this.adminRepository.getSystemStats();
+  }
+
+  async getUsers(query = null) {
+    if (query && (query.search || query.page || query.limit || query.role)) {
+      return this.adminRepository.findUsers(query);
+    }
+
+    return this.adminRepository.findAllUsers();
+  }
+
+  async getActionLogs(query = {}) {
+    if (!this.adminRepository?.findAdminActionLogs) {
+      throw new AppError("Admin action log repository is not available.", 500);
+    }
+
+    return this.adminRepository.findAdminActionLogs(query);
+  }
+
+  async getProjects(query = {}) {
+    if (typeof this.adminRepository.findProjects === "function") {
+      return this.adminRepository.findProjects(query);
+    }
+
+    if (typeof this.adminRepository.findAllProjects === "function") {
+      return this.adminRepository.findAllProjects(query);
+    }
+
     if (typeof this.adminRepository.findProjectsForReview === "function") {
-      return await this.adminRepository.findProjectsForReview({
+      return this.adminRepository.findProjectsForReview({
         skip: 0,
         limit: 50,
       });
     }
 
-    return await this.adminRepository.findProjects();
-  };
+    return [];
+  }
 
-  getReports = async () => {
-    return await this.adminRepository.findAllReports();
-  };
+  async getReports() {
+    return this.adminRepository.findAllReports();
+  }
 
-  toggleUserBan = async (userId) => {
+  async toggleUserBan(userId, reason, actorId = null, actorRole = "admin") {
+    const normalizedReason = this._ensureReason(reason);
+
     const user = await User.findById(userId);
-    if (!user) throw new Error("User not found");
+    if (!user) {
+      throw new AppError("User not found.", 404);
+    }
+
+    const previousState = {
+      status: user.status || null,
+      isActive: user.isActive,
+      isVerified: user.isVerified,
+    };
 
     const nextStatus = user.isActive ? "banned" : "active";
+
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: { isActive: !user.isActive, status: nextStatus } },
       { new: true }
     );
 
+    await this._logAdminAction({
+      actorId,
+      actorRole,
+      targetType: "user",
+      targetId: updatedUser._id,
+      action: nextStatus === "banned" ? "BAN_USER" : "UNBAN_USER",
+      reason: normalizedReason,
+      previousState,
+      nextState: {
+        status: updatedUser.status || null,
+        isActive: updatedUser.isActive,
+        isVerified: updatedUser.isVerified,
+      },
+      metadata: {
+        email: updatedUser.email,
+        fullName: updatedUser.fullName,
+      },
+    });
+
     return updatedUser;
-  };
+  }
 
-  verifyUser = async (userId, isVerified) => {
-    const user = await User.findByIdAndUpdate(
-      userId,
-      { $set: { isVerified: Boolean(isVerified) } },
-      { new: true }
-    );
+  async updateUserStatus(
+    userId,
+    status,
+    reason,
+    actorId = null,
+    actorRole = "admin"
+  ) {
+    const normalizedReason = this._ensureReason(reason);
+    const normalizedStatus = String(status || "").trim().toLowerCase();
 
-    if (!user) throw new Error("User not found");
-    return user;
-  };
-
-  updateUserStatus = async (userId, status) => {
-    const allowed = new Set(["active", "inactive", "banned"]);
-    if (!allowed.has(status)) {
-      throw new Error("Invalid user status");
+    const allowedStatuses = new Set(["active", "inactive", "banned"]);
+    if (!allowedStatuses.has(normalizedStatus)) {
+      throw new AppError("Invalid user status.", 400);
     }
 
-    const isActive = status !== "banned";
+    const existingUser = await User.findById(userId);
+    if (!existingUser) {
+      throw new AppError("User not found.", 404);
+    }
+
+    const isActive = normalizedStatus !== "banned";
+
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      { $set: { status, isActive } },
+      { $set: { status: normalizedStatus, isActive } },
       { new: true }
     );
 
-    if (!updatedUser) throw new Error("User not found");
-    return updatedUser;
-  };
+    await this._logAdminAction({
+      actorId,
+      actorRole,
+      targetType: "user",
+      targetId: updatedUser._id,
+      action: "UPDATE_USER_STATUS",
+      reason: normalizedReason,
+      previousState: {
+        status: existingUser.status || null,
+        isActive: existingUser.isActive,
+        isVerified: existingUser.isVerified,
+      },
+      nextState: {
+        status: updatedUser.status || null,
+        isActive: updatedUser.isActive,
+        isVerified: updatedUser.isVerified,
+      },
+      metadata: {
+        email: updatedUser.email,
+        fullName: updatedUser.fullName,
+      },
+    });
 
-  resolveReportWithActions = async (reportId, actions, note) => {
+    return updatedUser;
+  }
+
+  async resolveReportWithActions(reportId, actions, note) {
     const report = await Report.findById(reportId).populate("target_ref");
-    if (!report) throw new Error("Report not found");
+    if (!report) {
+      throw new AppError("Report not found.", 404);
+    }
 
     if (actions.includes("delete_content")) {
-      if (report.target_type.toLowerCase() === "post" && report.target_ref) {
+      if (
+        String(report.target_type || "").toLowerCase() === "post" &&
+        report.target_ref
+      ) {
         await Post.findByIdAndDelete(report.target_ref._id);
       }
     }
 
     if (actions.includes("ban_user")) {
+      const targetType = String(report.target_type || "").toLowerCase();
+
+      if (targetType === "user" && report.target_ref?._id) {
+        throw new AppError(
+          "Banning a user from report resolution now requires a dedicated admin reason flow.",
+          400
+        );
+      }
+
       const authorId = report.target_ref?.author;
       if (authorId) {
-        await this.toggleUserBan(authorId);
+        throw new AppError(
+          "Banning an author from report resolution now requires a dedicated admin reason flow.",
+          400
+        );
       }
     }
 
@@ -335,10 +729,11 @@ class AdminService {
     report.reviewed_at = new Date();
 
     await report.save();
-    return report;
-  };
 
-  createSystemNotification = async ({
+    return report;
+  }
+
+  async createSystemNotification({
     title,
     message,
     targetType = "all",
@@ -348,37 +743,41 @@ class AdminService {
     severity = "info",
     actorId = null,
     actorRole = null,
-  }) => {
+  }) {
     if (String(actorRole || "").toLowerCase() !== "admin") {
-      throw new Error("Only admin can create system notifications.");
+      throw new AppError("Only admin can create system notifications.", 403);
     }
 
     const normalizedTitle = String(title || "").trim();
     const normalizedMessage = String(message || "").trim();
-    const normalizedSeverity = String(severity || "info").trim().toLowerCase();
-    const normalizedTargetType = String(targetType || "all").trim().toLowerCase();
+    const normalizedSeverity = String(severity || "info")
+      .trim()
+      .toLowerCase();
+    const normalizedTargetType = String(targetType || "all")
+      .trim()
+      .toLowerCase();
 
     if (!normalizedTitle) {
-      throw new Error("Title is required");
+      throw new AppError("Title is required.", 400);
     }
 
     if (!normalizedMessage) {
-      throw new Error("Message is required");
+      throw new AppError("Message is required.", 400);
     }
 
     if (!["info", "success", "warning", "error"].includes(normalizedSeverity)) {
-      throw new Error("Invalid severity");
+      throw new AppError("Invalid severity.", 400);
     }
 
     if (!["all", "role", "users", "custom"].includes(normalizedTargetType)) {
-      throw new Error("Invalid targetType");
+      throw new AppError("Invalid target type.", 400);
     }
 
     if (!this.eventBus || typeof this.eventBus.emit !== "function") {
-      throw new Error("Notification event bus is not available");
+      throw new AppError("Notification event bus is not available.", 500);
     }
 
-    const payload = {
+    const basePayload = {
       title: normalizedTitle,
       message: normalizedMessage,
       severity: normalizedSeverity,
@@ -389,11 +788,11 @@ class AdminService {
       const normalizedRole = String(role || "").trim().toLowerCase();
 
       if (!normalizedRole) {
-        throw new Error("Role is required when targetType is role");
+        throw new AppError("Role is required when targetType is 'role'.", 400);
       }
 
       await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
-        ...payload,
+        ...basePayload,
         role: normalizedRole,
       });
 
@@ -408,15 +807,20 @@ class AdminService {
 
     if (normalizedTargetType === "users") {
       const normalizedUserIds = [
-        ...new Set((userIds || []).map((id) => String(id).trim()).filter(Boolean)),
+        ...new Set(
+          (userIds || []).map((id) => String(id).trim()).filter(Boolean)
+        ),
       ];
 
       if (!normalizedUserIds.length) {
-        throw new Error("At least one userId is required when targetType is users");
+        throw new AppError(
+          "At least one user ID is required when targetType is 'users'.",
+          400
+        );
       }
 
       await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
-        ...payload,
+        ...basePayload,
         userIds: normalizedUserIds,
       });
 
@@ -440,15 +844,20 @@ class AdminService {
       ].filter((item) => ["user", "organizer", "admin"].includes(item));
 
       const normalizedUserIds = [
-        ...new Set((userIds || []).map((id) => String(id).trim()).filter(Boolean)),
+        ...new Set(
+          (userIds || []).map((id) => String(id).trim()).filter(Boolean)
+        ),
       ];
 
       if (!normalizedRoles.length && !normalizedUserIds.length) {
-        throw new Error("At least one role or one user is required for custom recipients");
+        throw new AppError(
+          "At least one role or one user is required for custom recipients.",
+          400
+        );
       }
 
       await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
-        ...payload,
+        ...basePayload,
         roles: normalizedRoles,
         userIds: normalizedUserIds,
       });
@@ -466,7 +875,7 @@ class AdminService {
     }
 
     await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
-      ...payload,
+      ...basePayload,
     });
 
     return {
@@ -475,7 +884,7 @@ class AdminService {
       title: normalizedTitle,
       message: normalizedMessage,
     };
-  };
+  }
 }
 
 export default AdminService;

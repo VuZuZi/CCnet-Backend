@@ -11,7 +11,7 @@ const documentPayloadSchema = z
     _id: z.string().optional(),
     publicId: z.string().optional(),
     blurHash: z.string().nullable().optional(),
-    
+
     fileName: z.string().min(1, "Tên file là bắt buộc"),
     mimeType: z.string().min(1, "Loại file là bắt buộc"),
     size: z.coerce.number().min(0).optional(),
@@ -67,21 +67,34 @@ export const submitOrganizerRequestSchema = z
   })
   .strict();
 
+export const approveOrganizerRequestSchema = z
+  .object({
+    reviewReason: z
+      .string()
+      .min(5, "Lý do duyệt tối thiểu 5 ký tự")
+      .max(1000, "Lý do duyệt tối đa 1000 ký tự"),
+  })
+  .strict();
+
 export const declineOrganizerRequestSchema = z
   .object({
-    reviewReason: z.string().min(5, "Lý do từ chối tối thiểu 5 ký tự").max(1000),
+    reviewReason: z
+      .string()
+      .min(5, "Lý do từ chối tối thiểu 5 ký tự")
+      .max(1000),
   })
   .strict();
 
 export const verifyDepositSchema = z
   .object({
-    amount: z.number({ 
-        required_error: "Vui lòng nhập số tiền xác nhận", 
-        invalid_type_error: "Số tiền phải là một con số" 
+    amount: z
+      .number({
+        required_error: "Vui lòng nhập số tiền xác nhận",
+        invalid_type_error: "Số tiền phải là một con số",
       })
       .int("Số tiền không hợp lệ")
       .positive("Số tiền phải lớn hơn 0")
       .min(1000, "Số tiền tối thiểu là 1000đ")
-      .max(5000, "Số tiền tối đa là 5000đ")
+      .max(5000, "Số tiền tối đa là 5000đ"),
   })
   .strict();

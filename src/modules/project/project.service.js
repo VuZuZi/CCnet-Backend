@@ -16,7 +16,7 @@ class ProjectService {
     helprequestRepository,
     notificationRepository,
     userRepository,
-    eventBus
+    eventBus,
   }) {
     this.projectRepository = projectRepository;
     this.mediaRepository = mediaRepository;
@@ -39,7 +39,10 @@ class ProjectService {
     const limits = KYC_TIER_LIMITS[tier];
 
     if (!limits || !limits.canCreateProject) {
-      throw new AppError(`Tài khoản Tier ${tier} không được phép tạo dự án. Vui lòng nâng cấp KYC.`, 403);
+      throw new AppError(
+        `Tài khoản Tier ${tier} không được phép tạo dự án. Vui lòng nâng cấp KYC.`,
+        403,
+      );
     }
 
     const start = new Date(project.startDate);
@@ -47,12 +50,18 @@ class ProjectService {
     const durationDays = (end - start) / (1000 * 60 * 60 * 24);
 
     if (limits.maxDurationDays !== null && durationDays > limits.maxDurationDays) {
-      throw new AppError(`Tier ${tier} chỉ được tạo dự án tối đa ${limits.maxDurationDays} ngày (Dự án của bạn: ${Math.ceil(durationDays)} ngày).`, 403);
+      throw new AppError(
+        `Tier ${tier} chỉ được tạo dự án tối đa ${limits.maxDurationDays} ngày (Dự án của bạn: ${Math.ceil(durationDays)} ngày).`,
+        403,
+      );
     }
 
     if (project.projectType === PROJECT_TYPE.FUNDED && limits.maxFundingCap !== null) {
       if (project.targetAmount > limits.maxFundingCap) {
-        throw new AppError(`Tier ${tier} chỉ được gọi vốn tối đa ${limits.maxFundingCap.toLocaleString('vi-VN')} VND.`, 403);
+        throw new AppError(
+          `Tier ${tier} chỉ được gọi vốn tối đa ${limits.maxFundingCap.toLocaleString("vi-VN")} VND.`,
+          403,
+        );
       }
     }
 
@@ -61,7 +70,10 @@ class ProjectService {
       const concurrent = stats.activeProjects + stats.pendingProjects;
 
       if (concurrent >= limits.maxConcurrentProjects) {
-        throw new AppError(`Tier ${tier} chỉ được phép chạy song song tối đa ${limits.maxConcurrentProjects} dự án.`, 403);
+        throw new AppError(
+          `Tier ${tier} chỉ được phép chạy song song tối đa ${limits.maxConcurrentProjects} dự án.`,
+          403,
+        );
       }
     }
   }
@@ -74,8 +86,8 @@ class ProjectService {
     const newItemsToCheck = [];
 
     for (const item of mediaArray) {
-      if (item._id) idsToCheck.push(item._id);
-      else if (item.publicId && item.url) newItemsToCheck.push(item);
+      if (item?._id) idsToCheck.push(item._id);
+      else if (item?.publicId && item?.url) newItemsToCheck.push(item);
     }
 
     if (idsToCheck.length > 0) {
@@ -88,11 +100,8 @@ class ProjectService {
 
     if (newItemsToCheck.length > 0) {
       const publicIds = newItemsToCheck.map((m) => m.publicId);
-      const existingMedias =
-        await this.mediaRepository.findManyByPublicIds(publicIds);
-      const existingPublicIdMap = new Map(
-        existingMedias.map((m) => [m.publicId, m]),
-      );
+      const existingMedias = await this.mediaRepository.findManyByPublicIds(publicIds);
+      const existingPublicIdMap = new Map(existingMedias.map((m) => [m.publicId, m]));
 
       for (const item of newItemsToCheck) {
         const existing = existingPublicIdMap.get(item.publicId);
@@ -113,7 +122,7 @@ class ProjectService {
             width: item.width || 0,
             height: item.height || 0,
             uploadedBy: organizerId,
-            context: context,
+            context,
           });
         }
       }
@@ -130,25 +139,38 @@ class ProjectService {
     if (!project) throw new AppError("Không tìm thấy dự án.", 404);
 
     if (project.organizerId.toString() !== organizerId.toString()) {
-      throw new AppError("Bạn không có quyền thực hiện hành động này trên dự án của người khác.", 403);
+      throw new AppError(
+        "Bạn không có quyền thực hiện hành động này trên dự án của người khác.",
+        403,
+      );
     }
 
     if (project.status !== PROJECT_STATUS.DRAFT) {
-      throw new AppError("Chỉ có thể Gửi duyệt dự án đang ở trạng thái Bản nháp (DRAFT).", 400);
+      throw new AppError(
+        "Chỉ có thể Gửi duyệt dự án đang ở trạng thái Bản nháp (DRAFT).",
+        400,
+      );
     }
 
     if (!project.startDate || !project.endDate) {
-      throw new AppError("Bắt buộc phải cấu hình Ngày bắt đầu và Ngày kết thúc.", 400);
+      throw new AppError(
+        "Bắt buộc phải cấu hình Ngày bắt đầu và Ngày kết thúc.",
+        400,
+      );
     }
 
     const projectObj = project.toObject ? project.toObject() : project;
     const validationResult = projectCompleteSchema.safeParse(projectObj);
-    
+
     if (!validationResult.success) {
       const issues = validationResult.error.issues || validationResult.error.errors;
-      const firstError = issues && issues.length > 0 ? issues[0].message : "Dữ liệu không hợp lệ";
-      
-      throw new AppError(`Dự án chưa đủ điều kiện gửi duyệt: ${firstError}`, 400);
+      const firstError =
+        issues && issues.length > 0 ? issues[0].message : "Dữ liệu không hợp lệ";
+
+      throw new AppError(
+        `Dự án chưa đủ điều kiện gửi duyệt: ${firstError}`,
+        400,
+      );
     }
 
     await this._enforceKycTierCaps(projectObj, organizerId);
@@ -156,23 +178,30 @@ class ProjectService {
     const updatedProject = await this.projectRepository.transitionStatus(
       projectId,
       PROJECT_STATUS.DRAFT,
-      PROJECT_STATUS.PENDING_APPROVAL
+      PROJECT_STATUS.PENDING_APPROVAL,
     );
 
     if (!updatedProject) {
-      throw new AppError("Xung đột hệ thống: Dự án đã bị đổi trạng thái bởi một phiên làm việc khác.", 409);
+      throw new AppError(
+        "Xung đột hệ thống: Dự án đã bị đổi trạng thái bởi một phiên làm việc khác.",
+        409,
+      );
     }
 
-    this.jobQueue.addJob("project-ai-scan", "scan-risk", {
-      projectId: updatedProject._id,
-      title: updatedProject.title,
-      description: updatedProject.description,
-    }).catch(err => console.error(`[Queue Error] AI Scan failed for ${projectId}:`, err.message));
+    this.jobQueue
+      .addJob("project-ai-scan", "scan-risk", {
+        projectId: updatedProject._id,
+        title: updatedProject.title,
+        description: updatedProject.description,
+      })
+      .catch((err) =>
+        console.error(`[Queue Error] AI Scan failed for ${projectId}:`, err.message),
+      );
 
     if (this.eventBus) {
       this.eventBus.emit(DOMAIN_EVENTS.PROJECT_SUBMITTED_FOR_APPROVAL, {
         projectId: updatedProject._id,
-        organizerId: organizerId,
+        organizerId,
         projectType: updatedProject.projectType,
         title: updatedProject.title,
       });
@@ -191,7 +220,9 @@ class ProjectService {
 
   async getExploreProjects(queryParams) {
     const { page = 1, limit = 9, category, location } = queryParams;
-    const skip = (Math.max(1, page) - 1) * Math.max(1, limit);
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.max(1, Number(limit) || 9);
+    const skip = (safePage - 1) * safeLimit;
 
     if (skip > 5000) {
       throw new AppError(
@@ -204,26 +235,24 @@ class ProjectService {
     let textSearch = null;
 
     if (category) filter.category = category;
-    if (location) {
-      textSearch = location;
-    }
+    if (location) textSearch = location;
 
     const result = await this.projectRepository.findAllProjects({
       filter,
       skip,
-      limit,
+      limit: safeLimit,
       textSearch,
     });
 
-    const totalPages = Math.ceil(result.total / limit);
+    const totalPages = Math.ceil(result.total / safeLimit);
 
     return {
       projects: result.projects,
       pagination: {
         totalItems: result.total,
-        currentPage: Number(page),
+        currentPage: safePage,
         totalPages,
-        hasNextPage: page < totalPages,
+        hasNextPage: safePage < totalPages,
       },
     };
   }
@@ -237,28 +266,39 @@ class ProjectService {
     const redisKey = `project:${projectId}:views`;
     this.redis
       .incr(redisKey)
-      .catch((err) => console.error(`[Redis Error]:`, err.message));
+      .catch((err) => console.error("[Redis Error]:", err.message));
 
     let isFollowing = false;
     let isFollowingOrganizer = false;
 
     if (userId && this.followRepository) {
-      isFollowing = await this.followRepository.existsProjectFollow(
-        userId,
-        projectId,
-      );
+      isFollowing = await this.followRepository.existsProjectFollow(userId, projectId);
 
       const orgId = project.organizerId?._id || project.organizerId;
       if (orgId) {
-        isFollowingOrganizer = await this.followRepository.exists(
-          userId,
-          orgId,
-        );
+        isFollowingOrganizer = await this.followRepository.exists(userId, orgId);
       }
     }
 
     const projectData = project.toObject ? project.toObject() : project;
     return { ...projectData, isFollowing, isFollowingOrganizer };
+  }
+
+  // Draft detail riêng cho màn Organizer edit.
+  // Giữ nguyên getDetail public, chỉ bổ sung thêm nhánh private để tách vai trò rõ ràng hơn.
+  async getDraftDetail(projectId, organizerId) {
+    const project = await this.projectRepository.findByIdWithDetails(projectId);
+
+    if (!project) {
+      throw new AppError("Không tìm thấy dự án hoặc dự án đã bị xóa", 404);
+    }
+
+    const ownerId = project.organizerId?._id || project.organizerId;
+    if (String(ownerId) !== String(organizerId)) {
+      throw new AppError("Bạn không có quyền truy cập bản nháp này", 403);
+    }
+
+    return project;
   }
 
   async getWorkspaceStats(organizerId) {
@@ -273,13 +313,15 @@ class ProjectService {
 
   async getWorkspaceProjects(organizerId, queryParams) {
     const { page = 1, limit = 10, status = "ALL" } = queryParams;
-    const skip = (Math.max(1, page) - 1) * Math.max(1, limit);
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.max(1, Number(limit) || 10);
+    const skip = (safePage - 1) * safeLimit;
 
     const result = await this.projectRepository.findOrganizerProjects({
       organizerId,
       status,
       skip,
-      limit,
+      limit: safeLimit,
     });
 
     const formattedProjects = result.projects.map((project) => {
@@ -308,24 +350,24 @@ class ProjectService {
         ...project,
         currentMilestone: currentMilestone
           ? {
-            title: currentMilestone.title,
-            targetAmount: currentMilestone.targetAmount,
-            status: currentMilestone.status,
-            index: milestoneIndex,
-          }
+              title: currentMilestone.title,
+              targetAmount: currentMilestone.targetAmount,
+              status: currentMilestone.status,
+              index: milestoneIndex,
+            }
           : null,
       };
     });
 
-    const totalPages = Math.ceil(result.total / limit);
+    const totalPages = Math.ceil(result.total / safeLimit);
 
     return {
       projects: formattedProjects,
       pagination: {
         totalItems: result.total,
-        currentPage: Number(page),
+        currentPage: safePage,
         totalPages,
-        hasNextPage: page < totalPages,
+        hasNextPage: safePage < totalPages,
       },
     };
   }
@@ -353,119 +395,102 @@ class ProjectService {
     }
 
     const { validMediaIds: validCoverIds, newMediaToInsert: newCoverMedia } =
-      await this._processMediaPayload(
-        coverPayload,
-        organizerId,
-        "project_cover",
-      );
+      await this._processMediaPayload(coverPayload, organizerId, "project_cover");
 
     const { validMediaIds: validDocIds, newMediaToInsert: newDocMedia } =
-      await this._processMediaPayload(
-        docsPayload,
-        organizerId,
-        "project_document",
-      );
+      await this._processMediaPayload(docsPayload, organizerId, "project_document");
 
     const allNewMediaToInsert = [...newCoverMedia, ...newDocMedia];
     const publicIdsToRollback = allNewMediaToInsert.map((m) => m.publicId);
 
     try {
-      const result = await this.transactionManager.runInTransaction(
-        async (session) => {
-          let finalCoverMediaData = null;
-          const finalDocumentIds = [...validDocIds];
+      const result = await this.transactionManager.runInTransaction(async (session) => {
+        let finalCoverMediaData = null;
+        const finalDocumentIds = [...validDocIds];
 
-          if (allNewMediaToInsert.length > 0) {
-            const insertedMedia = await this.mediaRepository.createMany(
-              allNewMediaToInsert,
-              session,
-            );
-
-            insertedMedia.forEach((media) => {
-              if (media.context === "project_cover") {
-                finalCoverMediaData = {
-                  url: media.url,
-                  publicId: media.publicId,
-                  mediaType: media.mimetype.startsWith("video")
-                    ? "video"
-                    : "image",
-                };
-              } else {
-                finalDocumentIds.push(media._id.toString());
-              }
-            });
-          }
-
-          if (!finalCoverMediaData && validCoverIds.length > 0) {
-            const existingCover = await this.mediaRepository.findById(
-              validCoverIds[0],
-            );
-            if (existingCover) {
-              finalCoverMediaData = {
-                url: existingCover.url,
-                publicId: existingCover.publicId,
-                mediaType: existingCover.mimetype.startsWith("video")
-                  ? "video"
-                  : "image",
-              };
-            }
-          }
-
-          const { coverMedia: _, documents: __, ...otherProjectData } = projectData;
-          const newProjectData = {
-            ...otherProjectData,
-            stats: { targetVolunteers, currentVolunteers: 0 },
-            organizerId,
-            coverMedia: finalCoverMediaData || undefined,
-            documents: [...new Set(finalDocumentIds)],
-            status: PROJECT_STATUS.DRAFT,
-            currentAmount: 0,
-          };
-
-          const createdProject = await this.projectRepository.create(
-            newProjectData,
+        if (allNewMediaToInsert.length > 0) {
+          const insertedMedia = await this.mediaRepository.createMany(
+            allNewMediaToInsert,
             session,
           );
 
-          if (projectData.fromHelpRequestId && this.helpRequestRepository) {
-            try {
-              const linkedHelpRequest = await this.helpRequestRepository.findById(projectData.fromHelpRequestId);
-
-              await this.helpRequestRepository.updateById(
-                projectData.fromHelpRequestId,
-                { linkedProjectId: createdProject._id },
-                session
-              );
-
-              if (linkedHelpRequest?.requesterId && this.notificationRepository) {
-                const organizerUser = await this.userRepository.findById(organizerId);
-
-                await this.notificationRepository.create({
-                  recipientId: linkedHelpRequest.requesterId,
-                  actorId: organizerId,
-                  type: 'help_request_assignment_responded',
-                  title: `${organizerUser?.fullName || 'Organizer'} đã đồng ý host yêu cầu của bạn`,
-                  message: `Yêu cầu "${linkedHelpRequest.title}" đã được chấp nhận và chuyển thành dự án.`,
-                  actionUrl: `/projects/${createdProject._id}`,
-                  metadata: {
-                    helpRequestId: String(linkedHelpRequest._id),
-                    projectId: String(createdProject._id),
-                    organizerId: String(organizerId),
-                    action: 'hosted',
-                  },
-                });
-              }
-            } catch (err) {
-              console.error(
-                "[Project Creation] Failed to link help request:",
-                err.message,
-              );
+          insertedMedia.forEach((media) => {
+            if (media.context === "project_cover") {
+              finalCoverMediaData = {
+                url: media.url,
+                publicId: media.publicId,
+                mediaType: media.mimetype.startsWith("video") ? "video" : "image",
+              };
+            } else {
+              finalDocumentIds.push(media._id.toString());
             }
-          }
+          });
+        }
 
-          return createdProject;
-        },
-      );
+        if (!finalCoverMediaData && validCoverIds.length > 0) {
+          const existingCover = await this.mediaRepository.findById(validCoverIds[0]);
+          if (existingCover) {
+            finalCoverMediaData = {
+              url: existingCover.url,
+              publicId: existingCover.publicId,
+              mediaType: existingCover.mimetype.startsWith("video") ? "video" : "image",
+            };
+          }
+        }
+
+        const { coverMedia: _, documents: __, ...otherProjectData } = projectData;
+        const newProjectData = {
+          ...otherProjectData,
+          stats: { targetVolunteers, currentVolunteers: 0 },
+          organizerId,
+          coverMedia: finalCoverMediaData || undefined,
+          documents: [...new Set(finalDocumentIds)],
+          status: PROJECT_STATUS.DRAFT,
+          currentAmount: 0,
+        };
+
+        const createdProject = await this.projectRepository.create(newProjectData, session);
+
+        if (projectData.fromHelpRequestId && this.helpRequestRepository) {
+          try {
+            const linkedHelpRequest = await this.helpRequestRepository.findById(
+              projectData.fromHelpRequestId,
+            );
+
+            await this.helpRequestRepository.updateById(
+              projectData.fromHelpRequestId,
+              { linkedProjectId: createdProject._id },
+              session,
+            );
+
+            if (linkedHelpRequest?.requesterId && this.notificationRepository) {
+              const organizerUser = await this.userRepository.findById(organizerId);
+
+              await this.notificationRepository.create({
+                recipientId: linkedHelpRequest.requesterId,
+                actorId: organizerId,
+                type: "help_request_assignment_responded",
+                title: `${organizerUser?.fullName || "Organizer"} đã đồng ý host yêu cầu của bạn`,
+                message: `Yêu cầu "${linkedHelpRequest.title}" đã được chấp nhận và chuyển thành dự án.`,
+                actionUrl: `/projects/${createdProject._id}`,
+                metadata: {
+                  helpRequestId: String(linkedHelpRequest._id),
+                  projectId: String(createdProject._id),
+                  organizerId: String(organizerId),
+                  action: "hosted",
+                },
+              });
+            }
+          } catch (err) {
+            console.error(
+              "[Project Creation] Failed to link help request:",
+              err.message,
+            );
+          }
+        }
+
+        return createdProject;
+      });
 
       return result;
     } catch (error) {
@@ -488,17 +513,18 @@ class ProjectService {
 
   async updateDraftProject(projectId, organizerId, updateData) {
     const existingProject = await this.projectRepository.findById(projectId);
-    if (!existingProject)
-      throw new AppError("Không tìm thấy bản nháp dự án", 404);
-    if (existingProject.organizerId.toString() !== organizerId.toString())
+    if (!existingProject) throw new AppError("Không tìm thấy bản nháp dự án", 404);
+    if (existingProject.organizerId.toString() !== organizerId.toString()) {
       throw new AppError("Bạn không có quyền", 403);
-    if (existingProject.status !== PROJECT_STATUS.DRAFT)
+    }
+    if (existingProject.status !== PROJECT_STATUS.DRAFT) {
       throw new AppError("Chỉ có thể chỉnh sửa dự án Nháp.", 400);
+    }
 
     let {
       deletedDocumentIds,
-      coverMedia: _,
-      documents: __,
+      coverMedia,
+      documents,
       ...finalUpdateData
     } = updateData;
 
@@ -520,29 +546,19 @@ class ProjectService {
       finalUpdateData["stats.targetVolunteers"] = 0;
     }
 
-    const coverPayload = Array.isArray(finalUpdateData.coverMedia)
-      ? finalUpdateData.coverMedia
-      : finalUpdateData.coverMedia
-        ? [finalUpdateData.coverMedia]
+    const coverPayload = Array.isArray(coverMedia)
+      ? coverMedia
+      : coverMedia
+        ? [coverMedia]
         : [];
 
-    const docsPayload = Array.isArray(finalUpdateData.documents)
-      ? finalUpdateData.documents
-      : [];
+    const docsPayload = Array.isArray(documents) ? documents : [];
 
     const { validMediaIds: validCoverIds, newMediaToInsert: newCoverMedia } =
-      await this._processMediaPayload(
-        coverPayload,
-        organizerId,
-        "project_cover",
-      );
+      await this._processMediaPayload(coverPayload, organizerId, "project_cover");
 
     const { validMediaIds: validDocIds, newMediaToInsert: newDocMedia } =
-      await this._processMediaPayload(
-        docsPayload,
-        organizerId,
-        "project_document",
-      );
+      await this._processMediaPayload(docsPayload, organizerId, "project_document");
 
     const allNewMediaToInsert = [...newCoverMedia, ...newDocMedia];
     const publicIdsToRollback = allNewMediaToInsert.map((m) => m.publicId);
@@ -566,9 +582,7 @@ class ProjectService {
                 finalCoverMediaData = {
                   url: media.url,
                   publicId: media.publicId,
-                  mediaType: media.mimetype.startsWith("video")
-                    ? "video"
-                    : "image",
+                  mediaType: media.mimetype.startsWith("video") ? "video" : "image",
                 };
               } else {
                 finalDocumentIds.add(media._id.toString());
@@ -577,17 +591,12 @@ class ProjectService {
           }
 
           if (!finalCoverMediaData && validCoverIds.length > 0) {
-            const existingCover = await this.mediaRepository.findById(
-              validCoverIds[0],
-            );
-
+            const existingCover = await this.mediaRepository.findById(validCoverIds[0]);
             if (existingCover) {
               finalCoverMediaData = {
                 url: existingCover.url,
                 publicId: existingCover.publicId,
-                mediaType: existingCover.mimetype.startsWith("video")
-                  ? "video"
-                  : "image",
+                mediaType: existingCover.mimetype.startsWith("video") ? "video" : "image",
               };
             }
           }
@@ -603,27 +612,22 @@ class ProjectService {
           if (finalCoverMediaData) {
             finalUpdateData.coverMedia = finalCoverMediaData;
           } else if (validCoverIds.length > 0) {
-            const existingCover = await this.mediaRepository.findById(
-              validCoverIds[0],
-            );
+            const existingCover = await this.mediaRepository.findById(validCoverIds[0]);
             if (existingCover) {
               finalUpdateData.coverMedia = {
                 url: existingCover.url,
                 publicId: existingCover.publicId,
-                mediaType: existingCover.mimetype.startsWith("video")
-                  ? "video"
-                  : "image",
+                mediaType: existingCover.mimetype.startsWith("video") ? "video" : "image",
               };
             }
           }
 
           if (deletedDocumentIds.length > 0) {
-            const mediaDocsToDelete =
-              await this.mediaRepository.findManyByIdsAndOwner(
-                deletedDocumentIds,
-                organizerId,
-                session,
-              );
+            const mediaDocsToDelete = await this.mediaRepository.findManyByIdsAndOwner(
+              deletedDocumentIds,
+              organizerId,
+              session,
+            );
 
             const actualIdsToDelete = mediaDocsToDelete.map((m) => m._id);
             mediaDocsToDelete.forEach((media) => {
@@ -686,10 +690,7 @@ class ProjectService {
             publicIds: publicIdsToRollback,
           })
           .catch((err) =>
-            console.error(
-              "[Queue Error] Lỗi đẩy job dọn rác rollback:",
-              err.message,
-            ),
+            console.error("[Queue Error] Lỗi đẩy job dọn rác rollback:", err.message),
           );
       }
 

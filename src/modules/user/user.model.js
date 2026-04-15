@@ -29,11 +29,23 @@ const userSchema = new mongoose.Schema(
     title: { type: String, default: 'Advocate' },
 
     isEmailVerified: { type: Boolean, default: false },
+
+    isVerified: { type: Boolean, default: false },
+
     role: { type: String, enum: ['user', 'admin', 'organizer', 'Organizer'], default: 'user' },
+
     coolingPeriodEnd: {
       type: Date,
       default: null
     },
+
+    status: {
+      type: String,
+      enum: ['active', 'inactive', 'banned'],
+      default: 'active',
+      index: true,
+    },
+
     isActive: { type: Boolean, default: true },
 
     kyc: {

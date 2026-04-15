@@ -1,9 +1,14 @@
 import AppError from "../../core/AppError.js";
-import fs from 'fs';
-import fsPromises from 'fs/promises';
+import fs from "fs";
+import fsPromises from "fs/promises";
 
 class ProjectFeedService {
-  constructor({ projectRepository, volunteerRepository, projectFeedRepository, cloudinaryProvider }) {
+  constructor({
+    projectRepository,
+    volunteerRepository,
+    projectFeedRepository,
+    cloudinaryProvider,
+  }) {
     this.projectRepository = projectRepository;
     this.volunteerRepository = volunteerRepository;
     this.projectFeedRepository = projectFeedRepository;
@@ -19,10 +24,12 @@ class ProjectFeedService {
   async _canInteract(project, userId) {
     if (!userId) return false;
     if (String(project.organizerId) === String(userId)) return true;
+
     const application = await this.volunteerRepository.application({
       volunteerId: userId,
       opportunityId: project._id,
     });
+
     return Boolean(application && application.status === "APPROVED");
   }
 
@@ -43,6 +50,7 @@ class ProjectFeedService {
       const likedByMe = userId
         ? (p.likedBy || []).some((id) => String(id) === String(userId))
         : false;
+
       return {
         ...p,
         author: p.authorId,
@@ -66,25 +74,15 @@ class ProjectFeedService {
   }
 
   async createPost(projectId, { userId, content = "", media = null }) {
-    console.log('[createPost] Start with params:', {
-      projectId: projectId.toString?.() || projectId,
-      userId: userId.toString?.() || userId,
-      contentLength: content?.length || 0,
-      media: media ? {
-        filename: media.filename,
-        mimetype: media.mimetype,
-        size: media.size,
-        hasPath: !!media.path
-      } : 'null'
-    });
-
     const project = await this._getProjectOrThrow(projectId);
     const can = await this._canInteract(project, userId);
-    if (!can)
+
+    if (!can) {
       throw new AppError(
         "Chỉ nhà tổ chức hoặc tình nguyện viên đã được duyệt mới có thể đăng bài.",
         403,
       );
+    }
 
     const trimmed = String(content || "").trim();
     if (!trimmed && !media) {
@@ -92,35 +90,28 @@ class ProjectFeedService {
     }
 
     let sanitizedMedia = [];
+
     if (media && media.path) {
       try {
-        console.log('[ProjectFeed] Uploading media:', {
-          filename: media.filename,
-          mimetype: media.mimetype,
-          size: media.size,
-          path: media.path
-        });
+        const uploadedUrl = await this.cloudinaryProvider.uploadImage(
+          media.path,
+          "projectFeed",
+        );
 
-        // Upload to Cloudinary
-        const uploadedUrl = await this.cloudinaryProvider.uploadImage(media.path, 'projectFeed');
-
-        console.log('[ProjectFeed] Media uploaded successfully:', {
-          url: uploadedUrl.secure_url,
-          publicId: uploadedUrl.public_id
-        });
-
-        sanitizedMedia = [{
-          url: uploadedUrl.secure_url,
-          publicId: uploadedUrl.public_id,
-          mediaType: media.mimetype?.startsWith('video') ? 'video' : 'image',
-        }];
+        sanitizedMedia = [
+          {
+            url: uploadedUrl.secure_url,
+            publicId: uploadedUrl.public_id,
+            mediaType: media.mimetype?.startsWith("video") ? "video" : "image",
+          },
+        ];
       } catch (error) {
-        console.error('[ProjectFeed] Error uploading media:', error);
         throw new AppError("Lỗi khi tải lên media. Vui lòng thử lại.", 500);
       } finally {
-        // Clean up temp file
         if (media.path && fs.existsSync(media.path)) {
-          fsPromises.unlink(media.path).catch(err => console.error('Error cleaning up temp file:', err));
+          fsPromises
+            .unlink(media.path)
+            .catch((err) => console.error("Error cleaning up temp file:", err));
         }
       }
     }
@@ -145,11 +136,13 @@ class ProjectFeedService {
   async createComment(projectId, postId, { userId, content }) {
     const project = await this._getProjectOrThrow(projectId);
     const can = await this._canInteract(project, userId);
-    if (!can)
+
+    if (!can) {
       throw new AppError(
         "Chỉ nhà tổ chức hoặc tình nguyện viên đã được duyệt mới có thể bình luận.",
         403,
       );
+    }
 
     const trimmed = String(content || "").trim();
     if (!trimmed) throw new AppError("Bình luận không được rỗng.", 400);
@@ -160,6 +153,7 @@ class ProjectFeedService {
       authorId: userId,
       content: trimmed,
     });
+
     await this.projectFeedRepository.incrementPostCommentsCount(postId, 1);
 
     const full = await this.projectFeedRepository.findCommentById(created._id);
@@ -173,6 +167,7 @@ class ProjectFeedService {
 
   async listComments(projectId, postId, { limit = 20, cursor = null, userId = null } = {}) {
     await this._getProjectOrThrow(projectId);
+
     const comments = await this.projectFeedRepository.listComments(postId, {
       limit,
       cursor,
@@ -196,6 +191,7 @@ class ProjectFeedService {
   async togglePostLike(projectId, postId, userId) {
     const project = await this._getProjectOrThrow(projectId);
     const can = await this._canInteract(project, userId);
+
     if (!can) throw new AppError("Bạn không có quyền thả tim.", 403);
 
     const result = await this.projectFeedRepository.togglePostLike(postId, userId);
@@ -215,6 +211,7 @@ class ProjectFeedService {
   async toggleCommentLike(projectId, commentId, userId) {
     const project = await this._getProjectOrThrow(projectId);
     const can = await this._canInteract(project, userId);
+
     if (!can) throw new AppError("Bạn không có quyền thả tim.", 403);
 
     const result = await this.projectFeedRepository.toggleCommentLike(
@@ -236,4 +233,3 @@ class ProjectFeedService {
 }
 
 export default ProjectFeedService;
-

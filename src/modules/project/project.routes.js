@@ -76,8 +76,6 @@ router.post("/:id/feed/posts/:postId/comments", authenticate, execute("createFee
 router.post("/:id/feed/posts/:postId/like", authenticate, execute("toggleFeedPostLike"));
 router.post("/:id/feed/comments/:commentId/like", authenticate, execute("toggleFeedCommentLike"));
 
-router.get("/:id", optionalAuthenticate, execute("getDetail"));
-
 router.post(
   "/",
   authenticate,
@@ -96,6 +94,15 @@ router.put(
   ensureKycActive,
   validateBody(updateDraftSchema),
   execute("updateDraft"),
+);
+
+// Route draft detail riêng cho Organizer edit.
+// Đặt trước "/:id" để không bị route public bắt mất.
+router.get(
+  "/:id/draft",
+  authenticate,
+  authorize("Organizer"),
+  execute("getDraftDetail"),
 );
 
 router.post(
@@ -125,5 +132,7 @@ router.post(
   validateBody(reportProjectSchema),
   execute("reportProject"),
 );
+
+router.get("/:id", optionalAuthenticate, execute("getDetail"));
 
 export default router;

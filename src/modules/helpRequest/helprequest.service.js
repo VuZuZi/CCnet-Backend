@@ -1,8 +1,11 @@
 import AppError from '../../core/AppError.js';
+import User from '../user/user.model.js';
 
 const toRadians = (value) => (value * Math.PI) / 180;
-
 const normalizeRole = (role = '') => role.toString().trim().toLowerCase();
+
+const PUBLIC_VISIBLE_STATUSES = ['VERIFIED', 'IN_PROGRESS', 'COMPLETED'];
+const ASSIGNABLE_STATUSES = ['VERIFIED', 'IN_PROGRESS'];
 
 const parseCoordinates = (value) => {
   if (!value) return null;
@@ -31,6 +34,7 @@ const parseCoordinates = (value) => {
     const match = value
       .trim()
       .match(/^\s*(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)\s*$/);
+
     if (match) {
       const lat = Number(match[1]);
       const lng = Number(match[2]);
@@ -76,6 +80,7 @@ const scoreRelevance = (helpRequest, organizer) => {
   const requestAddress = helpRequest?.location?.address?.toLowerCase() || '';
   const organizerLocation = organizer?.location?.toLowerCase() || '';
   const requestCategory = helpRequest?.category?.toLowerCase() || '';
+
   const profileText = [organizer?.headline, organizer?.about, ...(organizer?.skills || [])]
     .filter(Boolean)
     .join(' ')
@@ -101,6 +106,17 @@ const scoreRelevance = (helpRequest, organizer) => {
   return score;
 };
 
+const buildViewerContext = (viewer = null) => {
+  const role = normalizeRole(viewer?.role || '');
+  return {
+    id: viewer?.userId || viewer?.id || null,
+    role,
+    isAdmin: role === 'admin',
+    isOrganizer: role === 'organizer',
+    isAuthenticated: Boolean(viewer?.userId || viewer?.id),
+  };
+};
+
 export default class HelpRequestService {
   constructor({
     helprequestRepository,
@@ -120,7 +136,14 @@ export default class HelpRequestService {
     const helpRequestData = {
       ...data,
       requesterId: userId,
-      status: 'VERIFIED',
+      status: 'PENDING',
+      verifiedBy: null,
+      verifiedAt: null,
+      rejectionReason: null,
+      assignedByAdminId: null,
+      assignedOrganizerId: null,
+      assignedAt: null,
+      linkedProjectId: null,
     };
 
     const helpRequest = await this.helpRequestRepository.create(helpRequestData);
@@ -140,10 +163,13 @@ export default class HelpRequestService {
       assignedOrganizerId,
     } = filters;
 
+    const viewer = buildViewerContext(options.viewer);
     const query = { isDeleted: false };
 
     if (status) {
       query.status = status;
+    } else if (!viewer.isAdmin) {
+      query.status = { $in: PUBLIC_VISIBLE_STATUSES };
     }
 
     if (category) {
@@ -163,10 +189,23 @@ export default class HelpRequestService {
     }
 
     if (search) {
+      const keyword = String(search).trim();
+      const regex = { $regex: keyword, $options: 'i' };
+
+      const matchedRequesters = await User.find({
+        $or: [{ fullName: regex }, { email: regex }, { username: regex }],
+      })
+        .select('_id')
+        .lean()
+        .exec();
+
+      const requesterIds = matchedRequesters.map((user) => user._id);
+
       query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { story: { $regex: search, $options: 'i' } },
-        { 'location.address': { $regex: search, $options: 'i' } },
+        { title: regex },
+        { story: regex },
+        { 'location.address': regex },
+        ...(requesterIds.length ? [{ requesterId: { $in: requesterIds } }] : []),
       ];
     }
 
@@ -179,11 +218,11 @@ export default class HelpRequestService {
   async getMyHelpRequests(userId, filters = {}, options = {}) {
     return this.getHelpRequests(
       { ...filters, requesterId: userId },
-      options
+      { ...options, viewer: { userId, role: 'user' } }
     );
   }
 
-  async getHelpRequestById(id, userId = null) {
+  async getHelpRequestById(id, viewer = null) {
     const helpRequest = await this.helpRequestRepository.findById(id, {
       populate: ['requester', 'verifier', 'assignedOrganizer', 'linkedProject'],
     });
@@ -192,7 +231,30 @@ export default class HelpRequestService {
       throw new AppError('Help request not found', 404);
     }
 
-    return helpRequest;
+    const context = buildViewerContext(viewer);
+
+    if (context.isAdmin) {
+      return helpRequest;
+    }
+
+    if (PUBLIC_VISIBLE_STATUSES.includes(helpRequest.status)) {
+      return helpRequest;
+    }
+
+    const requesterId = helpRequest.requesterId?._id || helpRequest.requesterId;
+    const assignedOrganizerId =
+      helpRequest.assignedOrganizerId?._id || helpRequest.assignedOrganizerId;
+
+    const canViewPrivate =
+      context.id &&
+      (String(requesterId) === String(context.id) ||
+        String(assignedOrganizerId) === String(context.id));
+
+    if (canViewPrivate) {
+      return helpRequest;
+    }
+
+    throw new AppError('Help request not found', 404);
   }
 
   async updateHelpRequest(id, userId, updateData) {
@@ -230,8 +292,13 @@ export default class HelpRequestService {
     }
 
     if (helpRequest.status === 'REJECTED') {
-      filteredData.status = 'VERIFIED';
+      filteredData.status = 'PENDING';
       filteredData.rejectionReason = null;
+      filteredData.verifiedBy = null;
+      filteredData.verifiedAt = null;
+      filteredData.assignedByAdminId = null;
+      filteredData.assignedOrganizerId = null;
+      filteredData.assignedAt = null;
     }
 
     const updated = await this.helpRequestRepository.updateById(id, filteredData);
@@ -258,8 +325,9 @@ export default class HelpRequestService {
 
     if (helpRequest.evidences?.length > 0) {
       const publicIds = helpRequest.evidences
-        .filter((e) => e.publicId)
-        .map((e) => e.publicId);
+        .filter((evidence) => evidence.publicId)
+        .map((evidence) => evidence.publicId);
+
       if (publicIds.length > 0) {
         await this.cloudinaryProvider.deleteMany(publicIds);
       }
@@ -300,38 +368,73 @@ export default class HelpRequestService {
     const updateData = {
       verifiedBy: adminId,
       verifiedAt: new Date(),
+      assignedByAdminId: null,
+      assignedOrganizerId: null,
+      assignedAt: null,
     };
 
     if (approved) {
       updateData.status = 'VERIFIED';
+      updateData.rejectionReason = null;
     } else {
       if (!rejectionReason) {
         throw new AppError('Rejection reason is required', 400);
       }
       updateData.status = 'REJECTED';
-      updateData.rejectionReason = rejectionReason;
+      updateData.rejectionReason = rejectionReason.trim();
     }
 
-    return this.helpRequestRepository.updateById(id, updateData);
+    const updated = await this.helpRequestRepository.updateById(id, updateData);
+
+    const requesterId = helpRequest.requesterId?._id || helpRequest.requesterId;
+
+    if (approved && requesterId) {
+      await this.createHelpRequestNotification({
+        type: 'HELP_REQUEST_VERIFIED',
+        title: 'NeedHelp request verified',
+        message: `Your NeedHelp request "${helpRequest.title}" has been verified.`,
+        recipientId: requesterId,
+        senderId: adminId,
+        link: `/need-help/${helpRequest._id}`,
+        metadata: {
+          helpRequestId: helpRequest._id.toString(),
+          action: 'verified',
+        },
+      });
+    }
+
+    if (!approved && requesterId) {
+      await this.createHelpRequestNotification({
+        type: 'HELP_REQUEST_REJECTED',
+        title: 'NeedHelp request needs revision',
+        message: `Your NeedHelp request "${helpRequest.title}" was rejected. Please review and resubmit.`,
+        recipientId: requesterId,
+        senderId: adminId,
+        link: `/need-help/${helpRequest._id}/edit`,
+        metadata: {
+          helpRequestId: helpRequest._id.toString(),
+          action: 'rejected',
+          rejectionReason: updateData.rejectionReason,
+        },
+      });
+    }
+
+    return updated;
   }
 
   async assignOrganizer(id, adminId, organizerId) {
-    console.log(`[ASSIGN] Starting assignment: requestId=${id}, organizerId=${organizerId}`);
-    
     const helpRequest = await this.helpRequestRepository.findById(id);
-    console.log(`[ASSIGN] Found request:`, { id: helpRequest?._id, title: helpRequest?.title, status: helpRequest?.status });
 
     if (!helpRequest || helpRequest.isDeleted) {
       throw new AppError('Help request not found', 404);
     }
 
-    if (!['VERIFIED', 'IN_PROGRESS'].includes(helpRequest.status)) {
+    if (!ASSIGNABLE_STATUSES.includes(helpRequest.status)) {
       throw new AppError('Help request must be verified before assigning organizer', 400);
     }
 
     const organizer = await this.userRepository.findById(organizerId);
-    console.log(`[ASSIGN] Found organizer:`, { id: organizer?._id, role: organizer?.role, fullName: organizer?.fullName });
-    
+
     if (!organizer) {
       throw new AppError('Organizer not found', 404);
     }
@@ -340,46 +443,45 @@ export default class HelpRequestService {
       throw new AppError('Selected user is not an organizer', 400);
     }
 
+    const wasAssignedBefore = Boolean(helpRequest.assignedOrganizerId);
+
     const updateData = {
       assignedByAdminId: adminId,
       assignedOrganizerId: organizerId,
       assignedAt: new Date(),
       status: 'VERIFIED',
     };
-    
-    console.log(`[ASSIGN] Updating with data:`, updateData);
-    
-    const updatedHelpRequest = await this.helpRequestRepository.updateById(id, updateData);
-    console.log(`[ASSIGN] Updated request:`, { 
-      id: updatedHelpRequest?._id,
-      assignedOrganizerId: updatedHelpRequest?.assignedOrganizerId,
-      status: updatedHelpRequest?.status
-    });
 
-    console.log(`[ASSIGN] Creating notification for organizer ${organizerId}`);
+    const updatedHelpRequest = await this.helpRequestRepository.updateById(id, updateData);
+
     await this.createHelpRequestNotification({
-      type: 'HELP_REQUEST_ASSIGNED',
-      title: 'New NeedHelp assignment',
-      message: `You were assigned to request: ${helpRequest.title}`,
+      type: wasAssignedBefore ? 'HELP_REQUEST_REASSIGNED' : 'HELP_REQUEST_ASSIGNED',
+      title: wasAssignedBefore
+        ? 'NeedHelp assignment updated'
+        : 'New NeedHelp assignment',
+      message: wasAssignedBefore
+        ? `You were reassigned to request: ${helpRequest.title}`
+        : `You were assigned to request: ${helpRequest.title}`,
       recipientId: organizerId,
       senderId: adminId,
-      link: `/need-help/${helpRequest._id}`,
-      metadata: { helpRequestId: helpRequest._id.toString(), action: 'assigned' },
+      link: `/organizer/need-help?highlight=${helpRequest._id}`,
+      metadata: {
+        helpRequestId: helpRequest._id.toString(),
+        action: wasAssignedBefore ? 'reassigned' : 'assigned',
+        requesterId: String(helpRequest.requesterId),
+      },
     });
-    console.log(`[ASSIGN] Notification created for organizer`);
 
-    console.log(`[ASSIGN] Assignment completed successfully`);
-    // Re-fetch with full populate so frontend gets assignedOrganizerId.fullName etc.
-    // If the refresh fails for any reason, fall back to the updated document so the
-    // assignment still succeeds instead of bubbling a 500 back to the admin UI.
     try {
-      const refreshedHelpRequest = await this.helpRequestRepository.findById(updatedHelpRequest._id, {
-        populate: ['requester', 'assignedOrganizer', 'linkedProject'],
-      });
+      const refreshedHelpRequest = await this.helpRequestRepository.findById(
+        updatedHelpRequest._id,
+        {
+          populate: ['requester', 'assignedOrganizer', 'linkedProject'],
+        }
+      );
 
       return refreshedHelpRequest || updatedHelpRequest;
-    } catch (error) {
-      console.error('[ASSIGN] Failed to refresh populated help request:', error.message);
+    } catch {
       return updatedHelpRequest;
     }
   }
@@ -395,7 +497,6 @@ export default class HelpRequestService {
     const limit = Number(filters.limit) > 0 ? Math.min(Number(filters.limit), 50) : 20;
 
     const organizers = await this.userRepository.findOrganizers({ search: searchText });
-
     const requestCoordinates = parseCoordinates(helpRequest?.location?.coordinates);
 
     const ranked = organizers
@@ -426,19 +527,15 @@ export default class HelpRequestService {
   }
 
   async getAssignedRequestsForOrganizer(organizerId, filters = {}, options = {}) {
-    console.log(`[QUERY-ASSIGNED] organizerId=${organizerId}, filters=`, filters);
-    
     const queryFilters = {
       ...filters,
       assignedOrganizerId: organizerId,
     };
-    console.log(`[QUERY-ASSIGNED] Final query filters:`, queryFilters);
-    
-    const result = await this.getHelpRequests(queryFilters, options);
-    
-    console.log(`[QUERY-ASSIGNED] Found ${result.total || result.length || 0} requests for organizer`);
-    
-    return result;
+
+    return this.getHelpRequests(queryFilters, {
+      ...options,
+      viewer: { userId: organizerId, role: 'organizer' },
+    });
   }
 
   async respondToAssignment(id, organizerId, action) {
@@ -459,77 +556,56 @@ export default class HelpRequestService {
     }
 
     const organizer = await this.userRepository.findById(organizerId);
-
     const isAccept = action === 'accept';
+
     const updateData = isAccept
       ? { status: 'IN_PROGRESS' }
       : { status: 'VERIFIED', assignedOrganizerId: null, assignedAt: null };
 
     const updatedRequest = await this.helpRequestRepository.updateById(id, updateData);
 
-    const actionLabel = isAccept ? 'accepted' : 'rejected';
-    const adminTitle = isAccept
-      ? 'Organizer accepted assignment'
-      : 'Organizer declined assignment';
-    const adminMessage = isAccept
-      ? `${organizer?.fullName || 'Organizer'} accepted the assignment for: ${helpRequest.title}`
-      : `${organizer?.fullName || 'Organizer'} declined the assignment for: ${helpRequest.title}`;
+    const adminRecipientId = helpRequest.assignedByAdminId || helpRequest.verifiedBy || null;
 
-    const requesterTitle = isAccept
-      ? `${organizer?.fullName || 'Organizer'} đã đồng ý host yêu cầu của bạn`
-      : null;
-    const requesterMessage = isAccept
-      ? `Yêu cầu "${helpRequest.title}" đã được chấp nhận và đang được triển khai.`
-      : null;
-
-    const adminRecipientId =
-      helpRequest.assignedByAdminId ||
-      helpRequest.verifiedBy ||
-      null;
     if (adminRecipientId) {
       await this.createHelpRequestNotification({
         type: 'HELP_REQUEST_ASSIGNMENT_RESPONDED',
-        title: adminTitle,
-        message: adminMessage,
+        title: isAccept
+          ? 'Organizer accepted assignment'
+          : 'Organizer declined assignment',
+        message: isAccept
+          ? `${organizer?.fullName || 'Organizer'} accepted the assignment for: ${helpRequest.title}`
+          : `${organizer?.fullName || 'Organizer'} declined the assignment for: ${helpRequest.title}`,
         recipientId: adminRecipientId,
         senderId: organizerId,
-        link: `/need-help/${helpRequest._id}`,
+        link: `/admin/need-help/${helpRequest._id}`,
         metadata: {
           helpRequestId: helpRequest._id.toString(),
-          action: actionLabel,
+          action: isAccept ? 'accepted' : 'rejected',
           organizerId: organizerId.toString(),
         },
       });
     }
 
-    if (isAccept && helpRequest.requesterId) {
+    if (helpRequest.requesterId) {
       await this.createHelpRequestNotification({
         type: 'HELP_REQUEST_ASSIGNMENT_RESPONDED',
-        title: requesterTitle,
-        message: requesterMessage,
+        title: isAccept
+          ? `${organizer?.fullName || 'Organizer'} accepted your NeedHelp request`
+          : `${organizer?.fullName || 'Organizer'} could not take your NeedHelp request`,
+        message: isAccept
+          ? `Your request "${helpRequest.title}" is now being handled.`
+          : `Your request "${helpRequest.title}" is waiting for a new organizer assignment.`,
         recipientId: helpRequest.requesterId,
         senderId: organizerId,
         link: `/need-help/${helpRequest._id}`,
         metadata: {
           helpRequestId: helpRequest._id.toString(),
-          action: actionLabel,
+          action: isAccept ? 'accepted' : 'rejected',
         },
       });
     }
 
     return updatedRequest;
-  }
-
-  async linkProject(id, projectId) {
-    const helpRequest = await this.helpRequestRepository.findById(id);
-
-    if (!helpRequest || helpRequest.isDeleted) {
-      throw new AppError('Help request not found', 404);
-    }
-
-    return this.helpRequestRepository.updateById(id, {
-      linkedProjectId: projectId,
-    });
   }
 
   async completeHelpRequest(id, userId) {
@@ -551,14 +627,92 @@ export default class HelpRequestService {
       throw new AppError('Help request must be in progress to complete', 400);
     }
 
-    return this.helpRequestRepository.updateById(id, { status: 'COMPLETED' });
+    const updated = await this.helpRequestRepository.updateById(id, {
+      status: 'COMPLETED',
+    });
+
+    const requesterId = helpRequest.requesterId?._id || helpRequest.requesterId;
+    const organizerId = helpRequest.assignedOrganizerId?._id || helpRequest.assignedOrganizerId;
+
+    if (requesterId && String(requesterId) !== String(userId)) {
+      await this.createHelpRequestNotification({
+        type: 'HELP_REQUEST_COMPLETED',
+        title: 'NeedHelp request completed',
+        message: `Your request "${helpRequest.title}" has been marked as completed.`,
+        recipientId: requesterId,
+        senderId: userId,
+        link: `/need-help/${helpRequest._id}`,
+        metadata: {
+          helpRequestId: helpRequest._id.toString(),
+          action: 'completed',
+        },
+      });
+    }
+
+    if (organizerId && String(organizerId) !== String(userId)) {
+      await this.createHelpRequestNotification({
+        type: 'HELP_REQUEST_COMPLETED',
+        title: 'NeedHelp request completed',
+        message: `The request "${helpRequest.title}" has been marked as completed.`,
+        recipientId: organizerId,
+        senderId: userId,
+        link: `/organizer/need-help?highlight=${helpRequest._id}`,
+        metadata: {
+          helpRequestId: helpRequest._id.toString(),
+          action: 'completed',
+        },
+      });
+    }
+
+    return updated;
   }
 
   async getUrgentRequests(options = {}) {
+    const viewer = buildViewerContext(options.viewer);
+
+    if (viewer.isAdmin) {
+      return this.helpRequestRepository.findMany(
+        {
+          isDeleted: false,
+          status: { $in: ['PENDING', 'VERIFIED', 'IN_PROGRESS'] },
+          urgencyLevel: { $in: ['HIGH', 'CRITICAL'] },
+        },
+        {
+          ...options,
+          sort: { urgencyLevel: -1, createdAt: -1 },
+          populate: ['requester', 'assignedOrganizer'],
+        }
+      );
+    }
+
     return this.helpRequestRepository.findUrgent(options);
   }
 
   async getNearbyRequests(coordinates, maxDistance, options = {}) {
+    const viewer = buildViewerContext(options.viewer);
+
+    if (viewer.isAdmin) {
+      return this.helpRequestRepository.findMany(
+        {
+          isDeleted: false,
+          status: { $in: ['PENDING', 'VERIFIED', 'IN_PROGRESS'] },
+          location: {
+            $near: {
+              $geometry: {
+                type: 'Point',
+                coordinates,
+              },
+              $maxDistance: maxDistance,
+            },
+          },
+        },
+        {
+          ...options,
+          populate: ['requester', 'assignedOrganizer'],
+        }
+      );
+    }
+
     return this.helpRequestRepository.findNearby(coordinates, maxDistance, options);
   }
 
@@ -575,21 +729,21 @@ export default class HelpRequestService {
       throw new AppError('Help request not found', 404);
     }
 
-    // Map help request category to project category
     const categoryMapping = {
-      'Y_TE': 'Y_TE',
-      'GIAO_DUC': 'GIAO_DUC',
-      'THIEN_TAI': 'THIEN_TAI',
-      'XAY_DUNG': 'XAY_DUNG',
-      'MOI_TRUONG': 'MOI_TRUONG',
-      'KHAC': 'KHAC'
+      Y_TE: 'Y_TE',
+      GIAO_DUC: 'GIAO_DUC',
+      THIEN_TAI: 'THIEN_TAI',
+      XAY_DUNG: 'XAY_DUNG',
+      MOI_TRUONG: 'MOI_TRUONG',
+      KHAC: 'KHAC',
     };
 
-    // Determine if it's urgent from urgency level
     const isUrgent = ['HIGH', 'CRITICAL'].includes(helpRequest.urgencyLevel);
 
-    // Convert evidences to media format
-    const coverMedia = helpRequest.evidences?.find((e) => e.mediaType === 'image' || !e.mediaType) || null;
+    const coverMedia =
+      helpRequest.evidences?.find(
+        (evidence) => evidence.mediaType === 'image' || !evidence.mediaType
+      ) || null;
 
     return {
       title: helpRequest.title,
@@ -600,12 +754,16 @@ export default class HelpRequestService {
       targetAmount: helpRequest.amountNeeded > 0 ? helpRequest.amountNeeded : 0,
       isFundraising: helpRequest.amountNeeded > 0,
       isUrgent,
-      coverMedia: coverMedia ? [{
-        url: coverMedia.url,
-        publicId: coverMedia.publicId,
-        mediaType: coverMedia.mediaType || 'image',
-        originalName: coverMedia.originalName
-      }] : [],
+      coverMedia: coverMedia
+        ? [
+            {
+              url: coverMedia.url,
+              publicId: coverMedia.publicId,
+              mediaType: coverMedia.mediaType || 'image',
+              originalName: coverMedia.originalName,
+            },
+          ]
+        : [],
       documents: helpRequest.evidences || [],
       helpRequestInfo: {
         requesterId: helpRequest.requesterId,
@@ -614,7 +772,7 @@ export default class HelpRequestService {
         requesterPhone: helpRequest.requester?.phone,
         contactPhone: helpRequest.contactPhone,
         contactEmail: helpRequest.contactEmail,
-      }
+      },
     };
   }
 
@@ -626,15 +784,14 @@ export default class HelpRequestService {
     senderId,
     link,
     metadata,
+    entityType = 'help_request',
+    entityId = null,
   }) {
     if (!this.notificationRepository || !recipientId) {
       return null;
     }
 
-    // Map type string to enum value (e.g. 'HELP_REQUEST_ASSIGNED' → 'help_request_assigned')
-    const typeValue = type?.toLowerCase
-      ? type.toLowerCase()
-      : type;
+    const typeValue = type?.toLowerCase ? type.toLowerCase() : type;
 
     try {
       return await this.notificationRepository.create({
@@ -644,11 +801,12 @@ export default class HelpRequestService {
         recipientId,
         actorId: senderId || null,
         actionUrl: link || null,
+        entityType,
+        entityId: entityId || metadata?.helpRequestId || null,
         metadata: metadata || {},
       });
-    } catch (err) {
-      // Log but don't rethrow — notification failure shouldn't break the main flow
-      console.error('[NOTIFY] Failed to create help request notification:', err.message);
+    } catch (error) {
+      console.error('[NOTIFY] Failed to create help request notification:', error.message);
       return null;
     }
   }

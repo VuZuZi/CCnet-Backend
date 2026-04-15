@@ -267,6 +267,76 @@ export default class ConversationService {
     return this.reloadConversation(conversation._id);
   }
 
+  async syncApprovedVolunteerToProjectConversation({
+    projectId,
+    organizerId,
+    volunteerId,
+    groupName = "",
+    actorId = null,
+  }) {
+    if (!projectId) {
+      throw new AppError("projectId is required", 400);
+    }
+
+    if (!organizerId) {
+      throw new AppError("organizerId is required", 400);
+    }
+
+    if (!volunteerId) {
+      throw new AppError("volunteerId is required", 400);
+    }
+
+    const existing =
+      await this.conversationRepository.findGroupConversationByProjectId(projectId);
+
+    if (!existing) {
+      const createdConversation = await this.ensureProjectGroupConversation({
+        projectId,
+        organizerId,
+        participantIds: [volunteerId],
+        groupName,
+      });
+
+      const createdConversationId =
+        createdConversation?._id || createdConversation?.id || null;
+
+      if (!createdConversationId) {
+        return createdConversation;
+      }
+
+      const rawConversation = await this.conversationRepository.findById(createdConversationId);
+      if (!rawConversation) {
+        return this.reloadConversation(createdConversationId);
+      }
+
+      const populatedConversation = await this.reloadConversation(createdConversationId);
+
+      const addedUser = (populatedConversation?.participants || []).find(
+        (participant) =>
+          String(participant?._id || participant) === String(volunteerId)
+      );
+
+      await this.emitSystemMessage({
+        conversation: rawConversation,
+        text: addedUser
+          ? `${getDisplayName(addedUser)} đã được thêm vào nhóm`
+          : "Thành viên đã được thêm vào nhóm",
+        action: CHAT_GROUP_ACTIONS.MEMBER_ADDED,
+        actorId: actorId || organizerId,
+        targetUserIds: [String(volunteerId)],
+        extraParticipantIds: [String(volunteerId)],
+      });
+
+      return this.reloadConversation(createdConversationId);
+    }
+
+    return this.addMemberToProjectConversation({
+      projectId,
+      participantId: volunteerId,
+      actorId: actorId || organizerId,
+    });
+  }
+
   async addMemberToProjectConversation({
     projectId,
     participantId,

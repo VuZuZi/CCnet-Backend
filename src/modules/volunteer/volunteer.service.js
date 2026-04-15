@@ -42,6 +42,33 @@ class VolunteerService {
     return actor;
   }
 
+  _shouldSyncProjectConversation(status) {
+    return [
+      PROJECT_STATUS.FUNDING,
+      PROJECT_STATUS.RECRUITING,
+      PROJECT_STATUS.ACTIVE,
+      PROJECT_STATUS.EXECUTING,
+    ].includes(String(status));
+  }
+
+  async _syncApprovedVolunteerToProjectConversation({
+    project,
+    volunteerId,
+    actorId,
+  }) {
+    if (!project || !volunteerId) return null;
+    if (!this.conversationService) return null;
+    if (!this._shouldSyncProjectConversation(project.status)) return null;
+
+    return this.conversationService.syncApprovedVolunteerToProjectConversation({
+      projectId: project._id,
+      organizerId: project.organizerId,
+      volunteerId,
+      groupName: project.title,
+      actorId,
+    });
+  }
+
   async applyVolunteer(volunteerId, data) {
     const { opportunityId, changerId, skills, motivation, availability } = data;
 
@@ -182,13 +209,11 @@ class VolunteerService {
       { "stats.currentVolunteers": 1 }
     );
 
-    if (String(project.status) === PROJECT_STATUS.ACTIVE && this.conversationService) {
-      await this.conversationService.addMemberToProjectConversation({
-        projectId: project._id,
-        participantId: application.volunteerId,
-        actorId,
-      });
-    }
+    await this._syncApprovedVolunteerToProjectConversation({
+      project,
+      volunteerId: application.volunteerId,
+      actorId,
+    });
 
     return updated;
   }

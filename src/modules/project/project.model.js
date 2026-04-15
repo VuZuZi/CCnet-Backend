@@ -98,7 +98,7 @@ const projectSchema = new mongoose.Schema(
         item: { type: String, required: true },
         amount: { type: Number, required: true },
         note: { type: String },
-      }
+      },
     ],
     surplusPolicy: {
       type: String,
@@ -132,7 +132,7 @@ const projectSchema = new mongoose.Schema(
     aiRiskScore: { type: Number, min: 0, max: 100, default: null },
     riskFlags: [{ type: String }],
 
-    aapprovedBy: {
+    approvedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
@@ -144,11 +144,11 @@ const projectSchema = new mongoose.Schema(
 
     revisionCount: {
       type: Number,
-      default: 0
+      default: 0,
     },
     rejectionReason: {
       type: String,
-      default: null
+      default: null,
     },
 
     fromHelpRequestId: {
@@ -193,19 +193,16 @@ projectSchema.pre("save", function (next) {
   next();
 });
 
-projectSchema.pre(
-  ["findOneAndUpdate", "updateOne", "updateMany"],
-  function (next) {
-    const update = this.getUpdate();
-    const startDate = update.$set?.startDate || update.startDate;
-    const endDate = update.$set?.endDate || update.endDate;
+projectSchema.pre(["findOneAndUpdate", "updateOne", "updateMany"], function (next) {
+  const update = this.getUpdate();
+  const startDate = update.$set?.startDate || update.startDate;
+  const endDate = update.$set?.endDate || update.endDate;
 
-    if (startDate && endDate && new Date(startDate) >= new Date(endDate)) {
-      return next(new Error("Ngày kết thúc phải sau ngày bắt đầu dự án."));
-    }
-    next();
-  },
-);
+  if (startDate && endDate && new Date(startDate) >= new Date(endDate)) {
+    return next(new Error("Ngày kết thúc phải sau ngày bắt đầu dự án."));
+  }
+  next();
+});
 
 const Project = mongoose.model("Project", projectSchema);
 export default Project;

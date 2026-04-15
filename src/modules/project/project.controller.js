@@ -120,6 +120,24 @@ class ProjectController {
     }
   };
 
+  // Draft detail riêng cho Organizer edit màn create/edit.
+  // Không thay thế getDetail public, chỉ tách riêng để tránh 1 endpoint gánh 2 vai.
+  getDraftDetail = async (req, res, next) => {
+    try {
+      const result = await this.projectService.getDraftDetail(
+        req.params.id,
+        req.user.userId,
+      );
+      return ApiResponse.success(
+        res,
+        result,
+        "Lấy chi tiết bản nháp dự án thành công",
+      );
+    } catch (error) {
+      next(error);
+    }
+  };
+
   getWorkspaceStats = async (req, res, next) => {
     try {
       const result = await this.projectService.getWorkspaceStats(
@@ -201,7 +219,7 @@ class ProjectController {
       const { limit = 10, cursor = null } = req.query;
       const userId = req.user?.userId || null;
       const result = await this.projectFeedService.getPosts(projectId, { limit, cursor, userId });
-      return ApiResponse.success(res, result, 'Lấy bài viết dự án thành công');
+      return ApiResponse.success(res, result, "Lấy bài viết dự án thành công");
     } catch (error) {
       next(error);
     }
@@ -213,7 +231,7 @@ class ProjectController {
       const userId = req.user.userId;
       const content = req.body?.content;
 
-      console.log('[createFeedPost] Received request:', {
+      console.log("[createFeedPost] Received request:", {
         projectId,
         userId,
         content: content?.substring(0, 50),
@@ -238,13 +256,13 @@ class ProjectController {
       }
 
       const result = await this.projectFeedService.createPost(projectId, { userId, content, media });
-      console.log('[createFeedPost] Post created successfully:', {
+      console.log("[createFeedPost] Post created successfully:", {
         postId: result._id,
         hasMedia: result.media?.length > 0
       });
-      return ApiResponse.created(res, result, 'Đăng bài thành công');
+      return ApiResponse.created(res, result, "Đăng bài thành công");
     } catch (error) {
-      console.error('[createFeedPost] Error:', error.message);
+      console.error("[createFeedPost] Error:", error.message);
       next(error);
     }
   };
@@ -256,7 +274,7 @@ class ProjectController {
       const { limit = 20, cursor = null } = req.query;
       const userId = req.user?.userId || null;
       const result = await this.projectFeedService.listComments(projectId, postId, { limit, cursor, userId });
-      return ApiResponse.success(res, result, 'Lấy bình luận thành công');
+      return ApiResponse.success(res, result, "Lấy bình luận thành công");
     } catch (error) {
       next(error);
     }
@@ -268,7 +286,7 @@ class ProjectController {
       const postId = req.params.postId;
       const userId = req.user.userId;
       const result = await this.projectFeedService.createComment(projectId, postId, { userId, content: req.body?.content });
-      return ApiResponse.created(res, result, 'Bình luận thành công');
+      return ApiResponse.created(res, result, "Bình luận thành công");
     } catch (error) {
       next(error);
     }
@@ -280,7 +298,7 @@ class ProjectController {
       const postId = req.params.postId;
       const userId = req.user.userId;
       const result = await this.projectFeedService.togglePostLike(projectId, postId, userId);
-      return ApiResponse.success(res, result, 'Cập nhật thả tim thành công');
+      return ApiResponse.success(res, result, "Cập nhật thả tim thành công");
     } catch (error) {
       next(error);
     }
@@ -292,7 +310,7 @@ class ProjectController {
       const commentId = req.params.commentId;
       const userId = req.user.userId;
       const result = await this.projectFeedService.toggleCommentLike(projectId, commentId, userId);
-      return ApiResponse.success(res, result, 'Cập nhật thả tim thành công');
+      return ApiResponse.success(res, result, "Cập nhật thả tim thành công");
     } catch (error) {
       next(error);
     }
