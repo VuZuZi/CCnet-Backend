@@ -32,6 +32,10 @@ router.get("/action-logs", (req, res, next) =>
   getController().getActionLogs(req, res, next)
 );
 
+router.get("/organizer-action-logs", (req, res, next) =>
+  getController().getOrganizerActionLogs(req, res, next)
+);
+
 router.get("/projects", (req, res, next) =>
   getController().getProjects(req, res, next)
 );

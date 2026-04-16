@@ -1,5 +1,21 @@
 import ApiResponse from "../../core/Response.js";
-import AppError from "../../core/AppError.js";
+
+const getUserId = (req) => req.user?.userId || req.user?.id || null;
+
+const buildReportRef = () =>
+  `REP-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+const buildUploadedMedia = (file) => {
+  if (!file) return null;
+
+  return {
+    filename: file.filename,
+    originalName: file.originalname,
+    mimetype: file.mimetype,
+    size: file.size,
+    path: file.path,
+  };
+};
 
 class ProjectController {
   constructor({ projectService, projectFeedService, reportService }) {
@@ -8,46 +24,13 @@ class ProjectController {
     this.reportService = reportService;
   }
 
-  //     createDraft = async (req, res, next) => {
-  //         try {
-  //             const organizerId = req.user.userId;
-  //             const projectData = { ...req.body };
-
-  //             const files = {
-  //                 coverMedia: req.files?.coverMedia ? req.files.coverMedia[0] : null,
-  //                 documents: req.files?.documents || []
-  //             };
-  //             const result = await this.projectService.createDraftProject(organizerId, projectData, files);
-  //             return ApiResponse.created(res, result, 'Đã lưu bản nháp dự án (Bước 1)');
-  //         } catch (error) {
-  //             next(error);
-  //         }
-  //     };
-
-  //    updateDraft = async (req, res, next) => {
-  //         try {
-  //             const projectId = req.params.id;
-  //             const organizerId = req.user.userId;
-  //             const updateData = { ...req.body };
-
-  //             const files = {
-  //                 coverMedia: req.files?.coverMedia ? req.files.coverMedia[0] : null,
-  //                 documents: req.files?.documents || []
-  //             };
-
-  //             const result = await this.projectService.updateDraftProject(projectId, organizerId, updateData, files);
-  //             return ApiResponse.success(res, result, 'Đã cập nhật bản nháp dự án (Bước 2)');
-  //         } catch (error) {
-  //             next(error);
-  //         }
-  //     };
-
   createDraft = async (req, res, next) => {
     try {
       const result = await this.projectService.createDraftProject(
-        req.user.userId,
+        getUserId(req),
         req.body,
       );
+
       return ApiResponse.created(res, result, "Đã lưu bản nháp dự án (Bước 1)");
     } catch (error) {
       next(error);
@@ -58,9 +41,10 @@ class ProjectController {
     try {
       const result = await this.projectService.updateDraftProject(
         req.params.id,
-        req.user.userId,
+        getUserId(req),
         req.body,
       );
+
       return ApiResponse.success(
         res,
         result,
@@ -74,6 +58,7 @@ class ProjectController {
   getFeatured = async (req, res, next) => {
     try {
       const result = await this.projectService.getFeaturedProjects();
+
       return ApiResponse.success(
         res,
         result,
@@ -87,6 +72,7 @@ class ProjectController {
   getVolunteerNeeded = async (req, res, next) => {
     try {
       const result = await this.projectService.getVolunteerProjects();
+
       return ApiResponse.success(
         res,
         result,
@@ -100,6 +86,7 @@ class ProjectController {
   getExploreProjects = async (req, res, next) => {
     try {
       const result = await this.projectService.getExploreProjects(req.query);
+
       return ApiResponse.success(res, result, "Lấy danh sách dự án thành công");
     } catch (error) {
       next(error);
@@ -108,26 +95,24 @@ class ProjectController {
 
   getDetail = async (req, res, next) => {
     try {
-      const projectId = req.params.id;
-      const userId = req.user?.userId || req.user?.id || null;
       const result = await this.projectService.getProjectDetail(
-        projectId,
-        userId,
+        req.params.id,
+        getUserId(req),
       );
+
       return ApiResponse.success(res, result, "Lấy chi tiết dự án thành công");
     } catch (error) {
       next(error);
     }
   };
 
-  // Draft detail riêng cho Organizer edit màn create/edit.
-  // Không thay thế getDetail public, chỉ tách riêng để tránh 1 endpoint gánh 2 vai.
   getDraftDetail = async (req, res, next) => {
     try {
       const result = await this.projectService.getDraftDetail(
         req.params.id,
-        req.user.userId,
+        getUserId(req),
       );
+
       return ApiResponse.success(
         res,
         result,
@@ -140,9 +125,8 @@ class ProjectController {
 
   getWorkspaceStats = async (req, res, next) => {
     try {
-      const result = await this.projectService.getWorkspaceStats(
-        req.user.userId,
-      );
+      const result = await this.projectService.getWorkspaceStats(getUserId(req));
+
       return ApiResponse.success(
         res,
         result,
@@ -156,9 +140,10 @@ class ProjectController {
   getWorkspaceProjects = async (req, res, next) => {
     try {
       const result = await this.projectService.getWorkspaceProjects(
-        req.user.userId,
+        getUserId(req),
         req.query,
       );
+
       return ApiResponse.success(
         res,
         result,
@@ -171,12 +156,9 @@ class ProjectController {
 
   submitForApproval = async (req, res, next) => {
     try {
-      const projectId = req.params.id;
-      const organizerId = req.user.userId;
-
       const result = await this.projectService.submitForApproval(
-        projectId,
-        organizerId,
+        req.params.id,
+        getUserId(req),
       );
 
       return ApiResponse.success(
@@ -191,21 +173,16 @@ class ProjectController {
 
   reportProject = async (req, res, next) => {
     try {
-      const projectId = req.params.id;
-      const { reason_code, description = "" } = req.body;
-
-      const reportData = {
-        report_ref: `REP-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-        reporter_ref: req.user.userId,
+      const report = await this.reportService.createReport({
+        report_ref: buildReportRef(),
+        reporter_ref: getUserId(req),
         target_type: "project",
-        target_ref: projectId,
-        reason_code: reason_code.trim(),
-        description: description.trim(),
+        target_ref: req.params.id,
+        reason_code: String(req.body?.reason_code || "").trim(),
+        description: String(req.body?.description || "").trim(),
         evidence_files: [],
         status: "pending",
-      };
-
-      const report = await this.reportService.createReport(reportData);
+      });
 
       return ApiResponse.created(res, report, "Báo cáo dự án đã gửi thành công");
     } catch (error) {
@@ -215,10 +192,12 @@ class ProjectController {
 
   getFeedPosts = async (req, res, next) => {
     try {
-      const projectId = req.params.id;
-      const { limit = 10, cursor = null } = req.query;
-      const userId = req.user?.userId || null;
-      const result = await this.projectFeedService.getPosts(projectId, { limit, cursor, userId });
+      const result = await this.projectFeedService.getPosts(req.params.id, {
+        limit: req.query?.limit || 10,
+        cursor: req.query?.cursor || null,
+        userId: getUserId(req),
+      });
+
       return ApiResponse.success(res, result, "Lấy bài viết dự án thành công");
     } catch (error) {
       next(error);
@@ -227,53 +206,30 @@ class ProjectController {
 
   createFeedPost = async (req, res, next) => {
     try {
-      const projectId = req.params.id;
-      const userId = req.user.userId;
-      const content = req.body?.content;
-
-      console.log("[createFeedPost] Received request:", {
-        projectId,
-        userId,
-        content: content?.substring(0, 50),
-        hasFile: !!req.file,
-        fileInfo: req.file ? {
-          filename: req.file.filename,
-          originalname: req.file.originalname,
-          mimetype: req.file.mimetype,
-          size: req.file.size
-        } : null
+      const result = await this.projectFeedService.createPost(req.params.id, {
+        userId: getUserId(req),
+        content: req.body?.content,
+        media: buildUploadedMedia(req.file),
       });
 
-      let media = null;
-      if (req.file) {
-        media = {
-          filename: req.file.filename,
-          originalName: req.file.originalname,
-          mimetype: req.file.mimetype,
-          size: req.file.size,
-          path: req.file.path
-        };
-      }
-
-      const result = await this.projectFeedService.createPost(projectId, { userId, content, media });
-      console.log("[createFeedPost] Post created successfully:", {
-        postId: result._id,
-        hasMedia: result.media?.length > 0
-      });
       return ApiResponse.created(res, result, "Đăng bài thành công");
     } catch (error) {
-      console.error("[createFeedPost] Error:", error.message);
       next(error);
     }
   };
 
   listFeedComments = async (req, res, next) => {
     try {
-      const projectId = req.params.id;
-      const postId = req.params.postId;
-      const { limit = 20, cursor = null } = req.query;
-      const userId = req.user?.userId || null;
-      const result = await this.projectFeedService.listComments(projectId, postId, { limit, cursor, userId });
+      const result = await this.projectFeedService.listComments(
+        req.params.id,
+        req.params.postId,
+        {
+          limit: req.query?.limit || 20,
+          cursor: req.query?.cursor || null,
+          userId: getUserId(req),
+        },
+      );
+
       return ApiResponse.success(res, result, "Lấy bình luận thành công");
     } catch (error) {
       next(error);
@@ -282,10 +238,15 @@ class ProjectController {
 
   createFeedComment = async (req, res, next) => {
     try {
-      const projectId = req.params.id;
-      const postId = req.params.postId;
-      const userId = req.user.userId;
-      const result = await this.projectFeedService.createComment(projectId, postId, { userId, content: req.body?.content });
+      const result = await this.projectFeedService.createComment(
+        req.params.id,
+        req.params.postId,
+        {
+          userId: getUserId(req),
+          content: req.body?.content,
+        },
+      );
+
       return ApiResponse.created(res, result, "Bình luận thành công");
     } catch (error) {
       next(error);
@@ -294,10 +255,12 @@ class ProjectController {
 
   toggleFeedPostLike = async (req, res, next) => {
     try {
-      const projectId = req.params.id;
-      const postId = req.params.postId;
-      const userId = req.user.userId;
-      const result = await this.projectFeedService.togglePostLike(projectId, postId, userId);
+      const result = await this.projectFeedService.togglePostLike(
+        req.params.id,
+        req.params.postId,
+        getUserId(req),
+      );
+
       return ApiResponse.success(res, result, "Cập nhật thả tim thành công");
     } catch (error) {
       next(error);
@@ -306,10 +269,12 @@ class ProjectController {
 
   toggleFeedCommentLike = async (req, res, next) => {
     try {
-      const projectId = req.params.id;
-      const commentId = req.params.commentId;
-      const userId = req.user.userId;
-      const result = await this.projectFeedService.toggleCommentLike(projectId, commentId, userId);
+      const result = await this.projectFeedService.toggleCommentLike(
+        req.params.id,
+        req.params.commentId,
+        getUserId(req),
+      );
+
       return ApiResponse.success(res, result, "Cập nhật thả tim thành công");
     } catch (error) {
       next(error);

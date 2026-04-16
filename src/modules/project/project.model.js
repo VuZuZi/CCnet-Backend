@@ -14,6 +14,7 @@ const milestoneSchema = new mongoose.Schema(
     title: { type: String, required: true, trim: true, maxlength: 100 },
     description: { type: String, required: true, trim: true, maxlength: 500 },
     targetAmount: { type: Number, default: 0, min: 0 },
+    startDate: { type: Date, default: null },
     deliverables: { type: String, trim: true },
     endDate: { type: Date, default: null },
     status: {
@@ -75,21 +76,21 @@ const projectSchema = new mongoose.Schema(
       totalBeneficiaries: { type: Number, default: 0 },
       evidenceMethod: { type: String },
     },
-
     coverMedia: {
       url: { type: String, default: null },
       publicId: { type: String, default: null },
-      mediaType: { type: String, enum: ["image", "video"], default: "image" },
+      mediaType: {
+        type: String,
+        enum: ["image", "video"],
+        default: "image",
+      },
     },
-
     documents: [{ type: mongoose.Schema.Types.ObjectId, ref: "Media" }],
-
     location: {
       type: { type: String, enum: ["Point"], default: "Point" },
       coordinates: { type: [Number], required: true },
       address: { type: String, required: true },
     },
-
     targetAmount: { type: Number, default: 0, min: 0 },
     currentAmount: { type: Number, default: 0, min: 0 },
     mvpAmount: { type: Number, default: 0, min: 0 },
@@ -110,13 +111,10 @@ const projectSchema = new mongoose.Schema(
       ref: "Project",
       default: null,
     },
-
     milestones: [milestoneSchema],
-
     needsVolunteers: { type: Boolean, default: false },
     volunteerRoles: [volunteerRoleSchema],
     isVolunteerFull: { type: Boolean, default: false },
-
     status: {
       type: String,
       enum: Object.values(PROJECT_STATUS),
@@ -125,23 +123,18 @@ const projectSchema = new mongoose.Schema(
     },
     startDate: { type: Date, default: null },
     endDate: { type: Date, default: null },
-
     isUrgent: { type: Boolean, default: false, index: true },
     pauseReason: { type: String, default: null },
-
     aiRiskScore: { type: Number, min: 0, max: 100, default: null },
     riskFlags: [{ type: String }],
-
     approvedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
     },
     approvedAt: { type: Date, default: null },
-
     submittedAt: { type: Date, default: null },
     revisionRequestedAt: { type: Date, default: null },
-
     revisionCount: {
       type: Number,
       default: 0,
@@ -150,13 +143,11 @@ const projectSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-
     fromHelpRequestId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "HelpRequest",
       default: null,
     },
-
     stats: {
       donorCount: { type: Number, default: 0 },
       viewCount: { type: Number, default: 0 },
@@ -177,7 +168,6 @@ projectSchema.index({ location: "2dsphere" });
 projectSchema.index({ projectType: 1, status: 1 });
 projectSchema.index({ status: 1, category: 1, createdAt: -1 });
 projectSchema.index({ status: 1, needsVolunteers: 1, isVolunteerFull: 1 });
-
 projectSchema.index(
   { title: "text", "location.address": "text", description: "text" },
   {
@@ -186,23 +176,50 @@ projectSchema.index(
   },
 );
 
+const hasInvalidDateRange = (startDate, endDate) =>
+  Boolean(startDate && endDate && startDate >= endDate);
+
+const validateMilestonesDateRange = (milestones = []) => {
+  for (const milestone of milestones) {
+    if (hasInvalidDateRange(milestone?.startDate, milestone?.endDate)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
 projectSchema.pre("save", function (next) {
-  if (this.startDate && this.endDate && this.startDate >= this.endDate) {
+  if (hasInvalidDateRange(this.startDate, this.endDate)) {
     return next(new Error("Ngày kết thúc phải sau ngày bắt đầu dự án."));
   }
+
+  if (validateMilestonesDateRange(this.milestones)) {
+    return next(new Error("Ngày kết thúc milestone phải sau ngày bắt đầu milestone."));
+  }
+
   next();
 });
 
 projectSchema.pre(["findOneAndUpdate", "updateOne", "updateMany"], function (next) {
-  const update = this.getUpdate();
-  const startDate = update.$set?.startDate || update.startDate;
-  const endDate = update.$set?.endDate || update.endDate;
+  const update = this.getUpdate() || {};
+  const setData = update.$set || {};
 
-  if (startDate && endDate && new Date(startDate) >= new Date(endDate)) {
+  const startDate = setData.startDate ?? update.startDate;
+  const endDate = setData.endDate ?? update.endDate;
+
+  if (hasInvalidDateRange(startDate, endDate)) {
     return next(new Error("Ngày kết thúc phải sau ngày bắt đầu dự án."));
   }
+
+  const milestones = setData.milestones ?? update.milestones;
+  if (Array.isArray(milestones) && validateMilestonesDateRange(milestones)) {
+    return next(new Error("Ngày kết thúc milestone phải sau ngày bắt đầu milestone."));
+  }
+
   next();
 });
 
 const Project = mongoose.model("Project", projectSchema);
+
 export default Project;

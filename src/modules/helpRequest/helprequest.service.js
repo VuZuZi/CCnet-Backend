@@ -124,12 +124,41 @@ export default class HelpRequestService {
     transactionManager,
     userRepository,
     notificationRepository,
+    adminActionLogRepository,
   }) {
     this.helpRequestRepository = helprequestRepository;
     this.cloudinaryProvider = cloudinaryProvider;
     this.transactionManager = transactionManager;
     this.userRepository = userRepository;
     this.notificationRepository = notificationRepository;
+    this.adminActionLogRepository = adminActionLogRepository;
+  }
+
+  async logAdminHelpRequestAction({
+    actorId,
+    actorRole = 'admin',
+    targetId,
+    action,
+    reason = '',
+    previousState = null,
+    nextState = null,
+    metadata = null,
+  }) {
+    if (!this.adminActionLogRepository || !actorId || !targetId || !action) {
+      return null;
+    }
+
+    return this.adminActionLogRepository.createAdminActionLog({
+      actorId,
+      actorRole,
+      targetType: 'help_request',
+      targetId,
+      action,
+      reason: String(reason || '').trim(),
+      previousState,
+      nextState,
+      metadata,
+    });
   }
 
   async createHelpRequest(userId, data) {
@@ -365,6 +394,16 @@ export default class HelpRequestService {
       throw new AppError('Help request is not pending verification', 400);
     }
 
+    const previousState = {
+      status: helpRequest.status || null,
+      verifiedBy: helpRequest.verifiedBy || null,
+      verifiedAt: helpRequest.verifiedAt || null,
+      assignedByAdminId: helpRequest.assignedByAdminId || null,
+      assignedOrganizerId: helpRequest.assignedOrganizerId || null,
+      assignedAt: helpRequest.assignedAt || null,
+      rejectionReason: helpRequest.rejectionReason || null,
+    };
+
     const updateData = {
       verifiedBy: adminId,
       verifiedAt: new Date(),
@@ -385,6 +424,30 @@ export default class HelpRequestService {
     }
 
     const updated = await this.helpRequestRepository.updateById(id, updateData);
+
+    await this.logAdminHelpRequestAction({
+      actorId: adminId,
+      actorRole: 'admin',
+      targetId: updated._id,
+      action: approved ? 'HELP_REQUEST_VERIFIED' : 'HELP_REQUEST_REJECTED',
+      reason: approved ? '' : updateData.rejectionReason,
+      previousState,
+      nextState: {
+        status: updated.status || null,
+        verifiedBy: updated.verifiedBy || null,
+        verifiedAt: updated.verifiedAt || null,
+        assignedByAdminId: updated.assignedByAdminId || null,
+        assignedOrganizerId: updated.assignedOrganizerId || null,
+        assignedAt: updated.assignedAt || null,
+        rejectionReason: updated.rejectionReason || null,
+      },
+      metadata: {
+        title: helpRequest.title,
+        helpRequestTitle: helpRequest.title,
+        requesterId: String(helpRequest.requesterId || ''),
+        approved: Boolean(approved),
+      },
+    });
 
     const requesterId = helpRequest.requesterId?._id || helpRequest.requesterId;
 
@@ -445,6 +508,13 @@ export default class HelpRequestService {
 
     const wasAssignedBefore = Boolean(helpRequest.assignedOrganizerId);
 
+    const previousState = {
+      status: helpRequest.status || null,
+      assignedByAdminId: helpRequest.assignedByAdminId || null,
+      assignedOrganizerId: helpRequest.assignedOrganizerId || null,
+      assignedAt: helpRequest.assignedAt || null,
+    };
+
     const updateData = {
       assignedByAdminId: adminId,
       assignedOrganizerId: organizerId,
@@ -453,6 +523,29 @@ export default class HelpRequestService {
     };
 
     const updatedHelpRequest = await this.helpRequestRepository.updateById(id, updateData);
+
+    await this.logAdminHelpRequestAction({
+      actorId: adminId,
+      actorRole: 'admin',
+      targetId: updatedHelpRequest._id,
+      action: wasAssignedBefore ? 'HELP_REQUEST_REASSIGNED' : 'HELP_REQUEST_ASSIGNED',
+      reason: '',
+      previousState,
+      nextState: {
+        status: updatedHelpRequest.status || null,
+        assignedByAdminId: updatedHelpRequest.assignedByAdminId || null,
+        assignedOrganizerId: updatedHelpRequest.assignedOrganizerId || null,
+        assignedAt: updatedHelpRequest.assignedAt || null,
+      },
+      metadata: {
+        title: helpRequest.title,
+        helpRequestTitle: helpRequest.title,
+        organizerId: String(organizer._id || ''),
+        organizerName: organizer.fullName || '',
+        organizerEmail: organizer.email || '',
+        requesterId: String(helpRequest.requesterId || ''),
+      },
+    });
 
     await this.createHelpRequestNotification({
       type: wasAssignedBefore ? 'HELP_REQUEST_REASSIGNED' : 'HELP_REQUEST_ASSIGNED',

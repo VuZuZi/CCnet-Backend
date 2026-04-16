@@ -45,25 +45,6 @@ class AdminController {
     }
   };
 
-  /*
-  Disabled by team request: no more Verify / Verified feature in UI
-  verifyUser = async (req, res, next) => {
-    try {
-      const { isVerified, reason } = req.body || {};
-      const user = await this.adminService.verifyUser(
-        req.params.id,
-        isVerified,
-        reason,
-        req.user?.userId || req.user?._id || null,
-        req.user?.role || "admin"
-      );
-      res.json({ status: "success", data: user });
-    } catch (e) {
-      next(e);
-    }
-  };
-  */
-
   updateUserStatus = async (req, res, next) => {
     try {
       const { status, reason } = req.body || {};
@@ -89,6 +70,17 @@ class AdminController {
     }
   };
 
+  getOrganizerActionLogs = async (req, res, next) => {
+    try {
+      const logs = await this.adminService.getOrganizerActionLogs(
+        req.query || {}
+      );
+      res.json({ status: "success", data: logs });
+    } catch (e) {
+      next(e);
+    }
+  };
+
   getReports = async (req, res, next) => {
     try {
       const reports = await this.adminService.getReports();
@@ -104,7 +96,9 @@ class AdminController {
       const result = await this.adminService.resolveReportWithActions(
         req.params.id,
         Array.isArray(actions) ? actions : [],
-        note
+        note,
+        req.user?.userId || req.user?._id || null,
+        req.user?.role || "admin"
       );
 
       res.json({ status: "success", data: result });

@@ -1,6 +1,11 @@
 import mongoose from "mongoose";
-import Project from "./project.model.js";
-import { PROJECT_STATUS } from "./project.constant.js";
+import Project from "../project.model.js";
+import {
+  PUBLIC_PROJECT_STATUSES,
+  PROJECT_STATUS,
+  WORKSPACE_CANCELLED_STATUSES,
+  WORKSPACE_COMPLETED_STATUSES,
+} from "../project.constant.js";
 
 const PROJECT_CARD_PROJECTION = {
   title: 1,
@@ -13,14 +18,57 @@ const PROJECT_CARD_PROJECTION = {
   endDate: 1,
   stats: 1,
   organizerId: 1,
+  needsVolunteers: 1,
+  isVolunteerFull: 1,
+  projectType: 1,
+  volunteerRoles: 1,
+  status: 1,
 };
 
-const PUBLIC_PROJECT_STATUSES = [
-  PROJECT_STATUS.ACTIVE,
-  PROJECT_STATUS.FUNDING,
-  PROJECT_STATUS.RECRUITING,
-  PROJECT_STATUS.EXECUTING,
-];
+const ORGANIZER_PROJECT_PROJECTION = {
+  title: 1,
+  coverMedia: 1,
+  category: 1,
+  targetAmount: 1,
+  currentAmount: 1,
+  status: 1,
+  milestones: 1,
+  createdAt: 1,
+  updatedAt: 1,
+  projectType: 1,
+  needsVolunteers: 1,
+  volunteerRoles: 1,
+  stats: 1,
+  startDate: 1,
+  endDate: 1,
+  "location.address": 1,
+};
+
+const toObjectId = (value) =>
+  value instanceof mongoose.Types.ObjectId
+    ? value
+    : new mongoose.Types.ObjectId(value);
+
+const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
+
+const buildWorkspaceStatusFilter = (status) => {
+  if (!status || status === "ALL") return undefined;
+
+  if (status === "COMPLETED") {
+    return { $in: WORKSPACE_COMPLETED_STATUSES };
+  }
+
+  if (status === "CANCELLED") {
+    return { $in: WORKSPACE_CANCELLED_STATUSES };
+  }
+
+  return status;
+};
+
+const buildPublicProjectsFilter = (filter = {}) => ({
+  ...filter,
+  status: { $in: PUBLIC_PROJECT_STATUSES },
+});
 
 class ProjectRepository {
   async create(projectData, session = null) {
@@ -39,9 +87,11 @@ class ProjectRepository {
   }
 
   async transitionStatus(projectId, fromStatus, toStatus, session = null) {
+    if (!isValidObjectId(projectId)) return null;
+
     return await Project.findOneAndUpdate(
       {
-        _id: new mongoose.Types.ObjectId(projectId),
+        _id: toObjectId(projectId),
         status: fromStatus,
       },
       { $set: { status: toStatus } },
@@ -90,14 +140,14 @@ class ProjectRepository {
   }
 
   async findById(projectId, session = null) {
-    if (!mongoose.Types.ObjectId.isValid(projectId)) return null;
+    if (!isValidObjectId(projectId)) return null;
     return await Project.findById(projectId).session(session).lean().exec();
   }
 
   async checkExists(projectId) {
-    if (!mongoose.Types.ObjectId.isValid(projectId)) return false;
+    if (!isValidObjectId(projectId)) return false;
     const project = await Project.exists({ _id: projectId });
-    return !!project;
+    return Boolean(project);
   }
 
   async findFeaturedProjects(limit = 1) {
@@ -119,10 +169,7 @@ class ProjectRepository {
       needsVolunteers: true,
       isVolunteerFull: false,
     })
-      .select({
-        ...PROJECT_CARD_PROJECTION,
-        volunteerRoles: 1,
-      })
+      .select(PROJECT_CARD_PROJECTION)
       .sort({ createdAt: -1 })
       .limit(limit)
       .lean()
@@ -130,23 +177,22 @@ class ProjectRepository {
   }
 
   async findAllProjects({
-    filter,
+    filter = {},
     skip = 0,
     limit = 10,
     sort = { createdAt: -1 },
     textSearch = null,
   }) {
-    const queryFilter = {
-      ...filter,
-      status: { $in: PUBLIC_PROJECT_STATUSES },
-    };
-
+    const queryFilter = buildPublicProjectsFilter(filter);
     let finalSort = sort;
     let projection = { ...PROJECT_CARD_PROJECTION };
 
     if (textSearch) {
       queryFilter.$text = { $search: textSearch };
-      projection.score = { $meta: "textScore" };
+      projection = {
+        ...projection,
+        score: { $meta: "textScore" },
+      };
       finalSort = { score: { $meta: "textScore" } };
     }
 
@@ -166,7 +212,7 @@ class ProjectRepository {
   }
 
   async findByIdWithDetails(projectId) {
-    if (!mongoose.Types.ObjectId.isValid(projectId)) return null;
+    if (!isValidObjectId(projectId)) return null;
 
     return await Project.findById(projectId)
       .populate({
@@ -183,7 +229,11 @@ class ProjectRepository {
 
   async getOrganizerStats(organizerId) {
     const stats = await Project.aggregate([
-      { $match: { organizerId: new mongoose.Types.ObjectId(organizerId) } },
+      {
+        $match: {
+          organizerId: toObjectId(organizerId),
+        },
+      },
       {
         $group: {
           _id: null,
@@ -195,7 +245,11 @@ class ProjectRepository {
           },
           pendingProjects: {
             $sum: {
-              $cond: [{ $eq: ["$status", PROJECT_STATUS.PENDING_APPROVAL] }, 1, 0],
+              $cond: [
+                { $eq: ["$status", PROJECT_STATUS.PENDING_APPROVAL] },
+                1,
+                0,
+              ],
             },
           },
         },
@@ -204,18 +258,26 @@ class ProjectRepository {
 
     return stats.length > 0
       ? stats[0]
-      : { totalFundsRaised: 0, activeProjects: 0, pendingProjects: 0 };
+      : {
+          totalFundsRaised: 0,
+          activeProjects: 0,
+          pendingProjects: 0,
+        };
   }
 
   async findOrganizerProjects({ organizerId, status, skip = 0, limit = 10 }) {
-    const filter = { organizerId: new mongoose.Types.ObjectId(organizerId) };
-    if (status && status !== "ALL") {
-      filter.status = status;
+    const filter = {
+      organizerId: toObjectId(organizerId),
+    };
+
+    const normalizedStatusFilter = buildWorkspaceStatusFilter(status);
+    if (normalizedStatusFilter) {
+      filter.status = normalizedStatusFilter;
     }
 
     const [projects, total] = await Promise.all([
       Project.find(filter)
-        .select("title coverMedia category targetAmount currentAmount status milestones createdAt")
+        .select(ORGANIZER_PROJECT_PROJECTION)
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -229,10 +291,14 @@ class ProjectRepository {
   }
 
   async updateDraftAtomic(projectId, organizerId, updateData, session = null) {
+    if (!isValidObjectId(projectId) || !isValidObjectId(organizerId)) {
+      return null;
+    }
+
     return await Project.findOneAndUpdate(
       {
-        _id: new mongoose.Types.ObjectId(projectId),
-        organizerId: new mongoose.Types.ObjectId(organizerId),
+        _id: toObjectId(projectId),
+        organizerId: toObjectId(organizerId),
         status: PROJECT_STATUS.DRAFT,
       },
       { $set: updateData },

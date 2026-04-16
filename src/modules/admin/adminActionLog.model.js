@@ -32,7 +32,7 @@ const adminActionLogSchema = new mongoose.Schema(
     },
     reason: {
       type: String,
-      required: true,
+      default: "",
       trim: true,
     },
     previousState: {
@@ -51,7 +51,12 @@ const adminActionLogSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-adminActionLogSchema.index({ createdAt: -1, actorId: 1, targetType: 1, action: 1 });
+adminActionLogSchema.index({
+  createdAt: -1,
+  actorId: 1,
+  targetType: 1,
+  action: 1,
+});
 
 const AdminActionLog = mongoose.model("AdminActionLog", adminActionLogSchema);
 

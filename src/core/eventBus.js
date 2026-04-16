@@ -11,14 +11,18 @@ class SimpleEventBus {
 
   async emit(eventName, payload) {
     const handlers = this.listeners.get(eventName) || [];
-    await Promise.allSettled(handlers.map((handler) => handler(payload)));
+    return Promise.allSettled(handlers.map((handler) => handler(payload)));
   }
 }
 
 let sharedEventBus = null;
 
 export function createEventBus(customBus = null) {
-  if (customBus && typeof customBus.on === 'function' && typeof customBus.emit === 'function') {
+  if (
+    customBus &&
+    typeof customBus.on === "function" &&
+    typeof customBus.emit === "function"
+  ) {
     return customBus;
   }
 
@@ -34,8 +38,12 @@ export function getSharedEventBus() {
 }
 
 export function setSharedEventBus(customBus) {
-  if (!customBus || typeof customBus.on !== 'function' || typeof customBus.emit !== 'function') {
-    throw new Error('setSharedEventBus requires a valid event bus');
+  if (
+    !customBus ||
+    typeof customBus.on !== "function" ||
+    typeof customBus.emit !== "function"
+  ) {
+    throw new Error("setSharedEventBus requires a valid event bus");
   }
 
   sharedEventBus = customBus;
