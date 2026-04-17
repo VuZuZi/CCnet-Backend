@@ -64,18 +64,4 @@ transactionSchema.pre(['findOneAndDelete', 'deleteOne', 'deleteMany'], function 
 
 const IMMUTABLE_FIELDS = ['amount', 'grossAmount', 'platformFee', 'netAmount', 'currency', 'projectId', 'donorRef', 'type'];
 
-transactionSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], function (next) {
-    const update = this.getUpdate();
-    const setUpdate = update.$set || {};
-
-    const violatesImmutability = IMMUTABLE_FIELDS.some(field =>
-        setUpdate.hasOwnProperty(field) || update.hasOwnProperty(field)
-    );
-
-    if (violatesImmutability) {
-        return next(new Error("CRITICAL: Sổ cái tài chính bị khóa. Cấm UPDATE các trường giá trị cốt lõi (amount, type, etc.). Hãy tạo giao dịch đảo (Reversal) nếu cần."));
-    }
-    next();
-});
-
 export default mongoose.model('Transaction', transactionSchema);

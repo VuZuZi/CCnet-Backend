@@ -16,7 +16,7 @@ import {
   validateBody,
   validateQuery,
 } from "../../middlewares/validate.middleware.js";
-import { uploadMedia } from "../../middlewares/upload.middleware.js";
+import { uploadFiles, uploadMedia } from "../../middlewares/upload.middleware.js";
 import { scopePerRequest } from "../../middlewares/di.middleware.js";
 
 import {
@@ -32,15 +32,12 @@ router.use(scopePerRequest);
 
 const resolveProjectController = (req) => {
   if (!req.scope) {
-    throw new Error("Bắt buộc phải có req.scope.");
+    throw new Error("Bắt buộc phải có req.scope. Kiểm tra lại di.middleware.");
   }
-
   const controller = req.scope.resolve("projectController");
-
   if (!controller) {
     throw new Error("Không resolve được projectController.");
   }
-
   return controller;
 };
 
@@ -50,7 +47,7 @@ const execute = (action) => async (req, res, next) => {
     const handler = controller?.[action];
 
     if (typeof handler !== "function") {
-      throw new Error(`Action [${action}] không tồn tại.`);
+      throw new Error(`Action [${action}] không tồn tại trong ProjectController.`);
     }
 
     await handler.call(controller, req, res, next);
@@ -72,6 +69,13 @@ const organizerSubmitGuards = [
   ensureKycActive,
   ensureKycValidFor(30),
 ];
+
+/*
+const projectUploads = uploadFiles.fields([
+  { name: "coverMedia", maxCount: 1 },
+  { name: "documents", maxCount: 5 },
+]);
+*/
 
 const reportProjectSchema = z.object({
   reason_code: z.enum([
@@ -145,7 +149,6 @@ router.post(
 // [CTO ADD]: Placeholder cho Step 2 (Public Evidence API)
 // router.get("/:projectId/milestones/:milestoneId/evidence", execute("getMilestoneEvidencePublic"));
 
-// Project Detail & Actions
 router.get("/:id", optionalAuthenticate, execute("getDetail"));
 
 router.post(
