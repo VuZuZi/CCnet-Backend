@@ -1,12 +1,12 @@
 import mongoose from "mongoose";
-import Project from "../project.model.js";
+import Project from "./project.model.js";
 import {
   PUBLIC_PROJECT_STATUSES,
   PROJECT_STATUS,
   PROJECT_TYPE,
   WORKSPACE_CANCELLED_STATUSES,
   WORKSPACE_COMPLETED_STATUSES,
-} from "../project.constant.js";
+} from "./project.constant.js";
 
 const PROJECT_CARD_PROJECTION = {
   title: 1,
