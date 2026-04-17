@@ -9,12 +9,50 @@ class OrganizerRequestService {
     organizerRequestRepository,
     transactionManager,
     eventBus,
+    adminRepository,
   }) {
     this.userRepository = userRepository;
     this.bankAccountRepository = bankAccountRepository;
     this.organizerRequestRepository = organizerRequestRepository;
     this.transactionManager = transactionManager;
     this.eventBus = eventBus;
+    this.adminRepository = adminRepository;
+  }
+
+  _ensureReason(reason, message = 'Lý do là bắt buộc') {
+    const normalizedReason = String(reason || '').trim();
+    if (!normalizedReason) {
+      throw new AppError(message, 400);
+    }
+    return normalizedReason;
+  }
+
+  async _logOrganizerAdminAction({
+    actorId,
+    action,
+    reason,
+    request,
+    previousState,
+    nextState,
+  }) {
+    if (!this.adminRepository?.createAdminActionLog) return;
+
+    await this.adminRepository.createAdminActionLog({
+      actorId,
+      actorRole: 'admin',
+      targetType: 'organizer_request',
+      targetId: request._id,
+      action,
+      reason,
+      previousState,
+      nextState,
+      metadata: {
+        fullName: request.fullNameSnapshot,
+        email: request.emailSnapshot,
+        organizationName: request.organizationName,
+        status: request.status,
+      },
+    });
   }
 
 // async submitMyRequest(userId, payload) {
@@ -262,7 +300,20 @@ async submitMyRequest(userId, payload) {
     return request;
   }
 
-  async approveRequest(requestId, adminId) {
+  async getAdminActionLogs(query = {}) {
+    if (!this.adminRepository?.findOrganizerRequestActionLogs) {
+      throw new AppError('Organizer action log repository is not available', 500);
+    }
+
+    return await this.adminRepository.findOrganizerRequestActionLogs(query);
+  }
+
+  async approveRequest(requestId, adminId, reviewReason) {
+    const normalizedReason = this._ensureReason(
+      reviewReason,
+      'Lý do duyệt là bắt buộc'
+    );
+
     return await this.transactionManager.runInTransaction(async (session) => {
       const request = await this.organizerRequestRepository.findById(requestId);
 
@@ -281,11 +332,18 @@ async submitMyRequest(userId, payload) {
         throw new AppError('Người dùng nộp hồ sơ không tồn tại', 404);
       }
 
+      const previousState = {
+        status: request.status,
+        reviewedBy: request.reviewedBy || null,
+        reviewedAt: request.reviewedAt || null,
+        reviewReason: request.reviewReason || '',
+      };
+
       const updatedRequest = await this.organizerRequestRepository.updateById(requestId, {
         status: ORGANIZER_REQUEST_STATUS.APPROVED,
         reviewedBy: adminId,
         reviewedAt: new Date(),
-        reviewReason: '',
+        reviewReason: normalizedReason,
       }, session);
 
       const kycExpiryDate = new Date();
@@ -301,6 +359,20 @@ async submitMyRequest(userId, payload) {
         }
       }, session);
 
+      await this._logOrganizerAdminAction({
+        actorId: adminId,
+        action: 'APPROVE_ORGANIZER_REQUEST',
+        reason: normalizedReason,
+        request: updatedRequest,
+        previousState,
+        nextState: {
+          status: updatedRequest.status,
+          reviewedBy: updatedRequest.reviewedBy,
+          reviewedAt: updatedRequest.reviewedAt,
+          reviewReason: updatedRequest.reviewReason,
+        },
+      });
+
       await this.emitOrganizerRequestUpdated(updatedRequest, {
         actorId: adminId,
         message: 'Hồ sơ Organizer của bạn đã được duyệt.',
@@ -311,6 +383,11 @@ async submitMyRequest(userId, payload) {
   }
 
   async declineRequest(requestId, adminId, reviewReason) {
+    const normalizedReason = this._ensureReason(
+      reviewReason,
+      'Lý do từ chối là bắt buộc'
+    );
+
     return await this.transactionManager.runInTransaction(async (session) => {
       const request = await this.organizerRequestRepository.findById(requestId);
 
@@ -324,16 +401,37 @@ async submitMyRequest(userId, payload) {
 
       const userId = request.userId?._id || request.userId;
 
+      const previousState = {
+        status: request.status,
+        reviewedBy: request.reviewedBy || null,
+        reviewedAt: request.reviewedAt || null,
+        reviewReason: request.reviewReason || '',
+      };
+
       const updatedRequest = await this.organizerRequestRepository.updateById(requestId, {
         status: ORGANIZER_REQUEST_STATUS.DECLINED,
         reviewedBy: adminId,
         reviewedAt: new Date(),
-        reviewReason,
+        reviewReason: normalizedReason,
       }, session);
 
       await this.userRepository.updateById(userId, {
         'kyc.status': 'UNVERIFIED'
       }, session);
+
+      await this._logOrganizerAdminAction({
+        actorId: adminId,
+        action: 'DECLINE_ORGANIZER_REQUEST',
+        reason: normalizedReason,
+        request: updatedRequest,
+        previousState,
+        nextState: {
+          status: updatedRequest.status,
+          reviewedBy: updatedRequest.reviewedBy,
+          reviewedAt: updatedRequest.reviewedAt,
+          reviewReason: updatedRequest.reviewReason,
+        },
+      });
 
       await this.emitOrganizerRequestUpdated(updatedRequest, {
         actorId: adminId,

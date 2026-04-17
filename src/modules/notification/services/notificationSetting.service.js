@@ -3,8 +3,17 @@ import { NOTIFICATION_TYPES } from '../constants/notification.constants.js';
 const TYPE_TO_SETTING_KEY = Object.freeze({
   [NOTIFICATION_TYPES.FOLLOW_CREATED]: 'followEnabled',
   [NOTIFICATION_TYPES.PROJECT_UPDATED]: 'projectEnabled',
+
+  [NOTIFICATION_TYPES.VOLUNTEER_APPLIED]: 'projectEnabled',
+  [NOTIFICATION_TYPES.VOLUNTEER_APPLICATION_APPROVED]: 'projectEnabled',
+  [NOTIFICATION_TYPES.VOLUNTEER_APPLICATION_REJECTED]: 'projectEnabled',
+  [NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_REQUESTED]: 'projectEnabled',
+  [NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_APPROVED]: 'projectEnabled',
+  [NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_REJECTED]: 'projectEnabled',
+
   [NOTIFICATION_TYPES.ORGANIZER_REQUEST_SUBMITTED]: 'organizerRequestEnabled',
   [NOTIFICATION_TYPES.ORGANIZER_REQUEST_UPDATED]: 'organizerRequestEnabled',
+
   [NOTIFICATION_TYPES.SYSTEM_ANNOUNCEMENT]: 'systemEnabled',
 
   [NOTIFICATION_TYPES.POST_REACTED]: 'postEnabled',
@@ -44,14 +53,12 @@ function createCacheEntry(value, ttlMs) {
 }
 
 export class NotificationSettingService {
-  constructor({
-    notificationSettingRepository,
-    cacheTtlMs = DEFAULT_CACHE_TTL_MS,
-    cleanupIntervalMs = DEFAULT_CLEANUP_INTERVAL_MS,
-  }) {
+  constructor({ notificationSettingRepository }) {
     this.notificationSettingRepository = notificationSettingRepository;
-    this.cacheTtlMs = cacheTtlMs;
-    this.cleanupIntervalMs = cleanupIntervalMs;
+
+    this.cacheTtlMs = DEFAULT_CACHE_TTL_MS;
+    this.cleanupIntervalMs = DEFAULT_CLEANUP_INTERVAL_MS;
+
     this.settingsCache = new Map();
     this.cleanupTimer = null;
 
@@ -117,6 +124,7 @@ export class NotificationSettingService {
 
   async getSettings(userId) {
     const cached = this.getCachedSettings(userId);
+
     if (cached) {
       return cached;
     }
@@ -145,3 +153,5 @@ export class NotificationSettingService {
     return Boolean(settings?.[settingKey]);
   }
 }
+
+export default NotificationSettingService;

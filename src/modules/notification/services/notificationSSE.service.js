@@ -14,15 +14,18 @@ function createClientId() {
   return `${Date.now()}:${Math.random().toString(36).slice(2)}`;
 }
 
-export class NotificationSSEService {
+class NotificationSSEService {
   constructor({
     heartbeatMs = NOTIFICATION_DEFAULTS.SSE_HEARTBEAT_MS,
     sessionTtlMs = NOTIFICATION_DEFAULTS.SSE_SESSION_TTL_MS,
     streamSessionStore = new InMemoryStreamSessionStore(),
     clientRegistry = new InMemoryNotificationClientRegistry(),
   } = {}) {
-    this.heartbeatMs = heartbeatMs;
-    this.sessionTtlMs = sessionTtlMs;
+    this.heartbeatMs =
+      Number(heartbeatMs) || NOTIFICATION_DEFAULTS.SSE_HEARTBEAT_MS;
+    this.sessionTtlMs =
+      Number(sessionTtlMs) || NOTIFICATION_DEFAULTS.SSE_SESSION_TTL_MS;
+
     this.streamSessionStore = streamSessionStore;
     this.clientRegistry = clientRegistry;
     this.heartbeatTimer = null;
@@ -201,3 +204,6 @@ export class NotificationSSEService {
     }
   }
 }
+
+export { NotificationSSEService };
+export default NotificationSSEService;

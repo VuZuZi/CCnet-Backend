@@ -1,153 +1,88 @@
-import User from "../user/user.model.js";
-import Report from "../report/report.model.js";
-import Post from "../communitypost/post.model.js";
-import Project from "../project/project.model.js";
-
 class AdminRepository {
-  async getSystemStats() {
-    const [userStats, reportStats, projectStats] = await Promise.all([
-      User.aggregate([
-        {
-          $group: {
-            _id: null,
-            total: { $sum: 1 },
-            banned: { $sum: { $cond: [{ $eq: ["$status", "banned"] }, 1, 0] } },
-          },
-        },
-      ]),
-      Report.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
-      Project.aggregate([
-        {
-          $group: {
-            _id: "$status",
-            count: { $sum: 1 }
-          }
-        }
-      ]),
-    ]);
-
-    return {
-      users: userStats[0] || { total: 0, banned: 0 },
-      reports: reportStats,
-      projects: projectStats,
-    };
+  constructor({
+    adminDashboardRepository,
+    adminUserRepository,
+    adminActionLogRepository,
+    adminProjectRepository,
+    adminReportRepository,
+  }) {
+    this.adminDashboardRepository = adminDashboardRepository;
+    this.adminUserRepository = adminUserRepository;
+    this.adminActionLogRepository = adminActionLogRepository;
+    this.adminProjectRepository = adminProjectRepository;
+    this.adminReportRepository = adminReportRepository;
   }
 
-  async findAllUsers() {
-    return await User.find()
-      .select("fullName email avatar role status isActive createdAt")
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec();
+  getSystemStats(...args) {
+    return this.adminDashboardRepository.getSystemStats(...args);
   }
 
-  async findUsers({ search = "", page = 1, limit = 20, role = "" } = {}) {
-    const safePage = Math.max(1, Number(page) || 1);
-    const safeLimit = Math.max(1, Math.min(50, Number(limit) || 20));
-    const skip = (safePage - 1) * safeLimit;
-
-    const filter = {};
-
-    if (role) {
-      filter.role = String(role).trim().toLowerCase();
-    }
-
-    if (String(search || "").trim()) {
-      const keyword = String(search).trim();
-
-      filter.$or = [
-        { fullName: { $regex: keyword, $options: "i" } },
-        { email: { $regex: keyword, $options: "i" } },
-        { username: { $regex: keyword, $options: "i" } },
-      ];
-    }
-
-    const [items, total] = await Promise.all([
-      User.find(filter)
-        .select("fullName email avatar role status isActive createdAt")
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(safeLimit)
-        .lean()
-        .exec(),
-      User.countDocuments(filter),
-    ]);
-
-    return {
-      items,
-      pagination: {
-        page: safePage,
-        limit: safeLimit,
-        total,
-        totalPages: Math.max(1, Math.ceil(total / safeLimit)),
-      },
-    };
+  findAllUsers(...args) {
+    return this.adminUserRepository.findAllUsers(...args);
   }
 
-  async findUserById(id) {
-    return await User.findById(id);
+  findUsers(...args) {
+    return this.adminUserRepository.findUsers(...args);
   }
 
-  async updateUser(id, updateData) {
-    return await User.findByIdAndUpdate(id, updateData, { new: true });
+  findUserById(...args) {
+    return this.adminUserRepository.findUserById(...args);
   }
 
-  // async findAllReports() {
-  //   return await Report.find()
-  //     .populate("reporter_ref", "username email")
-  //     .populate({
-  //       path: "target_ref",
-  //       select: "content title fullName email isActive status",
-  //     })
-  //     .sort({ createdAt: -1 });
-  // }
-
-  async findAllProjects() {
-    return await Project.find()
-      .populate("organizerId", "fullName email kyc projectCount isVerified")
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec();
+  updateUser(...args) {
+    return this.adminUserRepository.updateUser(...args);
   }
 
-  async deleteProject(id) {
-    return await Project.findByIdAndDelete(id);
+  updateUserCoolingPeriod(...args) {
+    return this.adminUserRepository.updateUserCoolingPeriod(...args);
   }
 
-  async findProjectsForReview({ skip = 0, limit = 10 }) {
-    return await Project.find({
-      status: { $in: ['PENDING_APPROVAL', 'REVISION_REQUESTED'] }
-    })
-      .populate("organizerId", "fullName email kyc")
-      .sort({ updatedAt: 1 }) // Dự án nào đợi lâu nhất lên đầu
-      .skip(skip)
-      .limit(limit)
-      .lean()
-      .exec();
+  createAdminActionLog(...args) {
+    return this.adminActionLogRepository.createAdminActionLog(...args);
   }
 
-  async findProjectById(id) {
-    return await Project.findById(id)
-      .populate("organizerId", "fullName email kyc coolingPeriodEnd")
-      .lean()
-      .exec();
+  findAdminActionLogs(...args) {
+    return this.adminActionLogRepository.findAdminActionLogs(...args);
   }
 
-  async updateUserCoolingPeriod(userId, endDate, session = null) {
-    return await User.findByIdAndUpdate(
-      userId,
-      { $set: { coolingPeriodEnd: endDate } },
-      { new: true, session }
-    ).lean().exec();
+  findOrganizerRequestActionLogs(...args) {
+    return this.adminActionLogRepository.findOrganizerRequestActionLogs(...args);
   }
 
-  async findAllReports() {
-    return await Report.find()
-      .populate("reporter_ref", "fullName email")
-      .populate("target_ref")
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec();
+  findProjects(...args) {
+    return this.adminProjectRepository.findProjects(...args);
+  }
+
+  findProjectsForReview(...args) {
+    return this.adminProjectRepository.findProjectsForReview(...args);
+  }
+
+  findProjectById(...args) {
+    return this.adminProjectRepository.findProjectById(...args);
+  }
+
+  deleteProject(...args) {
+    return this.adminProjectRepository.deleteProject(...args);
+  }
+
+  findAllReports(...args) {
+    return this.adminReportRepository.findAllReports(...args);
+  }
+
+  findAllPosts(...args) {
+    return this.adminReportRepository.findAllPosts(...args);
+  }
+
+  findReportById(...args) {
+    return this.adminReportRepository.findReportById(...args);
+  }
+
+  deletePostById(...args) {
+    return this.adminReportRepository.deletePostById(...args);
+  }
+
+  saveReport(...args) {
+    return this.adminReportRepository.saveReport(...args);
   }
 }
 

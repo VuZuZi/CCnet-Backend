@@ -9,56 +9,55 @@ const getController = () => {
 };
 
 const router = express.Router();
+
 router.use(authenticate, adminMiddleware);
 
 router.get("/stats", (req, res, next) =>
-  getController().getStats(req, res, next),
+  getController().getStats(req, res, next)
 );
 
 router.get("/users", (req, res, next) =>
-  getController().getUsers(req, res, next),
+  getController().getUsers(req, res, next)
 );
 
 router.patch("/users/:id/ban", (req, res, next) =>
-  getController().banUser(req, res, next),
-);
-router.patch("/users/:id/verify", (req, res, next) =>
-  getController().verifyUser(req, res, next),
-);
-router.patch("/users/:id/status", (req, res, next) =>
-  getController().updateUserStatus(req, res, next),
-);
-
-router.patch("/users/:id/verify", (req, res, next) =>
-  getController().verifyUser(req, res, next),
+  getController().banUser(req, res, next)
 );
 
 router.patch("/users/:id/status", (req, res, next) =>
-  getController().updateUserStatus(req, res, next),
+  getController().updateUserStatus(req, res, next)
+);
+
+router.get("/action-logs", (req, res, next) =>
+  getController().getActionLogs(req, res, next)
+);
+
+router.get("/organizer-action-logs", (req, res, next) =>
+  getController().getOrganizerActionLogs(req, res, next)
 );
 
 router.get("/projects", (req, res, next) =>
-  getController().getProjects(req, res, next),
+  getController().getProjects(req, res, next)
 );
 
 router.patch("/projects/:id/status", (req, res, next) =>
-  getController().updateProjectStatus(req, res, next),
+  getController().updateProjectStatus(req, res, next)
 );
 
 router.delete("/projects/:id", (req, res, next) =>
-  getController().deleteProject(req, res, next),
+  getController().deleteProject(req, res, next)
 );
 
 router.get("/reports", (req, res, next) =>
-  getController().getReports(req, res, next),
+  getController().getReports(req, res, next)
 );
 
 router.patch("/reports/:id/resolve", (req, res, next) =>
-  getController().resolveReport(req, res, next),
+  getController().resolveReport(req, res, next)
 );
 
 router.post("/notifications", (req, res, next) =>
-  getController().sendNotification(req, res, next),
+  getController().sendNotification(req, res, next)
 );
 
 export default router;

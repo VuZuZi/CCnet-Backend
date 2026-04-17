@@ -32,17 +32,13 @@ class AdminController {
 
   banUser = async (req, res, next) => {
     try {
-      const user = await this.adminService.toggleUserBan(req.params.id);
-      res.json({ status: "success", data: user });
-    } catch (e) {
-      next(e);
-    }
-  };
-
-  verifyUser = async (req, res, next) => {
-    try {
-      const { isVerified } = req.body;
-      const user = await this.adminService.verifyUser(req.params.id, isVerified);
+      const { reason } = req.body || {};
+      const user = await this.adminService.toggleUserBan(
+        req.params.id,
+        reason,
+        req.user?.userId || req.user?._id || null,
+        req.user?.role || "admin"
+      );
       res.json({ status: "success", data: user });
     } catch (e) {
       next(e);
@@ -51,9 +47,35 @@ class AdminController {
 
   updateUserStatus = async (req, res, next) => {
     try {
-      const { status } = req.body || {};
-      const user = await this.adminService.updateUserStatus(req.params.id, status);
+      const { status, reason } = req.body || {};
+      const user = await this.adminService.updateUserStatus(
+        req.params.id,
+        status,
+        reason,
+        req.user?.userId || req.user?._id || null,
+        req.user?.role || "admin"
+      );
       res.json({ status: "success", data: user });
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  getActionLogs = async (req, res, next) => {
+    try {
+      const logs = await this.adminService.getActionLogs(req.query || {});
+      res.json({ status: "success", data: logs });
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  getOrganizerActionLogs = async (req, res, next) => {
+    try {
+      const logs = await this.adminService.getOrganizerActionLogs(
+        req.query || {}
+      );
+      res.json({ status: "success", data: logs });
     } catch (e) {
       next(e);
     }
@@ -70,12 +92,15 @@ class AdminController {
 
   resolveReport = async (req, res, next) => {
     try {
-      const { actions, note } = req.body;
+      const { actions, note } = req.body || {};
       const result = await this.adminService.resolveReportWithActions(
         req.params.id,
-        actions || [],
+        Array.isArray(actions) ? actions : [],
         note,
+        req.user?.userId || req.user?._id || null,
+        req.user?.role || "admin"
       );
+
       res.json({ status: "success", data: result });
     } catch (e) {
       next(e);
@@ -95,7 +120,7 @@ class AdminController {
 
       const notif = await this.adminService.createSystemNotification({
         ...req.body,
-        actorId: req.user?.userId || null,
+        actorId: req.user?.userId || req.user?._id || null,
         actorRole: currentRole,
       });
 
@@ -107,7 +132,7 @@ class AdminController {
 
   getProjects = async (req, res, next) => {
     try {
-      const projects = await this.adminService.getProjects();
+      const projects = await this.adminService.getProjects(req.query || {});
       res.json({ status: "success", data: projects });
     } catch (e) {
       next(e);
@@ -116,12 +141,15 @@ class AdminController {
 
   updateProjectStatus = async (req, res, next) => {
     try {
-      const { status } = req.body || {};
+      const { status, feedback, reason } = req.body || {};
+
       const updated = await this.adminService.updateProjectStatus(
         req.params.id,
         status,
-        req.user?.userId,
+        reason || feedback || "",
+        req.user?.userId || req.user?._id || null
       );
+
       res.json({ status: "success", data: updated });
     } catch (e) {
       next(e);
@@ -130,7 +158,14 @@ class AdminController {
 
   deleteProject = async (req, res, next) => {
     try {
-      await this.adminService.deleteProject(req.params.id);
+      const { reason } = req.body || {};
+
+      await this.adminService.deleteProject(
+        req.params.id,
+        reason,
+        req.user?.userId || req.user?._id || null
+      );
+
       res.status(204).send();
     } catch (e) {
       next(e);
