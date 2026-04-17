@@ -23,10 +23,7 @@ const mediaPayloadSchema = z
     url: z
       .string()
       .url("URL không hợp lệ")
-      .regex(
-        cloudinaryUrlRegex,
-        "Chỉ chấp nhận URL từ CDN hệ thống",
-      )
+      .regex(cloudinaryUrlRegex, "Chỉ chấp nhận URL từ CDN hệ thống")
       .optional(),
     publicId: z.string().min(1).optional(),
     originalName: z.string().optional(),
@@ -35,12 +32,14 @@ const mediaPayloadSchema = z
     mediaType: z.string().optional(),
   })
   .strict()
-  .refine((data) => data._id || (data.url && data.publicId));
+  .refine((data) => data._id || (data.url && data.publicId), {
+    message: "Media phải có _id hoặc cặp url + publicId",
+  });
 
 const locationSchema = z.object({
   type: z.literal("Point").default("Point"),
-  coordinates: z.array(z.number()).length(2),
-  address: z.string().min(1),
+  coordinates: z.array(z.number()).length(2, "Tọa độ phải có 2 phần tử"),
+  address: z.string().min(1, "Địa chỉ không được để trống"),
 });
 
 const beneficiaryInfoSchema = z.object({
@@ -92,7 +91,9 @@ const projectBaseShape = {
   needsVolunteers: z.boolean().optional().default(false),
   volunteerRoles: z.array(volunteerRoleSchema).optional(),
 
-  coverMedia: z.union([z.array(mediaPayloadSchema), mediaPayloadSchema]).optional(),
+  coverMedia: z
+    .union([z.array(mediaPayloadSchema), mediaPayloadSchema])
+    .optional(),
   documents: z.array(mediaPayloadSchema).optional(),
 };
 
@@ -111,12 +112,16 @@ const validateDateRange = (start, end, ctx) => {
 };
 
 const validateFunded = (data, ctx) => {
-  if (!data.targetAmount) addIssue(ctx, ["targetAmount"], "Thiếu target");
-  if (!data.mvpAmount) addIssue(ctx, ["mvpAmount"], "Thiếu mvp");
+  if (!data.targetAmount) {
+    addIssue(ctx, ["targetAmount"], "Thiếu target");
+  }
+  if (!data.mvpAmount) {
+    addIssue(ctx, ["mvpAmount"], "Thiếu mvp");
+  }
 };
 
 const validateVolunteer = (data, ctx) => {
-  if (data.targetAmount > 0) {
+  if (Number(data.targetAmount || 0) > 0) {
     addIssue(ctx, ["targetAmount"], "Volunteer không có tiền");
   }
 };
@@ -146,25 +151,43 @@ export const updateDraftSchema = z
   .strict()
   .superRefine(refine);
 
-export const projectCompleteSchema = z.object({
-  projectType: z.enum(Object.values(PROJECT_TYPE)),
-  description: z.string().min(200),
-  milestones: z.array(z.any()).min(1),
-}).superRefine((data, ctx) => {
-  if (data.projectType === PROJECT_TYPE.FUNDED) {
-    if (!data.targetAmount) addIssue(ctx, ["targetAmount"], "Thiếu target");
-  }
-});
+export const projectCompleteSchema = z
+  .object({
+    projectType: z.enum(Object.values(PROJECT_TYPE)),
+    description: z.string().min(200),
+    milestones: z.array(z.any()).min(1),
+    targetAmount: z.number().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.projectType === PROJECT_TYPE.FUNDED) {
+      if (!data.targetAmount) {
+        addIssue(ctx, ["targetAmount"], "Thiếu target");
+      }
+    }
+  });
 
-export const exploreQuerySchema = z.object({
-  page: z.coerce.number().default(1),
-  limit: z.coerce.number().default(9),
-  category: z.enum(Object.values(PROJECT_CATEGORY)).optional(),
-  sort: z.enum(["newest", "trending", "ending_soon"]).default("newest"),
-}).strict();
+export const exploreQuerySchema = z
+  .object({
+    page: z.coerce.number().default(1),
+    limit: z.coerce.number().default(9),
+    category: z.enum(Object.values(PROJECT_CATEGORY)).optional(),
+    sort: z.enum(["newest", "trending", "ending_soon"]).default("newest"),
+    location: z.string().optional(),
+    organizerScope: z.enum(["ALL", "FOLLOWED"]).optional(),
+    search: z.string().optional(),
+    status: z.string().optional(),
+    keyword: z.string().optional(),
+  })
+  .passthrough();
 
-export const workspaceQuerySchema = z.object({
-  page: z.coerce.number().default(1),
-  limit: z.coerce.number().default(10),
-  status: z.enum([...Object.values(PROJECT_STATUS), "ALL"]).default("ALL"),
-}).strict();
+export const workspaceQuerySchema = z
+  .object({
+    page: z.coerce.number().default(1),
+    limit: z.coerce.number().default(10),
+    status: z.enum([...Object.values(PROJECT_STATUS), "ALL"]).default("ALL"),
+    sort: z.enum(["newest", "oldest"]).optional(),
+    search: z.string().optional(),
+    keyword: z.string().optional(),
+    category: z.string().optional(),
+  })
+  .passthrough();
