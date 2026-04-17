@@ -99,30 +99,38 @@ export class RedisNotificationRealtimeGateway {
     });
   }
 
+  handleIncomingMessage(rawMessage) {
+    const message = safeJsonParse(rawMessage);
+
+    if (!message?.userId || !message?.eventName) {
+      this.logger?.error?.('Invalid Redis realtime notification payload', {
+        channel: this.channel,
+        rawMessage,
+      });
+      return;
+    }
+
+    try {
+      this.onUserEvent?.({
+        userId: String(message.userId),
+        eventName: message.eventName,
+        payload: message.payload ?? {},
+      });
+    } catch (error) {
+      this.logger?.error?.('Failed to handle Redis notification realtime message', {
+        error,
+        channel: this.channel,
+        rawMessage,
+      });
+    }
+  }
+
   attachSubscriberListeners() {
     if (!this.subscriber) return;
 
     this.subscriber.on('message', (channel, rawMessage) => {
       if (channel !== this.channel) return;
-
-      const message = safeJsonParse(rawMessage);
-      if (!message?.userId || !message?.eventName) {
-        return;
-      }
-
-      try {
-        this.onUserEvent?.({
-          userId: String(message.userId),
-          eventName: message.eventName,
-          payload: message.payload ?? {},
-        });
-      } catch (error) {
-        this.logger?.error?.('Failed to handle Redis notification realtime message', {
-          error,
-          channel,
-          rawMessage,
-        });
-      }
+      this.handleIncomingMessage(rawMessage);
     });
 
     this.subscriber.on('error', (error) => {
@@ -175,6 +183,8 @@ export class RedisNotificationRealtimeGateway {
         this.subscriber = baseClient.duplicate();
         this.attachSubscriberListeners();
 
+        // Với ioredis: KHÔNG gọi connect() lại
+        // và nhận message qua event "message", không phải callback subscribe.
         await this.subscriber.subscribe(this.channel);
 
         this.isReadyFlag = true;
@@ -226,6 +236,13 @@ export class RedisNotificationRealtimeGateway {
       });
 
       await this.redis.publish(this.channel, message);
+
+      this.logger?.info?.('Published realtime notification event', {
+        channel: this.channel,
+        userId: String(userId),
+        eventName,
+      });
+
       return true;
     } catch (error) {
       this.logger?.error?.('Failed to publish realtime notification event', {

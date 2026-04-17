@@ -1,10 +1,10 @@
-import EscrowAccount from './escrow.model.js';
+import EscrowAccount from "./escrow.model.js";
 
 class EscrowRepository {
-    async create(data, session = null) {
-        const docs = await EscrowAccount.create([data], { session });
-        return docs[0];
-    }
+  async create(data, session = null) {
+    const docs = await EscrowAccount.create([data], { session });
+    return docs[0];
+  }
 
     async findByProjectId(projectId, session = null) {
         return await EscrowAccount.findOne({ projectId })
@@ -85,4 +85,5 @@ class EscrowRepository {
         ).lean().exec();
     }
 }
+
 export default EscrowRepository;

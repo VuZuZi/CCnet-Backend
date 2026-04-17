@@ -5,6 +5,7 @@ import {
   PROJECT_CATEGORY,
   MILESTONE_STATUS,
   PROJECT_TYPE,
+  SURPLUS_POLICY,
 } from "./project.constant.js";
 
 const evidencePolicySchema = new mongoose.Schema(
@@ -22,7 +23,6 @@ const milestoneSchema = new mongoose.Schema(
     title: { type: String, required: true, trim: true, maxlength: 100 },
     description: { type: String, required: true, trim: true, maxlength: 500 },
     targetAmount: { type: Number, default: 0, min: 0 },
-    deliverables: { type: String, trim: true },
     startDate: { type: Date, default: null },
     endDate: { type: Date, default: null },
     location: {
@@ -73,7 +73,7 @@ const projectSchema = new mongoose.Schema(
       type: String,
       unique: true,
       sparse: true,
-      index: true
+      index: true,
     },
     projectType: {
       type: String,
@@ -100,21 +100,21 @@ const projectSchema = new mongoose.Schema(
       totalBeneficiaries: { type: Number, default: 0 },
       evidenceMethod: { type: String },
     },
-
     coverMedia: {
       url: { type: String, default: null },
       publicId: { type: String, default: null },
-      mediaType: { type: String, enum: ["image", "video"], default: "image" },
+      mediaType: {
+        type: String,
+        enum: ["image", "video"],
+        default: "image",
+      },
     },
-
     documents: [{ type: mongoose.Schema.Types.ObjectId, ref: "Media" }],
-
     location: {
       type: { type: String, enum: ["Point"], default: "Point" },
       coordinates: { type: [Number], required: true },
       address: { type: String, required: true },
     },
-
     targetAmount: { type: Number, default: 0, min: 0 },
     currentAmount: { type: Number, default: 0, min: 0 },
     mvpAmount: { type: Number, default: 0, min: 0 },
@@ -123,15 +123,22 @@ const projectSchema = new mongoose.Schema(
         item: { type: String, required: true },
         amount: { type: Number, required: true },
         note: { type: String },
-      }
+      },
     ],
-
+    surplusPolicy: {
+      type: String,
+      enum: Object.values(SURPLUS_POLICY),
+      default: SURPLUS_POLICY.DONATE_TO_PLATFORM,
+    },
+    carryOverProjectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Project",
+      default: null,
+    },
     milestones: [milestoneSchema],
-
     needsVolunteers: { type: Boolean, default: false },
     volunteerRoles: [volunteerRoleSchema],
     isVolunteerFull: { type: Boolean, default: false },
-
     status: {
       type: String,
       enum: Object.values(PROJECT_STATUS),
@@ -140,14 +147,12 @@ const projectSchema = new mongoose.Schema(
     },
     startDate: { type: Date, default: null },
     endDate: { type: Date, default: null },
-
     isUrgent: { type: Boolean, default: false, index: true },
 
     isOverFunded: { type: Boolean, default: false },
     isLocked: { type: Boolean, default: false },
 
     pauseReason: { type: String, default: null },
-
     aiRiskScore: { type: Number, min: 0, max: 100, default: null },
     riskFlags: [{ type: String }],
 
@@ -157,18 +162,10 @@ const projectSchema = new mongoose.Schema(
       default: null,
     },
     approvedAt: { type: Date, default: null },
-
     submittedAt: { type: Date, default: null },
     revisionRequestedAt: { type: Date, default: null },
-
-    revisionCount: {
-      type: Number,
-      default: 0
-    },
-    rejectionReason: {
-      type: String,
-      default: null
-    },
+    revisionCount: { type: Number, default: 0 },
+    rejectionReason: { type: String, default: null },
 
     fromHelpRequestId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -182,7 +179,7 @@ const projectSchema = new mongoose.Schema(
       shareCount: { type: Number, default: 0 },
       targetVolunteers: { type: Number, default: 0 },
       currentVolunteers: { type: Number, default: 0 },
-      followerCount: { type: Number, default: 0, min: 0 },
+      followerCount: { type: Number, default: 0 },
     },
     postProjectSummary: {
       totalSurplus: { type: Number, default: 0 },
@@ -194,8 +191,6 @@ const projectSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    toJSON: { virtuals: true },
-    toObject: { virtuals: true },
   },
 );
 
@@ -206,17 +201,10 @@ projectSchema.index({ status: 1, needsVolunteers: 1, isVolunteerFull: 1 });
 projectSchema.index({ status: 1, "stats.viewCount": -1 });
 projectSchema.index({ status: 1, endDate: 1 });
 projectSchema.index({ organizerId: 1, status: 1, createdAt: -1 });
-projectSchema.index(
-  { title: "text", "location.address": "text", description: "text" },
-  {
-    weights: { title: 10, "location.address": 5, description: 1 },
-    name: "ProjectTextIndex",
-  },
-);
 
 projectSchema.pre("save", function (next) {
   if (this.startDate && this.endDate && this.startDate >= this.endDate) {
-    return next(new Error("Ngày kết thúc phải sau ngày bắt đầu dự án."));
+    return next(new Error("Ngày không hợp lệ"));
   }
   next();
 });
@@ -253,4 +241,5 @@ projectSchema.pre(
 );
 
 const Project = mongoose.model("Project", projectSchema);
+
 export default Project;

@@ -1,11 +1,16 @@
 import express from "express";
+import { asValue } from "awilix";
 
 import {
   configureMiddleware,
   configureSystemRoutes,
 } from "./config/express.js";
 import { configureRoutes } from "./config/routes.js";
-import { getContainer, initializeContainer, registerModule } from "./container/index.js";
+import {
+  getContainer,
+  initializeContainer,
+  registerModule,
+} from "./container/index.js";
 import { createConfiguredNotificationModule } from "./config/notification.js";
 
 import { initPostWorkers } from "./modules/communitypost/post.worker.js";
@@ -22,6 +27,61 @@ export const createApp = async () => {
   getContainer().resolve("paymentProvider");
 
   const notificationModule = await createConfiguredNotificationModule();
+  const container = getContainer();
+
+  if (notificationModule?.services || notificationModule?.repositories) {
+    container.register({
+      ...(notificationModule.services?.notificationService
+        ? {
+            notificationService: asValue(
+              notificationModule.services.notificationService,
+            ),
+          }
+        : {}),
+      ...(notificationModule.services?.notificationSettingService
+        ? {
+            notificationSettingService: asValue(
+              notificationModule.services.notificationSettingService,
+            ),
+          }
+        : {}),
+      ...(notificationModule.services?.notificationSSEService
+        ? {
+            notificationSSEService: asValue(
+              notificationModule.services.notificationSSEService,
+            ),
+          }
+        : {}),
+      ...(notificationModule.services?.notificationBroadcastService
+        ? {
+            notificationBroadcastService: asValue(
+              notificationModule.services.notificationBroadcastService,
+            ),
+          }
+        : {}),
+      ...(notificationModule.services?.notificationRealtimeGateway
+        ? {
+            notificationRealtimeGateway: asValue(
+              notificationModule.services.notificationRealtimeGateway,
+            ),
+          }
+        : {}),
+      ...(notificationModule.repositories?.notificationRepository
+        ? {
+            notificationRepository: asValue(
+              notificationModule.repositories.notificationRepository,
+            ),
+          }
+        : {}),
+      ...(notificationModule.repositories?.notificationSettingRepository
+        ? {
+            notificationSettingRepository: asValue(
+              notificationModule.repositories.notificationSettingRepository,
+            ),
+          }
+        : {}),
+    });
+  }
 
   if (typeof configureMiddleware === "function") {
     configureMiddleware(app);

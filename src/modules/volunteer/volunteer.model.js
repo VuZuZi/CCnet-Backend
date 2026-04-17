@@ -1,4 +1,3 @@
-// backend/src/modules/volunteer/volunteer.model.js
 import mongoose from 'mongoose';
 
 const volunteerSchema = new mongoose.Schema(
@@ -8,7 +7,6 @@ const volunteerSchema = new mongoose.Schema(
       ref: 'Project',
       required: true,
     },
-
     volunteerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -22,44 +20,53 @@ const volunteerSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-
     motivation: {
       type: String,
       required: true,
     },
-
     availability: {
       type: String,
       required: true,
     },
-      reason:{
-          type: String
-      },
+    reason: {
+      type: String,
+    },
     status: {
       type: String,
-      enum: ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'],
+      enum: ['PENDING', 'APPROVED', 'REJECTED', 'WITHDRAW_REQUESTED', 'CANCELLED'],
       default: 'PENDING',
     },
-
     rejectReason: {
       type: String,
     },
-
+    withdrawReason: {
+      type: String,
+      default: null,
+    },
+    withdrawRequestedAt: {
+      type: Date,
+      default: null,
+    },
+    withdrawReviewedAt: {
+      type: Date,
+      default: null,
+    },
+    withdrawReviewNote: {
+      type: String,
+      default: null,
+    },
     ratingScore: {
       type: Number,
       min: 1,
       max: 5,
     },
-
     reviewNotes: {
       type: String,
     },
-
     isCertificateSent: {
       type: Boolean,
       default: false,
     },
-
     appliedAt: {
       type: Date,
       default: Date.now,
@@ -68,13 +75,12 @@ const volunteerSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-//  Partial Unique Index - chỉ áp dụng cho status KHÔNG phải CANCELLED
 volunteerSchema.index(
   { volunteerId: 1, opportunityId: 1 },
   {
     unique: true,
     partialFilterExpression: {
-      status: { $nin: ['CANCELLED'] }  // Chỉ unique khi status không phải CANCELLED
+      status: { $nin: ['CANCELLED'] }
     }
   }
 );

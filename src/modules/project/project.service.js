@@ -9,6 +9,59 @@ import { DOMAIN_EVENTS } from "../../config/notification.js";
 import { projectCompleteSchema } from "./project.validation.js";
 import { ProjectDTO } from "./project.dto.js";
 
+const toObject = (value) => (value?.toObject ? value.toObject() : value);
+
+const toIdString = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object") return String(value._id || value.id || value);
+  return String(value);
+};
+
+const toArray = (value) => {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+};
+
+const toUniqueStrings = (values = []) => [...new Set(values.map(String))];
+
+const formatCoverMedia = (media) => ({
+  url: media.url,
+  publicId: media.publicId,
+  mediaType: media.mimetype?.startsWith("video") ? "video" : "image",
+});
+
+const buildMediaInsertPayload = (item, organizerId, context) => ({
+  originalName: item.originalName || "unknown_file",
+  url: item.url,
+  publicId: item.publicId,
+  mimetype:
+    item.mimetype ||
+    (item.mediaType === "video" ? "video/mp4" : "image/jpeg"),
+  size: Number(item.size || 0),
+  width: Number(item.width || 0),
+  height: Number(item.height || 0),
+  uploadedBy: organizerId,
+  context,
+});
+
+const toPositiveInt = (value, fallback) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.floor(parsed);
+};
+
+const buildPagination = (totalItems, currentPage, pageSize) => {
+  const totalPages = Math.ceil(totalItems / pageSize) || 1;
+
+  return {
+    totalItems,
+    currentPage,
+    totalPages,
+    hasNextPage: currentPage < totalPages,
+  };
+};
+
 class ProjectService {
   constructor({
     projectRepository,
@@ -70,8 +123,8 @@ class ProjectService {
   _getFundingProgress(project) {
     const current = Number(
       project?.financialDetail?.availableBalance ??
-      project?.currentAmount ??
-      0
+        project?.currentAmount ??
+        0,
     );
     const target = Number(project?.targetAmount || 0);
     if (target <= 0) return 0;
@@ -81,23 +134,23 @@ class ProjectService {
   _getVolunteerProgress(project) {
     const current = Number(
       project?.stats?.currentVolunteers ??
-      project?.stats?.volunteerJoined ??
-      0
+        project?.stats?.volunteerJoined ??
+        0,
     );
 
     const target =
       Number(
         project?.stats?.targetVolunteers ??
-        project?.stats?.volunteerNeeded ??
-        0
+          project?.stats?.volunteerNeeded ??
+          0,
       ) ||
       Number(
         Array.isArray(project?.volunteerRoles)
           ? project.volunteerRoles.reduce(
-            (sum, role) => sum + Number(role?.quantity || 0),
-            0
-          )
-          : 0
+              (sum, role) => sum + Number(role?.quantity || 0),
+              0,
+            )
+          : 0,
       );
 
     if (target <= 0) return 0;
@@ -112,7 +165,6 @@ class ProjectService {
 
   _computeUrgencySignals(project) {
     const manualUrgent = Boolean(project?.isUrgent);
-
     const status = String(project?.status || "").toUpperCase();
     const closedStatuses = new Set([
       "COMPLETED",
@@ -123,27 +175,18 @@ class ProjectService {
     ]);
 
     const isClosed = closedStatuses.has(status);
-
-    const daysLeft =
-      typeof this._getDaysUntilEnd === "function"
-        ? this._getDaysUntilEnd(project)
-        : null;
-
+    const daysLeft = this._getDaysUntilEnd(project);
     const hasExpired = typeof daysLeft === "number" ? daysLeft < 0 : false;
     const isOpen = !isClosed && !hasExpired;
-
     const category = String(project?.category || "").toUpperCase();
     const isDisasterRelief = category === "THIEN_TAI";
-
     const fundingProgress = this._getFundingProgress(project) * 100;
     const volunteerProgress = this._getVolunteerProgress(project) * 100;
-
     const isFundedProject =
       String(project?.projectType || "").toUpperCase() === "FUNDED";
-
     const needsVolunteers = Boolean(
       project?.needsVolunteers ||
-      String(project?.projectType || "").toUpperCase() === "VOLUNTEER_ONLY"
+        String(project?.projectType || "").toUpperCase() === "VOLUNTEER_ONLY",
     );
 
     let score = 0;
@@ -251,7 +294,7 @@ class ProjectService {
     return new Set(
       user.skills
         .map((skill) => this._normalizeText(skill))
-        .filter(Boolean)
+        .filter(Boolean),
     );
   }
 
@@ -308,7 +351,7 @@ class ProjectService {
     const daysLeft = this._getDaysUntilEnd(project);
     const skillMatchScore = this._getVolunteerSkillMatchScore(
       project,
-      userSkillSet
+      userSkillSet,
     );
     const urgency = this._computeUrgencySignals(project);
 
@@ -394,18 +437,11 @@ class ProjectService {
     if (project?.coverMedia?.url) score += 8;
     if (project?.summary || project?.description) score += 4;
     if (project?.needsVolunteers) score += 8;
-
-    if (userCity && projectCity && userCity === projectCity) {
-      score += 28;
-    }
-
+    if (userCity && projectCity && userCity === projectCity) score += 28;
     if (supportedCategorySet.has(project?.category)) score += 22;
     if (appliedCategorySet.has(project?.category)) score += 16;
     if (followedProjectIds.has(projectId)) score += 40;
-
-    if (organizerId && followedOrganizerIds.has(organizerId)) {
-      score += 120;
-    }
+    if (organizerId && followedOrganizerIds.has(organizerId)) score += 120;
 
     if (daysLeft !== null) {
       if (daysLeft >= 0 && daysLeft <= 7) score += 12;
@@ -507,111 +543,151 @@ class ProjectService {
     };
   }
 
-  async _enforceKycTierCaps(project, organizerId) {
-    const user = await this.userRepository.findById(organizerId);
-    if (!user) throw new AppError("Không tìm thấy thông tin Organizer.", 404);
+  _calculateVolunteerStats(projectData = {}) {
+    const needsVolunteers = Boolean(projectData.needsVolunteers);
+    const volunteerRoles = Array.isArray(projectData.volunteerRoles)
+      ? projectData.volunteerRoles
+      : [];
 
-    const tier = user.kyc?.tier ?? 0;
-    const limits = KYC_TIER_LIMITS[tier];
-
-    if (!limits || !limits.canCreateProject) {
-      throw new AppError(
-        `Tài khoản Tier ${tier} không được phép tạo dự án. Vui lòng nâng cấp KYC.`,
-        403
-      );
+    if (!needsVolunteers || volunteerRoles.length === 0) {
+      return {
+        needsVolunteers: false,
+        volunteerRoles: [],
+        targetVolunteers: 0,
+      };
     }
 
-    const start = new Date(project.startDate);
-    const end = new Date(project.endDate);
-    const durationDays = (end - start) / (1000 * 60 * 60 * 24);
+    const targetVolunteers = volunteerRoles.reduce(
+      (sum, role) => sum + Number(role?.quantity || 0),
+      0,
+    );
 
-    if (limits.maxDurationDays !== null && durationDays > limits.maxDurationDays) {
-      throw new AppError(
-        `Tier ${tier} chỉ được tạo dự án tối đa ${limits.maxDurationDays} ngày (Dự án của bạn: ${Math.ceil(
-          durationDays
-        )} ngày).`,
-        403
-      );
-    }
-
-    if (
-      project.projectType === PROJECT_TYPE.FUNDED &&
-      limits.maxFundingCap !== null
-    ) {
-      if (project.targetAmount > limits.maxFundingCap) {
-        throw new AppError(
-          `Tier ${tier} chỉ được gọi vốn tối đa ${limits.maxFundingCap.toLocaleString(
-            "vi-VN"
-          )} VND.`,
-          403
-        );
-      }
-    }
-
-    if (limits.maxConcurrentProjects !== null) {
-      const stats = await this.projectRepository.getOrganizerStats(organizerId);
-      const concurrent = stats.activeProjects + stats.pendingProjects;
-
-      if (concurrent >= limits.maxConcurrentProjects) {
-        throw new AppError(
-          `Tier ${tier} chỉ được phép chạy song song tối đa ${limits.maxConcurrentProjects} dự án.`,
-          403
-        );
-      }
-    }
+    return {
+      needsVolunteers: true,
+      volunteerRoles,
+      targetVolunteers,
+    };
   }
 
-  async _processMediaPayload(mediaArray, organizerId, context) {
+  // From feature/Hieu_FixCreateProject: inject location + evidencePolicy defaults into milestones
+  _applyMilestoneSmartDefaults(milestones, fallbackProjectLocation) {
+    if (!milestones || !Array.isArray(milestones)) return [];
+
+    return milestones.map((m) => {
+      const targetAmt = m.targetAmount || 0;
+
+      const smartPolicy = {
+        requireFinancial: targetAmt > 0,
+        requireGeoPhotos: targetAmt === 0 ? 1 : 0,
+        requireVolunteerLogs: m.evidencePolicy?.requireVolunteerLogs || false,
+      };
+
+      return {
+        ...m,
+        location: m.location || fallbackProjectLocation,
+        evidencePolicy: smartPolicy,
+      };
+    });
+  }
+
+  async _linkHelpRequestAfterProjectCreation(
+    fromHelpRequestId,
+    createdProject,
+    organizerId,
+    session,
+  ) {
+    if (!fromHelpRequestId || !this.helpRequestRepository) {
+      return;
+    }
+
+    try {
+      const linkedHelpRequest =
+        await this.helpRequestRepository.findById(fromHelpRequestId);
+
+      await this.helpRequestRepository.updateById(
+        fromHelpRequestId,
+        { linkedProjectId: createdProject._id },
+        session,
+      );
+
+      if (linkedHelpRequest?.requesterId && this.notificationRepository) {
+        const organizerUser = await this.userRepository.findById(organizerId);
+
+        await this.notificationRepository.create({
+          recipientId: linkedHelpRequest.requesterId,
+          actorId: organizerId,
+          type: "help_request_assignment_responded",
+          title: `${organizerUser?.fullName || "Organizer"} đã đồng ý host yêu cầu của bạn`,
+          message: `Yêu cầu "${linkedHelpRequest.title}" đã được chấp nhận và chuyển thành dự án.`,
+          actionUrl: `/projects/${createdProject._id}`,
+          metadata: {
+            helpRequestId: String(linkedHelpRequest._id),
+            projectId: String(createdProject._id),
+            organizerId: String(organizerId),
+            action: "hosted",
+          },
+        });
+      }
+    } catch {}
+  }
+
+  async processMediaPayload(mediaArray, organizerId, context) {
     const validMediaIds = new Set();
     const newMediaToInsert = [];
-
+    const normalizedMedia = Array.isArray(mediaArray) ? mediaArray : [];
     const idsToCheck = [];
     const newItemsToCheck = [];
 
-    for (const item of mediaArray) {
-      if (item._id) idsToCheck.push(item._id);
-      else if (item.publicId && item.url) newItemsToCheck.push(item);
+    for (const item of normalizedMedia) {
+      if (item?._id) {
+        idsToCheck.push(item._id);
+        continue;
+      }
+
+      if (item?.publicId && item?.url) {
+        newItemsToCheck.push(item);
+      }
     }
 
     if (idsToCheck.length > 0) {
       const ownedMedia = await this.mediaRepository.findManyByIdsAndOwner(
         idsToCheck,
-        organizerId
+        organizerId,
       );
-      ownedMedia.forEach((m) => validMediaIds.add(m._id.toString()));
+
+      ownedMedia.forEach((media) => {
+        validMediaIds.add(String(media._id));
+      });
     }
 
-    if (newItemsToCheck.length > 0) {
-      const publicIds = newItemsToCheck.map((m) => m.publicId);
-      const existingMedias =
-        await this.mediaRepository.findManyByPublicIds(publicIds);
-      const existingPublicIdMap = new Map(
-        existingMedias.map((m) => [m.publicId, m])
-      );
+    if (newItemsToCheck.length === 0) {
+      return {
+        validMediaIds: Array.from(validMediaIds),
+        newMediaToInsert,
+      };
+    }
 
-      for (const item of newItemsToCheck) {
-        const existing = existingPublicIdMap.get(item.publicId);
+    const publicIds = newItemsToCheck.map((item) => item.publicId);
+    const existingMedias =
+      await this.mediaRepository.findManyByPublicIds(publicIds);
 
-        if (existing) {
-          if (existing.uploadedBy.toString() === organizerId.toString()) {
-            validMediaIds.add(existing._id.toString());
-          }
-        } else {
-          newMediaToInsert.push({
-            originalName: item.originalName || "unknown_file",
-            url: item.url,
-            publicId: item.publicId,
-            mimetype:
-              item.mimetype ||
-              (item.mediaType === "video" ? "video/mp4" : "image/jpeg"),
-            size: item.size || 0,
-            width: item.width || 0,
-            height: item.height || 0,
-            uploadedBy: organizerId,
-            context,
-          });
+    const existingByPublicId = new Map(
+      existingMedias.map((media) => [media.publicId, media]),
+    );
+
+    for (const item of newItemsToCheck) {
+      const existing = existingByPublicId.get(item.publicId);
+
+      if (existing) {
+        if (toIdString(existing.uploadedBy) === toIdString(organizerId)) {
+          validMediaIds.add(String(existing._id));
         }
+        continue;
       }
+
+      newMediaToInsert.push(
+        buildMediaInsertPayload(item, organizerId, context),
+      );
     }
 
     return {
@@ -620,57 +696,171 @@ class ProjectService {
     };
   }
 
+  async insertProjectMedia({ coverPayload, docsPayload, organizerId }) {
+    const { validMediaIds: validCoverIds, newMediaToInsert: newCoverMedia } =
+      await this.processMediaPayload(
+        coverPayload,
+        organizerId,
+        "project_cover",
+      );
+
+    const { validMediaIds: validDocIds, newMediaToInsert: newDocMedia } =
+      await this.processMediaPayload(
+        docsPayload,
+        organizerId,
+        "project_document",
+      );
+
+    const allNewMediaToInsert = [...newCoverMedia, ...newDocMedia];
+    const publicIdsToRollback = allNewMediaToInsert
+      .map((media) => media.publicId)
+      .filter(Boolean);
+
+    return {
+      validCoverIds,
+      validDocIds,
+      allNewMediaToInsert,
+      publicIdsToRollback,
+    };
+  }
+
+  async resolveCoverMedia({ validCoverIds, insertedMedia }) {
+    const insertedCover = insertedMedia.find(
+      (media) => media.context === "project_cover",
+    );
+
+    if (insertedCover) {
+      return formatCoverMedia(insertedCover);
+    }
+
+    if (validCoverIds.length === 0) {
+      return null;
+    }
+
+    const existingCover = await this.mediaRepository.findById(validCoverIds[0]);
+    return existingCover ? formatCoverMedia(existingCover) : null;
+  }
+
+  async queueMediaCleanup(publicIds = []) {
+    const ids = publicIds.filter(Boolean);
+    if (ids.length === 0) return;
+
+    this.jobQueue
+      .addJob("project-maintenance", "cleanup-old-media", { publicIds: ids })
+      .catch(() => {});
+  }
+
+  async enforceKycTierCaps(project, organizerId) {
+    const user = await this.userRepository.findById(organizerId);
+
+    if (!user) {
+      throw new AppError("Không tìm thấy thông tin Organizer.", 404);
+    }
+
+    const tier = user.kyc?.tier ?? 0;
+    const limits = KYC_TIER_LIMITS[tier];
+
+    if (!limits || !limits.canCreateProject) {
+      throw new AppError(
+        `Tài khoản Tier ${tier} không được phép tạo dự án. Vui lòng nâng cấp KYC.`,
+        403,
+      );
+    }
+
+    const start = new Date(project.startDate);
+    const end = new Date(project.endDate);
+    const durationDays = (end - start) / (1000 * 60 * 60 * 24);
+
+    if (
+      limits.maxDurationDays !== null &&
+      durationDays > limits.maxDurationDays
+    ) {
+      throw new AppError(
+        `Tier ${tier} chỉ được tạo dự án tối đa ${limits.maxDurationDays} ngày (Dự án của bạn: ${Math.ceil(durationDays)} ngày).`,
+        403,
+      );
+    }
+
+    if (
+      project.projectType === PROJECT_TYPE.FUNDED &&
+      limits.maxFundingCap !== null &&
+      Number(project.targetAmount || 0) > limits.maxFundingCap
+    ) {
+      throw new AppError(
+        `Tier ${tier} chỉ được gọi vốn tối đa ${limits.maxFundingCap.toLocaleString("vi-VN")} VND.`,
+        403,
+      );
+    }
+
+    if (limits.maxConcurrentProjects !== null) {
+      const stats = await this.projectRepository.getOrganizerStats(organizerId);
+      const concurrent =
+        Number(stats.activeProjects || 0) + Number(stats.pendingProjects || 0);
+
+      if (concurrent >= limits.maxConcurrentProjects) {
+        throw new AppError(
+          `Tier ${tier} chỉ được phép chạy song song tối đa ${limits.maxConcurrentProjects} dự án.`,
+          403,
+        );
+      }
+    }
+  }
+
   async submitForApproval(projectId, organizerId) {
     const project = await this.projectRepository.findById(projectId);
-    if (!project) throw new AppError("Không tìm thấy dự án.", 404);
 
-    if (project.organizerId.toString() !== organizerId.toString()) {
+    if (!project) {
+      throw new AppError("Không tìm thấy dự án.", 404);
+    }
+
+    if (toIdString(project.organizerId) !== toIdString(organizerId)) {
       throw new AppError(
         "Bạn không có quyền thực hiện hành động này trên dự án của người khác.",
-        403
+        403,
       );
     }
 
     if (project.status !== PROJECT_STATUS.DRAFT) {
       throw new AppError(
         "Chỉ có thể Gửi duyệt dự án đang ở trạng thái Bản nháp (DRAFT).",
-        400
+        400,
       );
     }
 
     if (!project.startDate || !project.endDate) {
       throw new AppError(
         "Bắt buộc phải cấu hình Ngày bắt đầu và Ngày kết thúc.",
-        400
+        400,
       );
     }
 
-    const projectObj = project.toObject ? project.toObject() : project;
-    const validationResult = projectCompleteSchema.safeParse(projectObj);
+    const projectData = toObject(project);
+    const validationResult = projectCompleteSchema.safeParse(projectData);
 
     if (!validationResult.success) {
-      const issues = validationResult.error.issues || validationResult.error.errors;
+      const issues =
+        validationResult.error.issues || validationResult.error.errors || [];
       const firstError =
-        issues && issues.length > 0 ? issues[0].message : "Dữ liệu không hợp lệ";
+        issues.length > 0 ? issues[0].message : "Dữ liệu không hợp lệ";
 
       throw new AppError(
         `Dự án chưa đủ điều kiện gửi duyệt: ${firstError}`,
-        400
+        400,
       );
     }
 
-    await this._enforceKycTierCaps(projectObj, organizerId);
+    await this.enforceKycTierCaps(projectData, organizerId);
 
     const updatedProject = await this.projectRepository.transitionStatus(
       projectId,
       PROJECT_STATUS.DRAFT,
-      PROJECT_STATUS.PENDING_APPROVAL
+      PROJECT_STATUS.PENDING_APPROVAL,
     );
 
     if (!updatedProject) {
       throw new AppError(
         "Xung đột hệ thống: Dự án đã bị đổi trạng thái bởi một phiên làm việc khác.",
-        409
+        409,
       );
     }
 
@@ -680,12 +870,7 @@ class ProjectService {
         title: updatedProject.title,
         description: updatedProject.description,
       })
-      .catch((err) =>
-        console.error(
-          `[Queue Error] AI Scan failed for ${projectId}:`,
-          err.message
-        )
-      );
+      .catch(() => {});
 
     if (this.eventBus) {
       this.eventBus.emit(DOMAIN_EVENTS.PROJECT_SUBMITTED_FOR_APPROVAL, {
@@ -699,8 +884,76 @@ class ProjectService {
     return this._decorateProjectUrgency(updatedProject);
   }
 
+  async syncVolunteerOnlyProjectStatus(project) {
+    if (!project?._id) return project;
+
+    const shouldTrySync =
+      project.projectType === PROJECT_TYPE.VOLUNTEER_ONLY &&
+      project.status === PROJECT_STATUS.RECRUITING;
+
+    if (!shouldTrySync) {
+      return project;
+    }
+
+    const synced = await this.projectRepository.syncVolunteerOnlyExecutionStatus(
+      project._id,
+    );
+
+    return synced || project;
+  }
+
+  async syncVolunteerOnlyProjectsStatus(projects = []) {
+    return Promise.all(
+      projects.map((project) => this.syncVolunteerOnlyProjectStatus(project)),
+    );
+  }
+
+  buildWorkspaceProject(project) {
+    const normalizedProject = { ...project };
+    const milestones = Array.isArray(normalizedProject.milestones)
+      ? normalizedProject.milestones
+      : [];
+
+    let currentMilestone = null;
+
+    if (milestones.length > 0) {
+      const activeIndex = milestones.findIndex(
+        (milestone) =>
+          milestone.status === MILESTONE_STATUS.PROCESSING ||
+          milestone.status === MILESTONE_STATUS.PENDING,
+      );
+
+      const selectedIndex =
+        activeIndex === -1 ? milestones.length - 1 : activeIndex;
+      const selectedMilestone = milestones[selectedIndex];
+
+      if (selectedMilestone) {
+        currentMilestone = {
+          title: selectedMilestone.title,
+          targetAmount: selectedMilestone.targetAmount,
+          status: selectedMilestone.status,
+          index: selectedIndex + 1,
+        };
+      }
+    }
+
+    delete normalizedProject.milestones;
+
+    return {
+      ...normalizedProject,
+      currentMilestone,
+    };
+  }
+
   async getFeaturedProjects(userId = null) {
-    const candidates = await this.projectRepository.findCandidateFeaturedProjects(24);
+    const findCandidateFeaturedProjects =
+      this.projectRepository.findCandidateFeaturedProjects?.bind(
+        this.projectRepository,
+      );
+
+    const candidates = findCandidateFeaturedProjects
+      ? await findCandidateFeaturedProjects(24)
+      : await this.projectRepository.findFeaturedProjects(1);
 
     if (!Array.isArray(candidates) || candidates.length === 0) {
       return [];
@@ -780,9 +1033,15 @@ class ProjectService {
 
     const [followedProjectsRaw, volunteerApplicationsRaw, followedUsersRaw] =
       await Promise.all([
-        this.followRepository?.findFollowingProjects?.(userId, 100, null).catch(() => []),
-        this.volunteerRepository?.findByUserWithProject?.(userId).catch(() => []),
-        this.followRepository?.findFollowingUsers?.(userId, 100, null).catch(() => []),
+        this.followRepository?.findFollowingProjects?.(userId, 100, null).catch(
+          () => [],
+        ),
+        this.volunteerRepository?.findByUserWithProject?.(userId).catch(
+          () => [],
+        ),
+        this.followRepository?.findFollowingUsers?.(userId, 100, null).catch(
+          () => [],
+        ),
       ]);
 
     const followedProjectIds = new Set(
@@ -790,9 +1049,9 @@ class ProjectService {
         .map(
           (row) =>
             row?.projectId?._id?.toString?.() ||
-            row?.projectId?.toString?.()
+            row?.projectId?.toString?.(),
         )
-        .filter(Boolean)
+        .filter(Boolean),
     );
 
     const followedOrganizerIds = new Set(
@@ -800,22 +1059,22 @@ class ProjectService {
         .map(
           (row) =>
             row?.followingId?._id?.toString?.() ||
-            row?.followingId?.toString?.()
+            row?.followingId?.toString?.(),
         )
-        .filter(Boolean)
+        .filter(Boolean),
     );
 
     const appliedCategorySet = new Set(
       (volunteerApplicationsRaw || [])
         .map((row) => row?.opportunityId?.category)
-        .filter(Boolean)
+        .filter(Boolean),
     );
 
     const supportedCategorySet = new Set(
       (volunteerApplicationsRaw || [])
         .filter((row) => String(row?.status || "").toUpperCase() === "APPROVED")
         .map((row) => row?.opportunityId?.category)
-        .filter(Boolean)
+        .filter(Boolean),
     );
 
     const userCity = this._extractKnownCity(user?.location || "");
@@ -871,41 +1130,44 @@ class ProjectService {
 
   async getVolunteerProjects() {
     const projects = await this.projectRepository.findVolunteerProjects(4);
-    return (projects || []).map((project) => this._decorateProjectUrgency(project));
+    const syncedProjects = await this.syncVolunteerOnlyProjectsStatus(projects);
+    return (syncedProjects || []).map((project) =>
+      this._decorateProjectUrgency(project),
+    );
   }
 
-  async getExploreProjects(queryParams, userId = null) {
+  async getExploreProjects(queryParams = {}, userId = null) {
+    const safePage = toPositiveInt(queryParams.page, 1);
+    const safeLimit = toPositiveInt(queryParams.limit, 9);
+    const skip = (safePage - 1) * safeLimit;
+
+    if (skip > 5000) {
+      throw new AppError(
+        "Truy vấn quá sâu. Vui lòng sử dụng bộ lọc để có kết quả chính xác hơn.",
+        400,
+      );
+    }
+
     const {
-      page,
-      limit,
       category,
       location,
       sort,
       organizerScope = "ALL",
     } = queryParams;
 
-    const skip = (page - 1) * limit;
-
-    if (skip > 5000) {
-      throw new AppError(
-        "Truy vấn quá sâu. Vui lòng sử dụng bộ lọc để có kết quả chính xác hơn.",
-        400
-      );
-    }
-
     let followedOrganizerIds = [];
 
     if (userId) {
       const followedUsersRaw =
         await this.followRepository?.findFollowingUsers?.(userId, 200, null).catch(
-          () => []
+          () => [],
         );
 
       followedOrganizerIds = (followedUsersRaw || [])
         .map(
           (row) =>
             row?.followingId?._id?.toString?.() ||
-            row?.followingId?.toString?.()
+            row?.followingId?.toString?.(),
         )
         .filter(Boolean);
     }
@@ -915,7 +1177,7 @@ class ProjectService {
         projects: [],
         pagination: {
           totalItems: 0,
-          currentPage: page,
+          currentPage: safePage,
           totalPages: 0,
           hasNextPage: false,
         },
@@ -923,9 +1185,14 @@ class ProjectService {
     }
 
     const filter = {};
+    let textSearch = null;
 
     if (category) {
       filter.category = category;
+    }
+
+    if (location) {
+      textSearch = location;
     }
 
     if (organizerScope === "FOLLOWED") {
@@ -941,61 +1208,89 @@ class ProjectService {
       };
     }
 
-    const poolLimit = Math.min(Math.max(page * limit * 6, 60), 240);
+    const supportsAdvancedExplore =
+      queryParams.sort !== undefined ||
+      queryParams.organizerScope !== undefined ||
+      typeof this.projectRepository.findAllProjects === "function";
+
+    if (supportsAdvancedExplore) {
+      const poolLimit = Math.min(Math.max(safePage * safeLimit * 6, 60), 240);
+
+      const result = await this.projectRepository.findAllProjects({
+        filter,
+        skip: 0,
+        limit: poolLimit,
+        sortType: sort,
+        textSearch,
+      });
+
+      const syncedProjects = await this.syncVolunteerOnlyProjectsStatus(
+        result.projects || [],
+      );
+
+      const rebalanced = this._rebalanceExploreProjects(
+        syncedProjects,
+        followedOrganizerIds,
+      );
+
+      const rankedProjects =
+        organizerScope === "FOLLOWED"
+          ? rebalanced.followedProjects
+          : rebalanced.merged;
+
+      const pagedProjects = rankedProjects
+        .slice(skip, skip + safeLimit)
+        .map((project) => this._decorateProjectUrgency(project));
+
+      return {
+        projects: pagedProjects,
+        pagination: buildPagination(result.total, safePage, safeLimit),
+      };
+    }
 
     const result = await this.projectRepository.findAllProjects({
       filter,
-      skip: 0,
-      limit: poolLimit,
-      sortType: sort,
-      textSearch: location || null,
+      skip,
+      limit: safeLimit,
+      textSearch,
     });
 
-    const rebalanced = this._rebalanceExploreProjects(
-      result.projects,
-      followedOrganizerIds
+    const syncedProjects = await this.syncVolunteerOnlyProjectsStatus(
+      result.projects || [],
     );
 
-    const rankedProjects =
-      organizerScope === "FOLLOWED"
-        ? rebalanced.followedProjects
-        : rebalanced.merged;
-
-    const pagedProjects = rankedProjects
-      .slice(skip, skip + limit)
-      .map((project) => this._decorateProjectUrgency(project));
-
-    const totalPages = Math.ceil(result.total / limit);
-
     return {
-      projects: pagedProjects,
-      pagination: {
-        totalItems: result.total,
-        currentPage: page,
-        totalPages,
-        hasNextPage: page < totalPages,
-      },
+      projects: syncedProjects.map((project) =>
+        this._decorateProjectUrgency(project),
+      ),
+      pagination: buildPagination(result.total, safePage, safeLimit),
     };
   }
 
   async getProjectDetail(projectId, userId = null) {
-    const project = await this.projectRepository.findByIdWithDetails(projectId);
+    let project = await this.projectRepository.findByIdWithDetails(projectId);
+
     if (!project) {
       throw new AppError("Không tìm thấy dự án hoặc dự án đã bị xóa", 404);
     }
 
+    project = await this.syncVolunteerOnlyProjectStatus(project);
+
     let escrow = null;
-    if (project.projectType === PROJECT_TYPE.FUNDED) {
+    if (
+      project.projectType === PROJECT_TYPE.FUNDED &&
+      this.escrowRepository?.findByProjectId
+    ) {
       escrow = await this.escrowRepository.findByProjectId(projectId);
     }
 
-    this.redis.incr(`project:${projectId}:views`).catch(() => { });
+    this.redis.incr(`project:${projectId}:views`).catch(() => {});
 
     const orgId = project.organizerId?._id || project.organizerId;
     let isFollowing = false;
     let isFollowingOrganizer = false;
 
-    if (userId) {
+    if (userId && this.followRepository) {
       [isFollowing, isFollowingOrganizer] = await Promise.all([
         this.followRepository.existsProjectFollow(userId, projectId),
         orgId ? this.followRepository.exists(userId, orgId) : Promise.resolve(false),
@@ -1003,9 +1298,13 @@ class ProjectService {
     }
 
     const isOrganizer = userId && String(orgId) === String(userId);
-    const safeProjectData = isOrganizer
-      ? ProjectDTO.toOrganizerDetail(project, escrow)
-      : ProjectDTO.toPublicDetail(project, escrow);
+
+    const safeProjectData =
+      ProjectDTO && typeof ProjectDTO.toOrganizerDetail === "function" && typeof ProjectDTO.toPublicDetail === "function"
+        ? isOrganizer
+          ? ProjectDTO.toOrganizerDetail(project, escrow)
+          : ProjectDTO.toPublicDetail(project, escrow)
+        : toObject(project);
 
     const decorated = this._decorateProjectUrgency(safeProjectData);
 
@@ -1016,8 +1315,25 @@ class ProjectService {
     };
   }
 
+  async getDraftDetail(projectId, organizerId) {
+    const project = await this.projectRepository.findByIdWithDetails(projectId);
+
+    if (!project) {
+      throw new AppError("Không tìm thấy dự án hoặc dự án đã bị xóa", 404);
+    }
+
+    const ownerId = project.organizerId?._id || project.organizerId;
+
+    if (toIdString(ownerId) !== toIdString(organizerId)) {
+      throw new AppError("Bạn không có quyền truy cập bản nháp này", 403);
+    }
+
+    return project;
+  }
+
   async getWorkspaceStats(organizerId) {
     const stats = await this.projectRepository.getOrganizerStats(organizerId);
+
     return {
       totalFundsRaised: stats.totalFundsRaised,
       activeProjects: stats.activeProjects,
@@ -1026,264 +1342,120 @@ class ProjectService {
     };
   }
 
-  async getWorkspaceProjects(organizerId, queryParams) {
-    const { page, limit, status, sort } = queryParams;
-    const skip = (page - 1) * limit;
+  async getWorkspaceProjects(organizerId, queryParams = {}) {
+    const safePage = toPositiveInt(queryParams.page, 1);
+    const safeLimit = toPositiveInt(queryParams.limit, 10);
+    const skip = (safePage - 1) * safeLimit;
+    const status = queryParams.status || "ALL";
+    const sort = queryParams.sort;
 
     const result = await this.projectRepository.findOrganizerProjects({
       organizerId,
       status,
       sortType: sort,
       skip,
-      limit,
+      limit: safeLimit,
     });
 
-    const formattedProjects = result.projects.map((project) => {
-      let currentMilestone = null;
-      let milestoneIndex = 0;
-
-      if (project.milestones && project.milestones.length > 0) {
-        const activeIndex = project.milestones.findIndex(
-          (m) =>
-            m.status === MILESTONE_STATUS.PROCESSING ||
-            m.status === MILESTONE_STATUS.PENDING
-        );
-
-        if (activeIndex !== -1) {
-          currentMilestone = project.milestones[activeIndex];
-          milestoneIndex = activeIndex + 1;
-        } else {
-          currentMilestone = project.milestones[project.milestones.length - 1];
-          milestoneIndex = project.milestones.length;
-        }
-      }
-
-      delete project.milestones;
-
-      const formattedProject = {
-        ...project,
-        currentMilestone: currentMilestone
-          ? {
-            title: currentMilestone.title,
-            targetAmount: currentMilestone.targetAmount,
-            status: currentMilestone.status,
-            index: milestoneIndex,
-          }
-          : null,
-      };
-
-      return this._decorateProjectUrgency(formattedProject);
-    });
-
-    const totalPages = Math.ceil(result.total / limit);
+    const syncedProjects = await this.syncVolunteerOnlyProjectsStatus(
+      result.projects || [],
+    );
 
     return {
-      projects: formattedProjects,
-      pagination: {
-        totalItems: result.total,
-        currentPage: page,
-        totalPages,
-        hasNextPage: page < totalPages,
-      },
+      projects: syncedProjects.map((project) =>
+        this._decorateProjectUrgency(this.buildWorkspaceProject(project)),
+      ),
+      pagination: buildPagination(result.total, safePage, safeLimit),
     };
   }
 
-  _applyMilestoneSmartDefaults(milestones, fallbackProjectLocation) {
-    if (!milestones || !Array.isArray(milestones)) return [];
+  async createDraftProject(organizerId, projectData = {}) {
+    const coverPayload = toArray(projectData.coverMedia);
+    const docsPayload = toArray(projectData.documents);
+    const volunteerStats = this._calculateVolunteerStats(projectData);
 
-    return milestones.map(m => {
-      const targetAmt = m.targetAmount || 0;
-
-      const smartPolicy = {
-        requireFinancial: targetAmt > 0,
-        requireGeoPhotos: targetAmt === 0 ? 1 : 0,
-        requireVolunteerLogs: m.evidencePolicy?.requireVolunteerLogs || false
-      };
-
-      return {
-        ...m,
-        location: m.location || fallbackProjectLocation,
-        evidencePolicy: smartPolicy
-      };
+    const {
+      validCoverIds,
+      validDocIds,
+      allNewMediaToInsert,
+      publicIdsToRollback,
+    } = await this.insertProjectMedia({
+      coverPayload,
+      docsPayload,
+      organizerId,
     });
-  }
-
-  async createDraftProject(organizerId, projectData) {
-    const coverPayload = Array.isArray(projectData.coverMedia)
-      ? projectData.coverMedia
-      : projectData.coverMedia
-        ? [projectData.coverMedia]
-        : [];
-
-    const docsPayload = Array.isArray(projectData.documents)
-      ? projectData.documents
-      : [];
-
-    let targetVolunteers = 0;
-    if (projectData.needsVolunteers && projectData.volunteerRoles?.length > 0) {
-      targetVolunteers = projectData.volunteerRoles.reduce(
-        (acc, curr) => acc + (Number(curr.quantity) || 0),
-        0
-      );
-    } else {
-      projectData.needsVolunteers = false;
-      projectData.volunteerRoles = [];
-    }
-
-    const { validMediaIds: validCoverIds, newMediaToInsert: newCoverMedia } =
-      await this._processMediaPayload(
-        coverPayload,
-        organizerId,
-        "project_cover"
-      );
-
-    const { validMediaIds: validDocIds, newMediaToInsert: newDocMedia } =
-      await this._processMediaPayload(
-        docsPayload,
-        organizerId,
-        "project_document"
-      );
-
-    const allNewMediaToInsert = [...newCoverMedia, ...newDocMedia];
-    const publicIdsToRollback = allNewMediaToInsert.map((m) => m.publicId);
 
     try {
-      const result = await this.transactionManager.runInTransaction(
-        async (session) => {
-          let finalCoverMediaData = null;
-          const finalDocumentIds = [...validDocIds];
+      return await this.transactionManager.runInTransaction(async (session) => {
+        const insertedMedia =
+          allNewMediaToInsert.length > 0
+            ? await this.mediaRepository.createMany(allNewMediaToInsert, session)
+            : [];
 
-          if (allNewMediaToInsert.length > 0) {
-            const insertedMedia = await this.mediaRepository.createMany(
-              allNewMediaToInsert,
-              session
-            );
+        const finalCoverMedia = await this.resolveCoverMedia({
+          validCoverIds,
+          insertedMedia,
+        });
 
-            insertedMedia.forEach((media) => {
-              if (media.context === "project_cover") {
-                finalCoverMediaData = {
-                  url: media.url,
-                  publicId: media.publicId,
-                  mediaType: media.mimetype.startsWith("video")
-                    ? "video"
-                    : "image",
-                };
-              } else {
-                finalDocumentIds.push(media._id.toString());
-              }
-            });
-          }
+        const finalDocumentIds = toUniqueStrings([
+          ...validDocIds,
+          ...insertedMedia
+            .filter((media) => media.context === "project_document")
+            .map((media) => String(media._id)),
+        ]);
 
-          if (!finalCoverMediaData && validCoverIds.length > 0) {
-            const existingCover = await this.mediaRepository.findById(
-              validCoverIds[0]
-            );
-            if (existingCover) {
-              finalCoverMediaData = {
-                url: existingCover.url,
-                publicId: existingCover.publicId,
-                mediaType: existingCover.mimetype.startsWith("video")
-                  ? "video"
-                  : "image",
-              };
-            }
-          }
+        const {
+          coverMedia: _coverMedia,
+          documents: _documents,
+          ...restProjectData
+        } = projectData;
 
-          const { coverMedia: _, documents: __, ...otherProjectData } = projectData;
+        restProjectData.milestones = this._applyMilestoneSmartDefaults(
+          restProjectData.milestones,
+          restProjectData.location,
+        );
 
-          otherProjectData.milestones = this._applyMilestoneSmartDefaults(
-            otherProjectData.milestones,
-            otherProjectData.location
-          );
-
-          const newProjectData = {
-            ...otherProjectData,
-            stats: { targetVolunteers, currentVolunteers: 0 },
+        const createdProject = await this.projectRepository.create(
+          {
+            ...restProjectData,
+            needsVolunteers: volunteerStats.needsVolunteers,
+            volunteerRoles: volunteerStats.volunteerRoles,
+            stats: {
+              targetVolunteers: volunteerStats.targetVolunteers,
+              currentVolunteers: 0,
+            },
             organizerId,
-            coverMedia: finalCoverMediaData || undefined,
-            documents: [...new Set(finalDocumentIds)],
+            coverMedia: finalCoverMedia || undefined,
+            documents: finalDocumentIds,
             status: PROJECT_STATUS.DRAFT,
             currentAmount: 0,
-            isOverFunded: false,
-            isLocked: false,
-          };
+          },
+          session,
+        );
 
-          const createdProject = await this.projectRepository.create(
-            newProjectData,
-            session
-          );
+        await this._linkHelpRequestAfterProjectCreation(
+          projectData.fromHelpRequestId,
+          createdProject,
+          organizerId,
+          session,
+        );
 
-          if (projectData.fromHelpRequestId && this.helpRequestRepository) {
-            try {
-              const linkedHelpRequest = await this.helpRequestRepository.findById(
-                projectData.fromHelpRequestId
-              );
-
-              await this.helpRequestRepository.updateById(
-                projectData.fromHelpRequestId,
-                { linkedProjectId: createdProject._id },
-                session
-              );
-
-              if (linkedHelpRequest?.requesterId && this.notificationRepository) {
-                const organizerUser = await this.userRepository.findById(
-                  organizerId
-                );
-
-                await this.notificationRepository.create({
-                  recipientId: linkedHelpRequest.requesterId,
-                  actorId: organizerId,
-                  type: "help_request_assignment_responded",
-                  title: `${organizerUser?.fullName || "Organizer"
-                    } đã đồng ý host yêu cầu của bạn`,
-                  message: `Yêu cầu "${linkedHelpRequest.title}" đã được chấp nhận và chuyển thành dự án.`,
-                  actionUrl: `/projects/${createdProject._id}`,
-                  metadata: {
-                    helpRequestId: String(linkedHelpRequest._id),
-                    projectId: String(createdProject._id),
-                    organizerId: String(organizerId),
-                    action: "hosted",
-                  },
-                });
-              }
-            } catch (err) {
-              console.error(
-                "[Project Creation] Failed to link help request:",
-                err.message
-              );
-            }
-          }
-
-          return createdProject;
-        }
-      );
-
-      return result;
+        return createdProject;
+      });
     } catch (error) {
-      if (publicIdsToRollback.length > 0) {
-        this.jobQueue
-          .addJob("project-maintenance", "cleanup-old-media", {
-            publicIds: publicIdsToRollback,
-          })
-          .catch((err) =>
-            console.error(
-              "[Queue Error] Lỗi đẩy job dọn rác rollback:",
-              err.message
-            )
-          );
-      }
-
+      await this.queueMediaCleanup(publicIdsToRollback);
       throw new AppError(`Tạo dự án thất bại: ${error.message}`, 400);
     }
   }
 
-  async updateDraftProject(projectId, organizerId, updateData) {
+  async updateDraftProject(projectId, organizerId, updateData = {}) {
     const existingProject = await this.projectRepository.findById(projectId);
+
     if (!existingProject) {
       throw new AppError("Không tìm thấy bản nháp dự án", 404);
     }
 
-    if (existingProject.organizerId.toString() !== organizerId.toString()) {
+    if (toIdString(existingProject.organizerId) !== toIdString(organizerId)) {
       throw new AppError("Bạn không có quyền", 403);
     }
 
@@ -1292,155 +1464,175 @@ class ProjectService {
     }
 
     let {
-      deletedDocumentIds,
+      deletedDocumentIds = [],
       coverMedia,
       documents,
       ...finalUpdateData
     } = updateData;
 
+    deletedDocumentIds = Array.isArray(deletedDocumentIds)
+      ? deletedDocumentIds
+      : deletedDocumentIds
+        ? [deletedDocumentIds]
+        : [];
+
     if (
-      finalUpdateData.projectType === PROJECT_TYPE.VOLUNTEER_ONLY ||
-      (!finalUpdateData.projectType && existingProject.projectType === PROJECT_TYPE.VOLUNTEER_ONLY)
+      (finalUpdateData.projectType || existingProject.projectType) ===
+      PROJECT_TYPE.VOLUNTEER_ONLY
     ) {
       finalUpdateData.targetAmount = 0;
       finalUpdateData.mvpAmount = 0;
       finalUpdateData.budgetBreakdown = [];
     }
 
-    if (finalUpdateData.needsVolunteers && finalUpdateData.volunteerRoles?.length > 0) {
-      finalUpdateData["stats.targetVolunteers"] = finalUpdateData.volunteerRoles.reduce(
-        (acc, curr) => acc + (Number(curr.quantity) || 0), 0
-      );
-    } else if (finalUpdateData.needsVolunteers === false) {
-      finalUpdateData.volunteerRoles = [];
-      finalUpdateData["stats.targetVolunteers"] = 0;
+    if (
+      "needsVolunteers" in finalUpdateData ||
+      "volunteerRoles" in finalUpdateData
+    ) {
+      const volunteerStats = this._calculateVolunteerStats({
+        needsVolunteers:
+          "needsVolunteers" in finalUpdateData
+            ? finalUpdateData.needsVolunteers
+            : existingProject.needsVolunteers,
+        volunteerRoles:
+          "volunteerRoles" in finalUpdateData
+            ? finalUpdateData.volunteerRoles
+            : existingProject.volunteerRoles,
+      });
+
+      finalUpdateData.needsVolunteers = volunteerStats.needsVolunteers;
+      finalUpdateData.volunteerRoles = volunteerStats.volunteerRoles;
+      finalUpdateData["stats.targetVolunteers"] =
+        volunteerStats.targetVolunteers;
     }
 
-    const coverPayload = Array.isArray(coverMedia) ? coverMedia : (coverMedia ? [coverMedia] : []);
-    const docsPayload = Array.isArray(documents) ? documents : [];
+    const coverPayload = toArray(coverMedia);
+    const docsPayload = toArray(documents);
 
-    const { validMediaIds: validCoverIds, newMediaToInsert: newCoverMedia } =
-      await this._processMediaPayload(coverPayload, organizerId, "project_cover");
+    const {
+      validCoverIds,
+      validDocIds,
+      allNewMediaToInsert,
+      publicIdsToRollback,
+    } = await this.insertProjectMedia({
+      coverPayload,
+      docsPayload,
+      organizerId,
+    });
 
-    const { validMediaIds: validDocIds, newMediaToInsert: newDocMedia } =
-      await this._processMediaPayload(docsPayload, organizerId, "project_document");
-
-    const allNewMediaToInsert = [...newCoverMedia, ...newDocMedia];
-    const publicIdsToRollback = allNewMediaToInsert.map((m) => m.publicId);
     const oldCloudinaryIdsToClean = [];
 
     try {
       const updatedProject = await this.transactionManager.runInTransaction(
         async (session) => {
-          let finalCoverMediaData = null;
-          const finalDocumentIds = new Set(validDocIds);
+          const insertedMedia =
+            allNewMediaToInsert.length > 0
+              ? await this.mediaRepository.createMany(
+                  allNewMediaToInsert,
+                  session,
+                )
+              : [];
 
-          if (allNewMediaToInsert.length > 0) {
-            const insertedMedia = await this.mediaRepository.createMany(allNewMediaToInsert, session);
-            insertedMedia.forEach((media) => {
-              if (media.context === "project_cover") {
-                finalCoverMediaData = {
-                  url: media.url,
-                  publicId: media.publicId,
-                  mediaType: media.mimetype.startsWith("video") ? "video" : "image",
-                };
-              } else {
-                finalDocumentIds.add(media._id.toString());
-              }
-            });
+          const resolvedCoverMedia = await this.resolveCoverMedia({
+            validCoverIds,
+            insertedMedia,
+          });
+
+          if (
+            resolvedCoverMedia &&
+            existingProject.coverMedia?.publicId &&
+            existingProject.coverMedia.publicId !== resolvedCoverMedia.publicId
+          ) {
+            oldCloudinaryIdsToClean.push(existingProject.coverMedia.publicId);
           }
 
-          if (finalCoverMediaData) {
-            finalUpdateData.coverMedia = finalCoverMediaData;
-          } else if (validCoverIds.length > 0) {
-            const existingCover = await this.mediaRepository.findById(validCoverIds[0]);
-            if (existingCover) {
-              finalUpdateData.coverMedia = {
-                url: existingCover.url,
-                publicId: existingCover.publicId,
-                mediaType: existingCover.mimetype.startsWith("video") ? "video" : "image",
-              };
-            }
-          } else if (coverMedia && Array.isArray(coverMedia) && coverMedia.length === 0) {
-            finalUpdateData.coverMedia = { url: null, publicId: null, mediaType: "image" };
+          if (
+            Array.isArray(coverMedia) &&
+            coverMedia.length === 0 &&
+            existingProject.coverMedia?.publicId
+          ) {
+            finalUpdateData.coverMedia = {
+              url: null,
+              publicId: null,
+              mediaType: "image",
+            };
+            oldCloudinaryIdsToClean.push(existingProject.coverMedia.publicId);
+          } else if (resolvedCoverMedia) {
+            finalUpdateData.coverMedia = resolvedCoverMedia;
           }
 
-          if (existingProject.coverMedia?.publicId) {
-            const isChanged = finalUpdateData.coverMedia && finalUpdateData.coverMedia.publicId !== existingProject.coverMedia.publicId;
-            const isDeleted = finalUpdateData.coverMedia && finalUpdateData.coverMedia.url === null;
-            if (isChanged || isDeleted) {
-              oldCloudinaryIdsToClean.push(existingProject.coverMedia.publicId);
-            }
-          }
+          if (deletedDocumentIds.length > 0) {
+            const mediaDocsToDelete =
+              await this.mediaRepository.findManyByIdsAndOwner(
+                deletedDocumentIds,
+                organizerId,
+                session,
+              );
 
-          const docsToSave = Array.from(finalDocumentIds);
-          finalUpdateData.documents = docsToSave;
-
-          const existingDocIdsStr = (existingProject.documents || []).map((id) => id.toString());
-          const orphanedIds = existingDocIdsStr.filter(id => !docsToSave.includes(id));
-
-          if (Array.isArray(deletedDocumentIds)) {
-            deletedDocumentIds.forEach(id => {
-              if (!orphanedIds.includes(id) && existingDocIdsStr.includes(id)) {
-                orphanedIds.push(id);
-              }
-            });
-          }
-
-          if (orphanedIds.length > 0) {
-            const mediaDocsToDelete = await this.mediaRepository.findManyByIdsAndOwner(orphanedIds, organizerId, session);
-            const actualIdsToDelete = mediaDocsToDelete.map((m) => m._id);
+            const actualIdsToDelete = mediaDocsToDelete.map((media) => media._id);
 
             mediaDocsToDelete.forEach((media) => {
-              if (media.publicId) oldCloudinaryIdsToClean.push(media.publicId);
+              if (media.publicId) {
+                oldCloudinaryIdsToClean.push(media.publicId);
+              }
             });
 
             if (actualIdsToDelete.length > 0) {
               await Promise.all(
-                actualIdsToDelete.map((id) => this.mediaRepository.deleteById(id, session))
+                actualIdsToDelete.map((id) =>
+                  this.mediaRepository.deleteById(id, session),
+                ),
               );
             }
           }
 
-          const fallbackLocation = finalUpdateData.location || existingProject.location;
+          const existingDocIds = (existingProject.documents || []).map(String);
+          const insertedDocIds = insertedMedia
+            .filter((media) => media.context === "project_document")
+            .map((media) => String(media._id));
+
+          finalUpdateData.documents = toUniqueStrings([
+            ...existingDocIds,
+            ...validDocIds,
+            ...insertedDocIds,
+          ]).filter((id) => !deletedDocumentIds.includes(id));
 
           if (finalUpdateData.milestones) {
+            const fallbackLocation =
+              finalUpdateData.location || existingProject.location;
             finalUpdateData.milestones = this._applyMilestoneSmartDefaults(
               finalUpdateData.milestones,
-              fallbackLocation
+              fallbackLocation,
             );
           }
 
-          const resultDoc = await this.projectRepository.updateDraftAtomic(
+          const result = await this.projectRepository.updateDraftAtomic(
             projectId,
             organizerId,
             finalUpdateData,
-            session
+            session,
           );
 
-          if (!resultDoc) {
-            throw new AppError("Xung đột hệ thống: Dự án đã đổi trạng thái hoặc bị khoá bởi luồng khác!", 409);
+          if (!result) {
+            throw new AppError(
+              "Xung đột hệ thống: Dự án đã đổi trạng thái hoặc bị khoá bởi luồng khác!",
+              409,
+            );
           }
 
-          return resultDoc;
-        }
+          return result;
+        },
       );
 
-      if (oldCloudinaryIdsToClean.length > 0) {
-        this.jobQueue.addJob("project-maintenance", "cleanup-old-media", {
-          publicIds: oldCloudinaryIdsToClean,
-        }).catch((err) => console.error("[Queue Error] Lỗi đẩy job dọn ảnh cũ:", err.message));
-      }
-
+      await this.queueMediaCleanup(oldCloudinaryIdsToClean);
       return updatedProject;
     } catch (error) {
-      if (publicIdsToRollback.length > 0) {
-        this.jobQueue.addJob("project-maintenance", "cleanup-old-media", {
-          publicIds: publicIdsToRollback,
-        }).catch((err) => console.error("[Queue Error] Lỗi đẩy job dọn rác rollback:", err.message));
+      await this.queueMediaCleanup(publicIdsToRollback);
+
+      if (error instanceof AppError) {
+        throw error;
       }
 
-      if (error instanceof AppError) throw error;
       throw new AppError(`Cập nhật dự án thất bại: ${error.message}`, 400);
     }
   }

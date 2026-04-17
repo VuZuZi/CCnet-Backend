@@ -1,23 +1,23 @@
-import NotificationRepository from './repositories/notification.repository.js';
-import { NotificationSettingRepository } from './repositories/notificationSetting.repository.js';
-import { NotificationSettingService } from './services/notificationSetting.service.js';
-import { NotificationSSEService } from './services/notificationSSE.service.js';
-import NotificationService from './services/notification.service.js';
-import { NotificationBroadcastService } from './services/notificationBroadcast.service.js';
-import { NotificationController } from './notification.controller.js';
-import { createNotificationRouter } from './notification.routes.js';
-import { registerFollowNotificationListener } from './listeners/follow.notification.listener.js';
-import { registerProjectNotificationListener } from './listeners/project.notification.listener.js';
-import { registerOrganizerRequestSubmittedNotificationListener } from './listeners/organizerRequestSubmitted.notification.listener.js';
-import { registerOrganizerRequestNotificationListener } from './listeners/organizerRequest.notification.listener.js';
-import { registerSystemNotificationListener } from './listeners/system.notification.listener.js';
-import { registerPostNotificationListener } from './listeners/post.notification.listener.js';
-import { NOTIFICATION_DEFAULTS } from './constants/notification.constants.js';
-import { InMemoryStreamSessionStore } from './infrastructure/inMemoryStreamSessionStore.js';
-import { InMemoryNotificationClientRegistry } from './infrastructure/inMemoryNotificationClientRegistry.js';
-import { RedisStreamSessionStore } from './infrastructure/redisStreamSessionStore.js';
-import { RedisNotificationRealtimeGateway } from './infrastructure/redisNotificationRealtimeGateway.js';
-import { registerTransactionNotificationListener } from './listeners/transaction.notification.listener.js';
+import NotificationRepository from "./repositories/notification.repository.js";
+import { NotificationSettingRepository } from "./repositories/notificationSetting.repository.js";
+import { NotificationSettingService } from "./services/notificationSetting.service.js";
+import { NotificationSSEService } from "./services/notificationSSE.service.js";
+import NotificationService from "./services/notification.service.js";
+import { NotificationBroadcastService } from "./services/notificationBroadcast.service.js";
+import { NotificationController } from "./notification.controller.js";
+import { createNotificationRouter } from "./notification.routes.js";
+import { registerFollowNotificationListener } from "./listeners/follow.notification.listener.js";
+import { registerProjectNotificationListener } from "./listeners/project.notification.listener.js";
+import { registerOrganizerRequestSubmittedNotificationListener } from "./listeners/organizerRequestSubmitted.notification.listener.js";
+import { registerOrganizerRequestNotificationListener } from "./listeners/organizerRequest.notification.listener.js";
+import { registerSystemNotificationListener } from "./listeners/system.notification.listener.js";
+import { registerPostNotificationListener } from "./listeners/post.notification.listener.js";
+import { registerTransactionNotificationListener } from "./listeners/transaction.notification.listener.js";
+import { NOTIFICATION_DEFAULTS } from "./constants/notification.constants.js";
+import { InMemoryStreamSessionStore } from "./infrastructure/inMemoryStreamSessionStore.js";
+import { InMemoryNotificationClientRegistry } from "./infrastructure/inMemoryNotificationClientRegistry.js";
+import { RedisStreamSessionStore } from "./infrastructure/redisStreamSessionStore.js";
+import { RedisNotificationRealtimeGateway } from "./infrastructure/redisNotificationRealtimeGateway.js";
 
 const registeredListenerBuses = new WeakSet();
 
@@ -41,18 +41,18 @@ function defaultCreateError(message, status = 400) {
 function normalizeStreamCookieOptions(streamCookieOptions = {}) {
   const merged = {
     httpOnly: true,
-    sameSite: 'lax',
+    sameSite: "lax",
     path: NOTIFICATION_DEFAULTS.SSE_COOKIE_PATH,
     maxAge: NOTIFICATION_DEFAULTS.SSE_SESSION_TTL_MS,
     ...streamCookieOptions,
   };
 
   const sameSite =
-    typeof merged.sameSite === 'string'
+    typeof merged.sameSite === "string"
       ? merged.sameSite.toLowerCase()
       : merged.sameSite;
 
-  if (sameSite === 'none' && merged.secure !== true) {
+  if (sameSite === "none" && merged.secure !== true) {
     throw new Error(
       "streamCookieOptions.secure must be true when streamCookieOptions.sameSite is 'none'"
     );
@@ -73,13 +73,13 @@ function createStreamAuthenticate({
         const token = req.cookies?.[streamCookieName];
 
         if (!token) {
-          throw createError('Unauthorized', 401);
+          throw createError("Unauthorized", 401);
         }
 
         const session = await notificationSSEService.consumeStreamSession(token);
 
         if (!session?.userId) {
-          throw createError('Unauthorized', 401);
+          throw createError("Unauthorized", 401);
         }
 
         req.user = {
@@ -109,18 +109,20 @@ function registerDomainListeners({
   logger,
 }) {
   if (registeredListenerBuses.has(eventBus)) {
-    logger?.info?.('[NotificationModule] Domain listeners already registered for this event bus');
+    logger?.info?.(
+      "[NotificationModule] Domain listeners already registered for this event bus"
+    );
     return;
   }
 
-  logger?.info?.('[NotificationModule] Registering follow notification listener');
+  logger?.info?.("[NotificationModule] Registering follow notification listener");
   registerFollowNotificationListener({
     eventBus,
     notificationService,
     logger,
   });
 
-  logger?.info?.('[NotificationModule] Registering project notification listener');
+  logger?.info?.("[NotificationModule] Registering project notification listener");
   registerProjectNotificationListener({
     eventBus,
     notificationService,
@@ -129,21 +131,25 @@ function registerDomainListeners({
     logger,
   });
 
-  logger?.info?.('[NotificationModule] Registering organizer request submitted notification listener');
+  logger?.info?.(
+    "[NotificationModule] Registering organizer request submitted notification listener"
+  );
   registerOrganizerRequestSubmittedNotificationListener({
     eventBus,
     notificationBroadcastService,
     logger,
   });
 
-  logger?.info?.('[NotificationModule] Registering organizer request notification listener');
+  logger?.info?.(
+    "[NotificationModule] Registering organizer request notification listener"
+  );
   registerOrganizerRequestNotificationListener({
     eventBus,
     notificationService,
     logger,
   });
 
-  logger?.info?.('[NotificationModule] Registering system notification listener');
+  logger?.info?.("[NotificationModule] Registering system notification listener");
   registerSystemNotificationListener({
     eventBus,
     notificationBroadcastService,
@@ -158,8 +164,7 @@ function registerDomainListeners({
     logger,
   });
 
-
-  logger?.info?.('[NotificationModule] Registering post notification listener');
+  logger?.info?.("[NotificationModule] Registering post notification listener");
   registerPostNotificationListener({
     eventBus,
     notificationService,
@@ -167,7 +172,7 @@ function registerDomainListeners({
   });
 
   registeredListenerBuses.add(eventBus);
-  logger?.info?.('[NotificationModule] All domain listeners registered successfully');
+  logger?.info?.("[NotificationModule] All domain listeners registered successfully");
 }
 
 function resolveStreamSessionStore({ redis, streamSessionStore }) {
@@ -203,21 +208,26 @@ export async function createNotificationModule({
   createError = defaultCreateError,
   resolveAllUserIds = null,
   resolveUserIdsByRole = null,
+  resolveUsersByIds = null,
   redis = null,
   streamSessionStore = null,
   clientRegistry = new InMemoryNotificationClientRegistry(),
   mailProvider = null,
   userRepository = null,
 } = {}) {
-  if (typeof authenticate !== 'function') {
-    throw new Error('createNotificationModule requires authenticate middleware');
+  if (typeof authenticate !== "function") {
+    throw new Error("createNotificationModule requires authenticate middleware");
   }
 
-  if (!eventBus || typeof eventBus.on !== 'function' || typeof eventBus.emit !== 'function') {
-    throw new Error('createNotificationModule requires a shared eventBus instance');
+  if (
+    !eventBus ||
+    typeof eventBus.on !== "function" ||
+    typeof eventBus.emit !== "function"
+  ) {
+    throw new Error("createNotificationModule requires a shared eventBus instance");
   }
 
-  logger?.info?.('[NotificationModule] Starting notification module creation');
+  logger?.info?.("[NotificationModule] Starting notification module creation");
 
   const notificationRepository = new NotificationRepository();
   const notificationSettingRepository = new NotificationSettingRepository();
@@ -249,10 +259,13 @@ export async function createNotificationModule({
     notificationService,
     resolveAllUserIds,
     resolveUserIdsByRole,
+    resolveUsersByIds,
     logger,
   });
 
-  const mergedStreamCookieOptions = normalizeStreamCookieOptions(streamCookieOptions);
+  const mergedStreamCookieOptions = normalizeStreamCookieOptions(
+    streamCookieOptions
+  );
 
   const controller = new NotificationController({
     notificationService,
@@ -278,7 +291,7 @@ export async function createNotificationModule({
   });
 
   if (notificationRealtimeGateway) {
-    logger?.info?.('[NotificationModule] Starting realtime gateway');
+    logger?.info?.("[NotificationModule] Starting realtime gateway");
     await notificationRealtimeGateway.start({
       onUserEvent({ userId, eventName, payload }) {
         notificationSSEService.emitToUser(userId, eventName, payload);
@@ -295,7 +308,7 @@ export async function createNotificationModule({
     logger,
   });
 
-  logger?.info?.('[NotificationModule] Notification module created successfully');
+  logger?.info?.("[NotificationModule] Notification module created successfully");
 
   return {
     router,

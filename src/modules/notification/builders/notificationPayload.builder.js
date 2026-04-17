@@ -55,6 +55,60 @@ export function buildNotificationPayload(input) {
         },
       };
 
+    case NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_REQUESTED:
+      return {
+        title: ensureText(input.title, 'Yêu cầu xin rút tình nguyện viên'),
+        message: ensureText(
+          input.message,
+          `${ensureText(input.actorName, 'Một tình nguyện viên')} đã gửi yêu cầu xin rút khỏi dự án.`
+        ),
+        actionUrl: ensureText(input.actionUrl, `/projects/${input.entityId || ''}`),
+        entityType: 'project',
+        entityId: input.entityId || null,
+        metadata: {
+          projectName: input.projectName || null,
+          actorName: input.actorName || null,
+          volunteerId: input.volunteerId || null,
+          applicationId: input.applicationId || null,
+          withdrawReason: input.withdrawReason || null,
+        },
+      };
+
+    case NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_APPROVED:
+      return {
+        title: ensureText(input.title, 'Yêu cầu xin rút đã được chấp nhận'),
+        message: ensureText(
+          input.message,
+          'Organizer đã chấp nhận yêu cầu xin rút của bạn.'
+        ),
+        actionUrl: ensureText(input.actionUrl, `/projects/${input.entityId || ''}`),
+        entityType: 'project',
+        entityId: input.entityId || null,
+        metadata: {
+          projectName: input.projectName || null,
+          actorName: input.actorName || null,
+          applicationId: input.applicationId || null,
+        },
+      };
+
+    case NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_REJECTED:
+      return {
+        title: ensureText(input.title, 'Yêu cầu xin rút đã bị từ chối'),
+        message: ensureText(
+          input.message,
+          'Organizer đã từ chối yêu cầu xin rút của bạn.'
+        ),
+        actionUrl: ensureText(input.actionUrl, `/projects/${input.entityId || ''}`),
+        entityType: 'project',
+        entityId: input.entityId || null,
+        metadata: {
+          projectName: input.projectName || null,
+          actorName: input.actorName || null,
+          applicationId: input.applicationId || null,
+          reviewNote: input.reviewNote || null,
+        },
+      };
+
     case NOTIFICATION_TYPES.ORGANIZER_REQUEST_SUBMITTED:
       return {
         title: 'New organizer request',

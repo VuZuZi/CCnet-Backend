@@ -21,6 +21,14 @@ export const NOTIFICATION_TYPES = Object.freeze({
   TRANSACTION_FAILED: 'transaction_failed',
   POST_REACTED: 'post_reacted',
   POST_COMMENTED: 'post_commented',
+
+  VOLUNTEER_APPLIED: 'volunteer_applied',
+  VOLUNTEER_APPLICATION_APPROVED: 'volunteer_application_approved',
+  VOLUNTEER_APPLICATION_REJECTED: 'volunteer_application_rejected',
+
+  VOLUNTEER_WITHDRAW_REQUESTED: 'volunteer_withdraw_requested',
+  VOLUNTEER_WITHDRAW_APPROVED: 'volunteer_withdraw_approved',
+  VOLUNTEER_WITHDRAW_REJECTED: 'volunteer_withdraw_rejected',
 });
 
 export const NOTIFICATION_CHANNELS = Object.freeze({

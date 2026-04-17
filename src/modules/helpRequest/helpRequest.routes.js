@@ -1,5 +1,8 @@
 import { Router } from 'express';
-import { authenticate } from '../../middlewares/auth.middleware.js';
+import {
+  authenticate,
+  optionalAuthenticate,
+} from '../../middlewares/auth.middleware.js';
 import { adminMiddleware } from '../../middlewares/admin.middleware.js';
 import { scopePerRequest } from '../../middlewares/di.middleware.js';
 import { validate } from '../../middlewares/validate.middleware.js';
@@ -25,24 +28,24 @@ const execute = (action) => (req, res, next) => {
     if (!req.scope) {
       throw new Error('req.scope is required. Check di.middleware.');
     }
+
     const controller = req.scope.resolve('helprequestController');
 
     if (typeof controller[action] !== 'function') {
       throw new Error(`Action [${action}] does not exist in HelpRequestController.`);
     }
+
     return controller[action](req, res, next);
   } catch (error) {
     next(error);
   }
 };
 
-router.get(
-  '/urgent',
-  execute('getUrgentRequests')
-);
+router.get('/urgent', optionalAuthenticate, execute('getUrgentRequests'));
 
 router.get(
   '/nearby',
+  optionalAuthenticate,
   validate(getNearbyRequestsSchema),
   execute('getNearbyRequests')
 );
@@ -70,12 +73,14 @@ router.get(
 
 router.get(
   '/:id/as-project',
+  optionalAuthenticate,
   validate(getHelpRequestByIdSchema),
   execute('getAsProjectData')
 );
 
 router.get(
   '/',
+  optionalAuthenticate,
   validate(getHelpRequestsSchema),
   execute('getHelpRequests')
 );
@@ -89,6 +94,7 @@ router.post(
 
 router.get(
   '/:id',
+  optionalAuthenticate,
   validate(getHelpRequestByIdSchema),
   execute('getHelpRequestById')
 );

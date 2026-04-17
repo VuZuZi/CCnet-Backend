@@ -1,12 +1,12 @@
-import { config } from './index.js';
-import ApiResponse from '../core/Response.js';
-import AppError from '../core/AppError.js';
-import { authenticate } from '../middlewares/auth.middleware.js';
-import { createNotificationModule } from '../modules/notification/notification.module.js';
-import { DOMAIN_EVENTS } from '../modules/notification/constants/notification.events.js';
-import User from '../modules/user/user.model.js';
-import { getContainer } from '../container/index.js';
-import { getSharedEventBus } from '../core/eventBus.js';
+import { config } from "./index.js";
+import ApiResponse from "../core/Response.js";
+import AppError from "../core/AppError.js";
+import { authenticate } from "../middlewares/auth.middleware.js";
+import { createNotificationModule } from "../modules/notification/notification.module.js";
+import { DOMAIN_EVENTS } from "../modules/notification/constants/notification.events.js";
+import User from "../modules/user/user.model.js";
+import { getContainer } from "../container/index.js";
+import { getSharedEventBus } from "../core/eventBus.js";
 
 function createDefaultLogger() {
   return {
@@ -18,7 +18,7 @@ function createDefaultLogger() {
 function resolveRedisInstance() {
   try {
     const container = getContainer();
-    return container.resolve('redis');
+    return container.resolve("redis");
   } catch {
     return null;
   }
@@ -27,7 +27,7 @@ function resolveRedisInstance() {
 function resolveMailProvider() {
   try {
     const container = getContainer();
-    return container.resolve('mailProvider');
+    return container.resolve("mailProvider");
   } catch {
     return null;
   }
@@ -36,7 +36,7 @@ function resolveMailProvider() {
 function resolveUserRepository() {
   try {
     const container = getContainer();
-    return container.resolve('userRepository');
+    return container.resolve("userRepository");
   } catch {
     return null;
   }
@@ -61,8 +61,8 @@ export async function createConfiguredNotificationModule({
     logger: createDefaultLogger(),
     createError: (message, status) => new AppError(message, status),
     streamCookieOptions: {
-      secure: config.env === 'production',
-      sameSite: config.notification.streamCrossSite ? 'none' : 'lax',
+      secure: config.env === "production",
+      sameSite: config.notification.streamCrossSite ? "none" : "lax",
     },
     resolveAllUserIds: async () => {
       const users = await User.find({}, { _id: 1 }).lean();
@@ -71,6 +71,15 @@ export async function createConfiguredNotificationModule({
     resolveUserIdsByRole: async (role) => {
       const users = await User.find({ role }, { _id: 1 }).lean();
       return users.map((user) => String(user._id));
+    },
+    resolveUsersByIds: async (ids = []) => {
+      const normalizedIds = [...new Set((ids || []).map(String).filter(Boolean))];
+      if (!normalizedIds.length) return [];
+
+      return User.find(
+        { _id: { $in: normalizedIds } },
+        { _id: 1, fullName: 1, email: 1, role: 1, avatar: 1 }
+      ).lean();
     },
   });
 }

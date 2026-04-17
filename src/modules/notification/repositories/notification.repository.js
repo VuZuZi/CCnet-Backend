@@ -5,14 +5,16 @@ class NotificationRepository {
     return NotificationModel.create(payload);
   }
 
-  async findByRecipient({ recipientId, page, limit }) {
-    const skip = (page - 1) * limit;
+  async findByRecipient({ recipientId, page = 1, limit = 20 }) {
+    const safePage = Math.max(Number(page) || 1, 1);
+    const safeLimit = Math.max(Number(limit) || 20, 1);
+    const skip = (safePage - 1) * safeLimit;
 
     const [items, total] = await Promise.all([
       NotificationModel.find({ recipientId })
         .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(limit)
+        .limit(safeLimit)
         .lean(),
       NotificationModel.countDocuments({ recipientId }),
     ]);
@@ -20,10 +22,10 @@ class NotificationRepository {
     return {
       items,
       pagination: {
-        page,
-        limit,
+        page: safePage,
+        limit: safeLimit,
         total,
-        totalPages: Math.ceil(total / limit) || 1,
+        totalPages: Math.max(1, Math.ceil(total / safeLimit)),
       },
     };
   }
@@ -36,7 +38,10 @@ class NotificationRepository {
   }
 
   async countUnread(recipientId) {
-    return NotificationModel.countDocuments({ recipientId, isRead: false });
+    return NotificationModel.countDocuments({
+      recipientId,
+      isRead: false,
+    });
   }
 
   async markAsRead({ id, recipientId }) {
@@ -62,7 +67,10 @@ class NotificationRepository {
   }
 
   async deleteById({ id, recipientId }) {
-    return NotificationModel.findOneAndDelete({ _id: id, recipientId }).lean();
+    return NotificationModel.findOneAndDelete({
+      _id: id,
+      recipientId,
+    }).lean();
   }
 }
 

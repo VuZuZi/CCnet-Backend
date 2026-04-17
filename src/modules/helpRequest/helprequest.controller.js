@@ -11,6 +11,7 @@ export default class HelpRequestController {
         req.user.userId,
         req.body
       );
+
       return Response.created(res, helpRequest, 'Help request created successfully');
     } catch (error) {
       next(error);
@@ -40,6 +41,7 @@ export default class HelpRequestController {
         page: parseInt(page, 10),
         limit: parseInt(limit, 10),
         sort: { [sortBy]: sortOrder === 'desc' ? -1 : 1 },
+        viewer: req.user || null,
       };
 
       const result = await this.helpRequestService.getHelpRequests(filters, options);
@@ -73,6 +75,7 @@ export default class HelpRequestController {
         filters,
         options
       );
+
       return Response.success(res, result);
     } catch (error) {
       next(error);
@@ -83,8 +86,9 @@ export default class HelpRequestController {
     try {
       const helpRequest = await this.helpRequestService.getHelpRequestById(
         req.params.id,
-        req.user?.userId
+        req.user || null
       );
+
       return Response.success(res, helpRequest);
     } catch (error) {
       next(error);
@@ -98,6 +102,7 @@ export default class HelpRequestController {
         req.user.userId,
         req.body
       );
+
       return Response.success(res, helpRequest, 'Help request updated successfully');
     } catch (error) {
       next(error);
@@ -119,6 +124,7 @@ export default class HelpRequestController {
         req.params.id,
         req.user.userId
       );
+
       return Response.success(res, helpRequest, 'Help request cancelled successfully');
     } catch (error) {
       next(error);
@@ -128,12 +134,14 @@ export default class HelpRequestController {
   verifyHelpRequest = async (req, res, next) => {
     try {
       const { approved, rejectionReason } = req.body;
+
       const helpRequest = await this.helpRequestService.verifyHelpRequest(
         req.params.id,
         req.user.userId,
         approved,
         rejectionReason
       );
+
       return Response.success(
         res,
         helpRequest,
@@ -147,11 +155,6 @@ export default class HelpRequestController {
   assignOrganizer = async (req, res, next) => {
     try {
       const { organizerId } = req.body;
-      console.log(`[CONTROLLER] Assign organizer:`, {
-        requestId: req.params.id,
-        organizerId: organizerId,
-        adminId: req.user.userId,
-      });
 
       const helpRequest = await this.helpRequestService.assignOrganizer(
         req.params.id,
@@ -159,15 +162,8 @@ export default class HelpRequestController {
         organizerId
       );
 
-      console.log(`[CONTROLLER] Assignment successful:`, {
-        requestId: helpRequest._id,
-        assignedOrganizerId: helpRequest.assignedOrganizerId,
-        status: helpRequest.status,
-      });
-
       return Response.success(res, helpRequest, 'Organizer assigned successfully');
     } catch (error) {
-      console.error(`[CONTROLLER] Error in assignOrganizer:`, error.message);
       next(error);
     }
   };
@@ -175,6 +171,7 @@ export default class HelpRequestController {
   getOrganizerSuggestions = async (req, res, next) => {
     try {
       const { search, limit = 20 } = req.query;
+
       const result = await this.helpRequestService.getOrganizerSuggestions(req.params.id, {
         search,
         limit: parseInt(limit, 10),
@@ -219,7 +216,6 @@ export default class HelpRequestController {
 
       return Response.success(res, result);
     } catch (error) {
-      console.error(`[CONTROLLER] Error in getAssignedRequestsForOrganizer:`, error.message);
       next(error);
     }
   };
@@ -227,6 +223,7 @@ export default class HelpRequestController {
   respondToAssignment = async (req, res, next) => {
     try {
       const { action } = req.body;
+
       const helpRequest = await this.helpRequestService.respondToAssignment(
         req.params.id,
         req.user.userId,
@@ -251,6 +248,7 @@ export default class HelpRequestController {
         req.params.id,
         req.user.userId
       );
+
       return Response.success(res, helpRequest, 'Help request completed successfully');
     } catch (error) {
       next(error);
@@ -260,10 +258,13 @@ export default class HelpRequestController {
   getUrgentRequests = async (req, res, next) => {
     try {
       const { page = 1, limit = 10 } = req.query;
+
       const options = {
         page: parseInt(page, 10),
         limit: parseInt(limit, 10),
+        viewer: req.user || null,
       };
+
       const result = await this.helpRequestService.getUrgentRequests(options);
       return Response.success(res, result);
     } catch (error) {
@@ -283,6 +284,7 @@ export default class HelpRequestController {
       const options = {
         page: parseInt(page, 10),
         limit: parseInt(limit, 10),
+        viewer: req.user || null,
       };
 
       const result = await this.helpRequestService.getNearbyRequests(
@@ -290,6 +292,7 @@ export default class HelpRequestController {
         parseInt(maxDistance, 10),
         options
       );
+
       return Response.success(res, result);
     } catch (error) {
       next(error);

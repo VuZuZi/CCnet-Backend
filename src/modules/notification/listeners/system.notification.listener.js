@@ -1,5 +1,13 @@
-import { DOMAIN_EVENTS } from '../constants/notification.events.js';
-import { NOTIFICATION_TYPES } from '../constants/notification.constants.js';
+import { DOMAIN_EVENTS } from "../constants/notification.events.js";
+import { NOTIFICATION_TYPES } from "../constants/notification.constants.js";
+
+function normalizeStringArray(values) {
+  return [
+    ...new Set(
+      (values || []).map((item) => String(item || "").trim()).filter(Boolean)
+    ),
+  ];
+}
 
 export function registerSystemNotificationListener({
   eventBus,
@@ -8,44 +16,54 @@ export function registerSystemNotificationListener({
 }) {
   eventBus.on(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, async (event) => {
     try {
-      const basePayload = {
+      const payload = {
         title: event.title,
         message: event.message,
         actionUrl: event.actionUrl || null,
-        entityId: event.entityId,
+        entityId: event.entityId || null,
         severity: event.severity,
       };
 
-      if (event.userIds?.length) {
-        await notificationBroadcastService.sendToUsers({
-          userIds: event.userIds,
-          actorId: event.actorId || null,
+      const actorId = event.actorId || null;
+
+      if (Array.isArray(event.roleSelections) && event.roleSelections.length) {
+        return notificationBroadcastService.sendToRoleSelections({
+          roleSelections: event.roleSelections,
+          actorId,
           type: NOTIFICATION_TYPES.SYSTEM_ANNOUNCEMENT,
-          payload: basePayload,
+          payload,
         });
-        return;
       }
 
-      if (event.role) {
-        await notificationBroadcastService.sendToRole({
-          role: event.role,
-          actorId: event.actorId || null,
+      const userIds = normalizeStringArray(event.userIds);
+      if (userIds.length) {
+        return notificationBroadcastService.sendToUsers({
+          userIds,
+          actorId,
           type: NOTIFICATION_TYPES.SYSTEM_ANNOUNCEMENT,
-          payload: basePayload,
+          payload,
         });
-        return;
       }
 
-      await notificationBroadcastService.sendToAll({
-        actorId: event.actorId || null,
+      return notificationBroadcastService.sendToAll({
+        actorId,
         type: NOTIFICATION_TYPES.SYSTEM_ANNOUNCEMENT,
-        payload: basePayload,
+        payload,
       });
     } catch (error) {
-      logger?.error?.('Failed to handle system notification event', {
+      logger?.error?.("Failed to handle system notification event", {
         error,
         event,
       });
+
+      return {
+        createdNotifications: [],
+        recipientIds: [],
+        recipientCount: 0,
+        recipients: [],
+        requestedUsers: [],
+        resolutionBreakdown: [],
+      };
     }
   });
 }
