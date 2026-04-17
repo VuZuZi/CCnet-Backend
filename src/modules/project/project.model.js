@@ -8,6 +8,15 @@ import {
   SURPLUS_POLICY,
 } from "./project.constant.js";
 
+const evidencePolicySchema = new mongoose.Schema(
+  {
+    requireFinancial: { type: Boolean, default: false },
+    requireGeoPhotos: { type: Number, default: 0 },
+    requireVolunteerLogs: { type: Boolean, default: false }
+  },
+  { _id: false }
+);
+
 const milestoneSchema = new mongoose.Schema(
   {
     milestoneId: { type: String, default: uuidv4 },
@@ -16,7 +25,16 @@ const milestoneSchema = new mongoose.Schema(
     targetAmount: { type: Number, default: 0, min: 0 },
     startDate: { type: Date, default: null },
     endDate: { type: Date, default: null },
-    deliverables: { type: String, trim: true },
+    location: {
+      type: { type: String, enum: ["Point"], default: "Point" },
+      coordinates: { type: [Number], default: undefined },
+      address: { type: String }
+    },
+    evidencePolicy: {
+      type: evidencePolicySchema,
+      default: () => ({ requireFinancial: false, requireGeoPhotos: 0 })
+    },
+
     status: {
       type: String,
       enum: Object.values(MILESTONE_STATUS),
@@ -163,6 +181,13 @@ const projectSchema = new mongoose.Schema(
       currentVolunteers: { type: Number, default: 0 },
       followerCount: { type: Number, default: 0 },
     },
+    postProjectSummary: {
+      totalSurplus: { type: Number, default: 0 },
+      walletRefundsAmount: { type: Number, default: 0 },
+      charitySweepAmount: { type: Number, default: 0 },
+      walletCount: { type: Number, default: 0 },
+      completedAt: { type: Date }
+    }
   },
   {
     timestamps: true,
@@ -183,6 +208,37 @@ projectSchema.pre("save", function (next) {
   }
   next();
 });
+
+projectSchema.pre(
+  ["findOneAndUpdate", "updateOne", "updateMany"],
+  async function (next) {
+    const update = this.getUpdate();
+    const newStartDate = update.$set?.startDate || update.startDate;
+    const newEndDate = update.$set?.endDate || update.endDate;
+
+    if (newStartDate === undefined && newEndDate === undefined) {
+      return next();
+    }
+
+    try {
+      let currentDoc = {};
+      if (newStartDate === undefined || newEndDate === undefined) {
+        currentDoc = await this.model.findOne(this.getQuery()).select('startDate endDate').lean();
+        if (!currentDoc) return next();
+      }
+
+      const finalStartDate = newStartDate !== undefined ? newStartDate : currentDoc.startDate;
+      const finalEndDate = newEndDate !== undefined ? newEndDate : currentDoc.endDate;
+
+      if (finalStartDate && finalEndDate && new Date(finalStartDate) >= new Date(finalEndDate)) {
+        return next(new Error("Ngày kết thúc phải diễn ra sau ngày bắt đầu dự án."));
+      }
+      next();
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 const Project = mongoose.model("Project", projectSchema);
 

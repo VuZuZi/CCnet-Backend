@@ -18,6 +18,7 @@ import { initFollowWorkers } from "./modules/follow/follow.worker.js";
 import { initProjectWorkers } from "./modules/project/project.worker.js";
 import { initVolunteerWorkers } from "./modules/volunteer/volunteer.worker.js";
 import { initUserWorkers } from "./modules/user/user.worker.js";
+import { initTransactionWorkers } from "./modules/transaction/transaction.worker.js";
 
 export const createApp = async () => {
   const app = express();
@@ -94,12 +95,17 @@ export const createApp = async () => {
   await registerModule("search");
   await registerModule("project");
   await registerModule("volunteer");
+  await registerModule("accounting");
 
   initPostWorkers();
   initFollowWorkers();
   initProjectWorkers();
   initVolunteerWorkers();
   initUserWorkers();
+  initTransactionWorkers();
+  setTimeout(() => {
+    getContainer().resolve("jobQueue").addJob("financial-reconciliation", "daily-reconciliation", {});
+  }, 5000);
 
   if (typeof configureSystemRoutes === "function") {
     configureSystemRoutes(app);
@@ -136,6 +142,22 @@ export const createApp = async () => {
 
     res.status(statusCode).json(errorResponse);
   });
+
+  setTimeout(async () => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log("=========================================");
+      console.log("🧪 [DEV MODE] CHẠY TEST LUỒNG ĐỐI SOÁT...");
+      const txService = getContainer().resolve("transactionService");
+      try {
+        const result = await txService.executeDailyReconciliation(new Date());
+        console.log("📊 KẾT QUẢ ĐỐI SOÁT:");
+        console.dir(result, { depth: null, colors: true });
+      } catch (err) {
+        console.error("❌ LỖI TEST ĐỐI SOÁT:", err.message);
+      }
+      console.log("=========================================");
+    }
+  }, 8000);
 
   return app;
 };

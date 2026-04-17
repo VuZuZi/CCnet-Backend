@@ -2,12 +2,15 @@ import { createContainer, asClass, asValue, Lifetime } from "awilix";
 import { config } from "../config/index.js";
 import { eventBus } from "../config/notification.js";
 
+// Đã gộp tất cả import từ cả 2 nhánh và chuẩn hóa dùng nháy kép
 import RedisClient from "../core/RedisClient.js";
 import MailProvider from "../core/MailProvider.js";
 import CloudinaryProvider from "../core/CloudinaryProvider.js";
 import JobQueue from "../core/JobQueue.js";
 import TransactionManager from "../core/TransactionManager.js";
+import SepayProvider from "../core/payment/sepay-provider.js";
 import PayosProvider from "../core/payment/PayosProvider.js";
+import TransactionSSEService from "../modules/transaction/services/transaction-sse.service.js";
 import { registerTransactionListeners } from "../modules/transaction/transaction.listener.js";
 
 let container;
@@ -23,16 +26,13 @@ export const initializeContainer = () => {
     cloudinaryProvider: asClass(CloudinaryProvider).singleton(),
     jobQueue: asClass(JobQueue).singleton(),
     transactionManager: asClass(TransactionManager).singleton(),
-    paymentProvider: asClass(PayosProvider).singleton(),
+    paymentProvider: asClass(SepayProvider).singleton(),
+    transactionSseService: asClass(TransactionSSEService).singleton(),
   });
 
   container.loadModules(
     [
-      "../modules/**/*.service.js",
-      "../modules/**/*.repository.js",
-      "../modules/**/*.controller.js",
-      "../modules/**/*.processor.js",
-
+      "!../modules/transaction/services/transaction-sse.service.js",
       "!../modules/notification/services/notification.service.js",
       "!../modules/notification/services/notificationSSE.service.js",
       "!../modules/notification/services/notificationBroadcast.service.js",
@@ -40,6 +40,10 @@ export const initializeContainer = () => {
       "!../modules/notification/repositories/notification.repository.js",
       "!../modules/notification/repositories/notificationSetting.repository.js",
       "!../modules/notification/notification.controller.js",
+      "../modules/**/*.service.js",
+      "../modules/**/*.repository.js",
+      "../modules/**/*.controller.js",
+      "../modules/**/*.processor.js"
     ],
     {
       cwd: import.meta.dirname,

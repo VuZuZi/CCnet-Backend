@@ -95,7 +95,7 @@ class ProjectRepository {
     return await Project.findByIdAndUpdate(
       projectId,
       { $inc: { currentAmount: amount } },
-      { new: true, session }
+      { new: true, runValidators: true, session }
     )
       .lean()
       .exec();
@@ -183,7 +183,7 @@ class ProjectRepository {
       return await Project.findByIdAndUpdate(
         projectId,
         { $inc: increments },
-        { new: true, session }
+        { new: true, runValidators: true, session }
       )
         .lean()
         .exec();
@@ -440,6 +440,22 @@ class ProjectRepository {
       .limit(limit)
       .lean()
       .exec();
+  }
+
+  async decrementFunding(projectId, amount, session = null) {
+    return await Project.findByIdAndUpdate(
+      projectId,
+      { $inc: { currentAmount: -amount } },
+      { new: true, session, runValidators: true }
+    ).lean().exec();
+  }
+
+  async updateMilestoneStatus(projectId, milestoneId, status, session = null) {
+    return await Project.findOneAndUpdate(
+      { _id: projectId, "milestones.milestoneId": milestoneId },
+      { $set: { "milestones.$.status": status } },
+      { new: true, session }
+    ).lean().exec();
   }
 }
 

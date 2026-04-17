@@ -2,7 +2,19 @@ import { Router } from "express";
 import { scopePerRequest } from "../../middlewares/di.middleware.js";
 import { authenticate } from "../../middlewares/auth.middleware.js";
 import { validateBody, validateParams, validateQuery } from "../../middlewares/validate.middleware.js";
-import { donateSchema, getDonationsQuerySchema, projectIdParamSchema, requestRefundSchema, withdrawSchema } from "./transaction.validation.js";
+import {
+    approveClaimSchema,
+    donateSchema,
+    getDonationsQuerySchema,
+    getSuspenseQuerySchema,
+    projectIdParamSchema,
+    requestRefundSchema,
+    submitClaimSchema,
+    transactionIdParamSchema,
+    updateMessageSchema,
+    withdrawSchema
+} from "./transaction.validation.js";
+import { adminMiddleware } from "../../middlewares/admin.middleware.js";
 
 const router = Router();
 router.use(scopePerRequest);
@@ -24,6 +36,13 @@ router.post(
 );
 
 router.get(
+    "/:id/stream",
+    authenticate,
+    validateParams(transactionIdParamSchema),
+    execute("streamTransaction")
+);
+
+router.get(
     "/project/:projectId/donations",
     validateParams(projectIdParamSchema),
     validateQuery(getDonationsQuerySchema),
@@ -38,13 +57,21 @@ router.get(
 );
 
 router.post(
-    "/webhook/payos",
-    execute("payosWebhook")
+    "/webhook/sepay",
+    execute("sepayWebhook")
+);
+
+router.get(
+    "/:id/status",
+    authenticate,
+    validateParams(transactionIdParamSchema),
+    execute("getTransactionStatus")
 );
 
 router.post(
     "/:id/refund",
     authenticate,
+    validateParams(transactionIdParamSchema),
     validateBody(requestRefundSchema),
     execute("requestRefund")
 );
@@ -54,6 +81,45 @@ router.post(
     authenticate,
     validateBody(withdrawSchema),
     execute("withdrawWallet")
+);
+
+router.post(
+    "/claims",
+    authenticate,
+    validateBody(submitClaimSchema),
+    execute("submitClaim")
+);
+
+router.get(
+    "/admin/suspense",
+    authenticate,
+    adminMiddleware,
+    validateQuery(getSuspenseQuerySchema),
+    execute("getSuspenseTransactions")
+);
+
+router.post(
+    "/admin/suspense/:id/approve",
+    authenticate,
+    adminMiddleware,
+    validateParams(transactionIdParamSchema),
+    validateBody(approveClaimSchema),
+    execute("approveSuspenseClaim")
+);
+
+router.patch(
+    "/:id/message",
+    authenticate,
+    validateParams(transactionIdParamSchema),
+    validateBody(updateMessageSchema),
+    execute("updateMessage")
+);
+
+router.patch(
+    "/:id/intent",
+    authenticate,
+    validateParams(transactionIdParamSchema),
+    execute("confirmPaymentIntent")
 );
 
 export default router;

@@ -9,8 +9,14 @@ class MediaController {
   upload = async (req, res, next) => {
     try {
       const userId = req.user.userId;
-      const context = req.body.context || 'general'; 
-      const media = await this.mediaService.uploadSingle(req.file, userId, context);
+      const context = req.body.context || 'general';
+
+      const clientLocation = {
+        lat: req.body.lat || null,
+        lng: req.body.lng || null
+      };
+
+      const media = await this.mediaService.uploadSingle(req.file, userId, context, clientLocation);
 
       return ApiResponse.success(res, { media }, 'File uploaded successfully');
     } catch (error) {
@@ -22,7 +28,7 @@ class MediaController {
     try {
       const userId = req.user.userId;
       const context = req.query.context || 'project_cover';
-      
+
       const signatureData = this.mediaService.getUploadSignature(userId, context);
 
       return ApiResponse.success(res, signatureData, 'Đã cấp chữ ký tải lên mây thành công');
@@ -34,13 +40,18 @@ class MediaController {
   uploadSmart = async (req, res, next) => {
     try {
       const userId = req.user.userId;
-      const context = req.body.context || 'general'; 
+      const context = req.body.context || 'general';
       const files = req.file ? [req.file] : (req.files || []);
 
       if (files.length === 0) throw new AppError('Không tìm thấy file để xử lý', 400);
 
-      const mediaList = await this.mediaService.uploadSmartMultiple(files, userId, context);
-      
+      const clientLocation = {
+        lat: req.body.lat || null,
+        lng: req.body.lng || null
+      };
+
+      const mediaList = await this.mediaService.uploadSmartMultiple(files, userId, context, clientLocation);
+
       const responseData = req.file ? mediaList[0] : mediaList;
 
       return ApiResponse.created(res, { media: responseData }, 'Tải lên thành công');
@@ -53,7 +64,7 @@ class MediaController {
     try {
       const userId = req.user.userId;
       const media = await this.mediaService.syncMediaRecord(userId, req.body);
-      
+
       return ApiResponse.created(res, { media }, 'Đồng bộ dữ liệu media thành công');
     } catch (error) {
       next(error);
