@@ -1,5 +1,5 @@
 import AppError from "../../../core/AppError.js";
-import { MILESTONE_STATUS } from "../project.constant.js";
+import { MILESTONE_STATUS, PROJECT_STATUS, PROJECT_TYPE } from "../project.constant.js";
 
 const toObject = (value) => (value?.toObject ? value.toObject() : value);
 
@@ -36,6 +36,27 @@ class ProjectWorkspaceService {
     this.projectRepository = projectRepository;
     this.redis = redis;
     this.followRepository = followRepository;
+  }
+
+  async syncVolunteerOnlyProjectStatus(project) {
+    if (!project?._id) return project;
+
+    const shouldTrySync =
+      project.projectType === PROJECT_TYPE.VOLUNTEER_ONLY &&
+      project.status === PROJECT_STATUS.RECRUITING;
+
+    if (!shouldTrySync) {
+      return project;
+    }
+
+    const synced = await this.projectRepository.syncVolunteerOnlyExecutionStatus(project._id);
+    return synced || project;
+  }
+
+  async syncVolunteerOnlyProjectsStatus(projects = []) {
+    return Promise.all(
+      projects.map((project) => this.syncVolunteerOnlyProjectStatus(project))
+    );
   }
 
   buildWorkspaceProject(project) {
@@ -105,18 +126,22 @@ class ProjectWorkspaceService {
       textSearch,
     });
 
+    const syncedProjects = await this.syncVolunteerOnlyProjectsStatus(result.projects);
+
     return {
-      projects: result.projects,
+      projects: syncedProjects,
       pagination: buildPagination(result.total, safePage, safeLimit),
     };
   }
 
   async getProjectDetail(projectId, userId = null) {
-    const project = await this.projectRepository.findByIdWithDetails(projectId);
+    let project = await this.projectRepository.findByIdWithDetails(projectId);
 
     if (!project) {
       throw new AppError("Không tìm thấy dự án hoặc dự án đã bị xóa", 404);
     }
+
+    project = await this.syncVolunteerOnlyProjectStatus(project);
 
     const redisKey = `project:${projectId}:views`;
     this.redis.incr(redisKey).catch(() => {});
@@ -187,8 +212,10 @@ class ProjectWorkspaceService {
       limit: safeLimit,
     });
 
+    const syncedProjects = await this.syncVolunteerOnlyProjectsStatus(result.projects);
+
     return {
-      projects: result.projects.map((project) =>
+      projects: syncedProjects.map((project) =>
         this.buildWorkspaceProject(project),
       ),
       pagination: buildPagination(result.total, safePage, safeLimit),

@@ -42,10 +42,9 @@ class VolunteerController {
   updateApplication = async (req, res, next) => {
     try {
       const { id } = req.params;
-      const { skills, status, availability, motivation } = req.body;
+      const { skills, availability, motivation } = req.body;
       const data = await this.volunteerService.updateApplication(req.user.userId, id, {
         skills,
-        status,
         availability,
         motivation
       });
@@ -60,6 +59,21 @@ class VolunteerController {
       const { id } = req.params;
       const data = await this.volunteerService.cancelApplication(id, req.user.userId);
       return ApiResponse.success(res, data, 'Application cancelled successfully');
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  requestWithdraw = async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const { withdrawReason } = req.body;
+      const data = await this.volunteerService.requestWithdraw(
+        id,
+        req.user.userId,
+        withdrawReason
+      );
+      return ApiResponse.success(res, data, 'Withdraw requested successfully');
     } catch (e) {
       next(e);
     }
@@ -87,6 +101,32 @@ class VolunteerController {
         rejectReason
       );
       return ApiResponse.success(res, data, 'Rejected successfully');
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  approveWithdraw = async (req, res, next) => {
+    try {
+      const data = await this.volunteerService.approveWithdraw(
+        req.params.id,
+        req.user.userId
+      );
+      return ApiResponse.success(res, data, 'Withdraw approved successfully');
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  rejectWithdraw = async (req, res, next) => {
+    try {
+      const { reviewNote } = req.body;
+      const data = await this.volunteerService.rejectWithdraw(
+        req.params.id,
+        req.user.userId,
+        reviewNote
+      );
+      return ApiResponse.success(res, data, 'Withdraw rejected successfully');
     } catch (e) {
       next(e);
     }
@@ -130,8 +170,9 @@ class VolunteerController {
 
   getProjectApplications = async (req, res, next) => {
     try {
-      const { projectId } = req.params;
-      const { status, limit = 20, cursor } = req.query;
+      const { projectId, status: statusFromParams } = req.params;
+      const { status: statusFromQuery, limit = 20, cursor } = req.query;
+      const status = statusFromParams || statusFromQuery || null;
 
       if (!projectId) {
         return ApiResponse.error(res, 'Missing projectId', 400);
@@ -150,7 +191,6 @@ class VolunteerController {
 
       return ApiResponse.success(res, data, 'Project applications retrieved');
     } catch (e) {
-      console.error('❌ Error in getProjectApplications:', e);
       next(e);
     }
   };
@@ -176,7 +216,6 @@ class VolunteerController {
 
       return ApiResponse.success(res, data, 'Pending applications retrieved');
     } catch (e) {
-      console.error('❌ Error in getProjectPendingApplications:', e);
       next(e);
     }
   };

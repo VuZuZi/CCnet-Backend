@@ -3,6 +3,7 @@ import Project from "../project.model.js";
 import {
   PUBLIC_PROJECT_STATUSES,
   PROJECT_STATUS,
+  PROJECT_TYPE,
   WORKSPACE_CANCELLED_STATUSES,
   WORKSPACE_COMPLETED_STATUSES,
 } from "../project.constant.js";
@@ -23,6 +24,7 @@ const PROJECT_CARD_PROJECTION = {
   projectType: 1,
   volunteerRoles: 1,
   status: 1,
+  startDate: 1,
 };
 
 const ORGANIZER_PROJECT_PROJECTION = {
@@ -70,6 +72,11 @@ const buildPublicProjectsFilter = (filter = {}) => ({
   status: { $in: PUBLIC_PROJECT_STATUSES },
 });
 
+const VOLUNTEER_ONLY_SYNCABLE_STATUSES = new Set([
+  PROJECT_STATUS.RECRUITING,
+  PROJECT_STATUS.EXECUTING,
+]);
+
 class ProjectRepository {
   async create(projectData, session = null) {
     const docs = await Project.create([projectData], { session });
@@ -101,6 +108,60 @@ class ProjectRepository {
       .exec();
   }
 
+  async syncVolunteerOnlyExecutionStatus(projectId, session = null) {
+    if (!isValidObjectId(projectId)) return null;
+
+    const project = await Project.findById(projectId).session(session).lean().exec();
+    if (!project) return null;
+
+    if (project.projectType !== PROJECT_TYPE.VOLUNTEER_ONLY) {
+      return project;
+    }
+
+    if (!VOLUNTEER_ONLY_SYNCABLE_STATUSES.has(String(project.status))) {
+      return project;
+    }
+
+    const now = new Date();
+    const currentVolunteers = Number(project?.stats?.currentVolunteers || 0);
+    const targetVolunteers = Number(project?.stats?.targetVolunteers || 0);
+
+    const reachedVolunteerTarget =
+      targetVolunteers > 0 && currentVolunteers >= targetVolunteers;
+
+    const reachedStartDate =
+      Boolean(project?.startDate) && new Date(project.startDate) <= now;
+
+    let nextStatus = project.status;
+
+    if (project.status === PROJECT_STATUS.RECRUITING) {
+      if (reachedVolunteerTarget || reachedStartDate) {
+        nextStatus = PROJECT_STATUS.EXECUTING;
+      }
+    } else if (project.status === PROJECT_STATUS.EXECUTING) {
+      const shouldReturnToRecruiting =
+        !reachedStartDate &&
+        targetVolunteers > 0 &&
+        currentVolunteers < targetVolunteers;
+
+      if (shouldReturnToRecruiting) {
+        nextStatus = PROJECT_STATUS.RECRUITING;
+      }
+    }
+
+    if (nextStatus === project.status) {
+      return project;
+    }
+
+    return await Project.findByIdAndUpdate(
+      projectId,
+      { $set: { status: nextStatus } },
+      { new: true, session },
+    )
+      .lean()
+      .exec();
+  }
+
   async incrementProjectStats(projectId, increments, session = null) {
     if (!increments["stats.currentVolunteers"]) {
       return await Project.findByIdAndUpdate(
@@ -118,9 +179,14 @@ class ProjectRepository {
         {
           $set: {
             "stats.currentVolunteers": {
-              $add: [
-                { $ifNull: ["$stats.currentVolunteers", 0] },
-                increments["stats.currentVolunteers"],
+              $max: [
+                {
+                  $add: [
+                    { $ifNull: ["$stats.currentVolunteers", 0] },
+                    increments["stats.currentVolunteers"],
+                  ],
+                },
+                0,
               ],
             },
           },
@@ -128,7 +194,15 @@ class ProjectRepository {
         {
           $set: {
             isVolunteerFull: {
-              $gte: ["$stats.currentVolunteers", "$stats.targetVolunteers"],
+              $and: [
+                { $gt: [{ $ifNull: ["$stats.targetVolunteers", 0] }, 0] },
+                {
+                  $gte: [
+                    "$stats.currentVolunteers",
+                    { $ifNull: ["$stats.targetVolunteers", 0] },
+                  ],
+                },
+              ],
             },
           },
         },

@@ -1,5 +1,4 @@
 import AppError from "../../../core/AppError.js";
-import { PROJECT_STATUS } from "../project.constant.js";
 import ProjectMediaService from "./project-media.service.js";
 import ProjectWorkspaceService from "./project-workspace.service.js";
 import ProjectSubmissionService from "./project-submission.service.js";
@@ -135,11 +134,13 @@ class ProjectService {
   }
 
   async getFeaturedProjects() {
-    return this.projectRepository.findFeaturedProjects(1);
+    const projects = await this.projectRepository.findFeaturedProjects(1);
+    return this.projectWorkspaceService.syncVolunteerOnlyProjectsStatus(projects);
   }
 
   async getVolunteerProjects() {
-    return this.projectRepository.findVolunteerProjects(4);
+    const projects = await this.projectRepository.findVolunteerProjects(4);
+    return this.projectWorkspaceService.syncVolunteerOnlyProjectsStatus(projects);
   }
 
   async getExploreProjects(queryParams = {}) {
@@ -219,7 +220,7 @@ class ProjectService {
             organizerId,
             coverMedia: finalCoverMedia || undefined,
             documents: finalDocumentIds,
-            status: PROJECT_STATUS.DRAFT,
+            status: "DRAFT",
             currentAmount: 0,
           },
           session,
@@ -251,7 +252,7 @@ class ProjectService {
       throw new AppError("Bạn không có quyền", 403);
     }
 
-    if (existingProject.status !== PROJECT_STATUS.DRAFT) {
+    if (existingProject.status !== "DRAFT") {
       throw new AppError("Chỉ có thể chỉnh sửa dự án Nháp.", 400);
     }
 

@@ -4,9 +4,9 @@ export default class NotificationService {
   constructor({
     notificationRepository,
     notificationSettingService,
-    notificationSSEService,
+    notificationSSEService = null,
     notificationRealtimeGateway = null,
-    logger = null,
+    logger = console,
     createError = null,
   }) {
     this.notificationRepository = notificationRepository;
@@ -40,57 +40,67 @@ export default class NotificationService {
   }
 
   hasActiveClients(recipientId) {
-    return this.notificationSSEService.hasActiveClients(recipientId);
+    if (!this.notificationSSEService || !recipientId) return false;
+
+    try {
+      return this.notificationSSEService.hasActiveClients(String(recipientId));
+    } catch (error) {
+      this.logger?.error?.('[NotificationService] hasActiveClients failed', {
+        recipientId,
+        error,
+      });
+      return false;
+    }
   }
 
   canDispatchRealtime(recipientId) {
-    return (
-      this.hasActiveClients(recipientId) ||
-      this.notificationRealtimeGateway?.isReady?.() === true
-    );
+    return this.hasActiveClients(recipientId);
   }
 
-  async emitToUser(recipientId, eventName, payload) {
+  async emitToUser(recipientId, event, payload) {
+    if (!recipientId || !event) return false;
+
     try {
-      if (this.notificationRealtimeGateway?.isReady?.()) {
-        const published = await this.notificationRealtimeGateway.publishToUser({
-          userId: recipientId,
-          eventName,
+      if (this.notificationRealtimeGateway) {
+        await this.notificationRealtimeGateway.publishToUser?.({
+          userId: String(recipientId),
+          eventName: event,
           payload,
         });
-
-        if (published) {
-          return true;
-        }
+        return true;
       }
 
-      this.notificationSSEService.emitToUser(recipientId, eventName, payload);
-      return true;
-    } catch (error) {
-      this.logger?.error?.('Failed to dispatch realtime notification event', {
-        error,
-        recipientId,
-        eventName,
-      });
+      if (this.notificationSSEService) {
+        this.notificationSSEService.emitToUser(String(recipientId), event, payload);
+        return true;
+      }
 
-      this.notificationSSEService.emitToUser(recipientId, eventName, payload);
-      return true;
+      return false;
+    } catch (error) {
+      this.logger?.error?.('[NotificationService] emitToUser failed', {
+        recipientId,
+        event,
+        error,
+      });
+      return false;
     }
   }
 
   async emitUnreadCount(recipientId, unreadCount = null) {
-    if (!this.canDispatchRealtime(recipientId)) {
-      return unreadCount ?? null;
+    if (!recipientId) {
+      return typeof unreadCount === 'number' ? unreadCount : 0;
     }
 
-    const nextUnreadCount =
-      unreadCount ?? (await this.getUnreadCountValue(recipientId));
+    const resolvedUnreadCount =
+      typeof unreadCount === 'number'
+        ? unreadCount
+        : await this.getUnreadCountValue(recipientId);
 
     await this.emitToUser(recipientId, NOTIFICATION_SSE_EVENTS.UNREAD_COUNT, {
-      unreadCount: nextUnreadCount,
+      unreadCount: resolvedUnreadCount,
     });
 
-    return nextUnreadCount;
+    return resolvedUnreadCount;
   }
 
   async createNotification(payload) {
@@ -106,12 +116,34 @@ export default class NotificationService {
     const created = await this.notificationRepository.create(payload);
     const serialized = this.serializeNotification(created);
 
-    if (this.canDispatchRealtime(payload.recipientId)) {
-      await this.emitToUser(payload.recipientId, NOTIFICATION_SSE_EVENTS.CREATED, {
-        notification: serialized,
-      });
+    const recipientId =
+      serialized?.recipientId?._id ||
+      serialized?.recipientId?.id ||
+      serialized?.recipientId ||
+      payload?.recipientId ||
+      null;
 
-      await this.emitUnreadCount(payload.recipientId);
+    if (recipientId) {
+      try {
+        const unreadCount = await this.getUnreadCountValue(recipientId);
+
+        await this.emitToUser(recipientId, NOTIFICATION_SSE_EVENTS.CREATED, {
+          event: NOTIFICATION_SSE_EVENTS.CREATED,
+          notification: serialized,
+          unreadCount,
+        });
+
+        await this.emitUnreadCount(recipientId, unreadCount);
+      } catch (error) {
+        this.logger?.error?.(
+          '[NotificationService] createNotification realtime emit failed',
+          {
+            recipientId,
+            type: payload?.type,
+            error,
+          }
+        );
+      }
     }
 
     return serialized;
@@ -145,32 +177,48 @@ export default class NotificationService {
 
   async markAsRead({ id, recipientId }) {
     const updated = await this.notificationRepository.markAsRead({ id, recipientId });
+    const serialized = this.serializeNotification(updated);
     const unreadCount = await this.getUnreadCountValue(recipientId);
 
-    if (updated && this.canDispatchRealtime(recipientId)) {
+    try {
       await this.emitToUser(recipientId, NOTIFICATION_SSE_EVENTS.READ, {
         notificationId: String(id),
-        readAt: updated.readAt,
+        readAt: serialized?.readAt || new Date().toISOString(),
+        unreadCount,
       });
 
       await this.emitUnreadCount(recipientId, unreadCount);
+    } catch (error) {
+      this.logger?.error?.('[NotificationService] markAsRead realtime emit failed', {
+        recipientId,
+        id,
+        error,
+      });
     }
 
     return {
-      item: updated,
+      item: serialized,
       unreadCount,
     };
   }
 
   async markAllAsRead(recipientId) {
     const result = await this.notificationRepository.markAllAsRead(recipientId);
+    const unreadCount = 0;
+    const readAt = new Date().toISOString();
 
-    if (result.modifiedCount > 0 && this.canDispatchRealtime(recipientId)) {
+    try {
       await this.emitToUser(recipientId, NOTIFICATION_SSE_EVENTS.READ_ALL, {
-        readAt: result.readAt,
+        readAt,
+        unreadCount,
       });
 
-      await this.emitUnreadCount(recipientId, 0);
+      await this.emitUnreadCount(recipientId, unreadCount);
+    } catch (error) {
+      this.logger?.error?.('[NotificationService] markAllAsRead realtime emit failed', {
+        recipientId,
+        error,
+      });
     }
 
     return result;
@@ -178,18 +226,26 @@ export default class NotificationService {
 
   async deleteNotification({ id, recipientId }) {
     const deleted = await this.notificationRepository.deleteById({ id, recipientId });
+    const serialized = this.serializeNotification(deleted);
     const unreadCount = await this.getUnreadCountValue(recipientId);
 
-    if (deleted && this.canDispatchRealtime(recipientId)) {
+    try {
       await this.emitToUser(recipientId, NOTIFICATION_SSE_EVENTS.DELETED, {
         notificationId: String(id),
+        unreadCount,
       });
 
       await this.emitUnreadCount(recipientId, unreadCount);
+    } catch (error) {
+      this.logger?.error?.('[NotificationService] deleteNotification realtime emit failed', {
+        recipientId,
+        id,
+        error,
+      });
     }
 
     return {
-      item: deleted,
+      item: serialized,
       unreadCount,
     };
   }

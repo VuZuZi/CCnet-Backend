@@ -100,6 +100,31 @@ class AdminProjectService {
     });
   }
 
+  _emitProjectDeleted({ project, actorId, reason }) {
+    if (!project?.organizerId) return;
+    if (!this.eventBus || typeof this.eventBus.emit !== "function") return;
+
+    const organizerId = extractObjectId(project.organizerId);
+    if (!organizerId) return;
+
+    const { title, message } = buildProjectStatusNotificationMessage(
+      project.title,
+      "DELETED",
+      reason
+    );
+
+    this.eventBus.emit(DOMAIN_EVENTS.PROJECT_STATUS_UPDATED, {
+      recipientIds: [String(organizerId)],
+      actorId,
+      projectId: project._id,
+      projectName: project.title,
+      status: "DELETED",
+      title,
+      message,
+      actionUrl: "/workspace",
+    });
+  }
+
   async _syncProjectConversationOnActive(project, adminId = null) {
     if (!project || String(project.status) !== PROJECT_STATUS.ACTIVE) return null;
     if (!this.conversationService || !this.volunteerRepository) return null;
@@ -330,6 +355,12 @@ class AdminProjectService {
         projectType: project.projectType,
         organizerId: extractObjectId(project.organizerId),
       },
+    });
+
+    this._emitProjectDeleted({
+      project,
+      actorId: adminId,
+      reason: normalizedReason,
     });
 
     return deletedProject;

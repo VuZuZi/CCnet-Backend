@@ -7,16 +7,25 @@ class VolunteerRepository {
     this.model = Volunteer;
   }
 
-  async exists(volunteerId, opportunityId) {
+  _applySession(query, session = null) {
+    if (session) {
+      query = query.session(session);
+    }
+
+    return query;
+  }
+
+  async exists(volunteerId, opportunityId, session = null) {
     try {
-      return await this.model.exists({ volunteerId, opportunityId });
+      const query = this.model.exists({ volunteerId, opportunityId });
+      return await this._applySession(query, session);
     } catch (error) {
       console.error("❌ [Repository] exists error:", error);
       throw error;
     }
   }
 
-  async find(filter, options = {}) {
+  async find(filter, options = {}, session = null) {
     try {
       let query = this.model.find(filter);
 
@@ -32,6 +41,8 @@ class VolunteerRepository {
         query = query.populate(options.populate, "fullName email avatar");
       }
 
+      query = this._applySession(query, session);
+
       const results = await query.lean();
       return results;
     } catch (error) {
@@ -40,53 +51,63 @@ class VolunteerRepository {
     }
   }
 
-  async create(data) {
+  async create(data, session = null) {
     try {
       if (!data.skills) throw new Error("skills is required");
       if (!data.motivation) throw new Error("motivation is required");
       if (!data.availability) throw new Error("availability is required");
 
-      const result = await this.model.create(data);
-      return result;
+      if (session) {
+        const docs = await this.model.create([data], { session });
+        return docs[0];
+      }
+
+      return await this.model.create(data);
     } catch (error) {
       console.error("❌ [Repository] create error:", error);
       throw error;
     }
   }
 
-  async application({ volunteerId, opportunityId }) {
+  async application({ volunteerId, opportunityId }, session = null) {
     try {
-      const application = await this.model.findOne({
+      let query = this.model.findOne({
         volunteerId,
         opportunityId,
         status: { $ne: "CANCELLED" },
       });
-      return application;
+
+      query = this._applySession(query, session);
+      return await query;
     } catch (error) {
       console.error("❌ [Repository] application error:", error);
       throw error;
     }
   }
 
-  async findOne(filter) {
+  async findOne(filter, session = null) {
     try {
-      return await this.model.findOne(filter);
+      let query = this.model.findOne(filter);
+      query = this._applySession(query, session);
+      return await query;
     } catch (error) {
       console.error("❌ [Repository] findOne error:", error);
       throw error;
     }
   }
 
-  async findById(id) {
+  async findById(id, session = null) {
     try {
-      return await this.model.findById(id);
+      let query = this.model.findById(id);
+      query = this._applySession(query, session);
+      return await query;
     } catch (error) {
       console.error("❌ [Repository] findById error:", error);
       throw error;
     }
   }
 
-  async update(id, updateData, changerId = null) {
+  async update(id, updateData, changerId = null, session = null) {
     try {
       const dataToUpdate = { ...updateData };
 
@@ -94,29 +115,32 @@ class VolunteerRepository {
         dataToUpdate.changerId = changerId;
       }
 
-      const updated = await this.model.findByIdAndUpdate(
+      let query = this.model.findByIdAndUpdate(
         id,
         { $set: dataToUpdate },
         { new: true, runValidators: true }
       );
 
-      return updated;
+      query = this._applySession(query, session);
+      return await query;
     } catch (error) {
       console.error("❌ [Repository] update error:", error);
       throw error;
     }
   }
 
-  async delete(id) {
+  async delete(id, session = null) {
     try {
-      return await this.model.findByIdAndDelete(id);
+      let query = this.model.findByIdAndDelete(id);
+      query = this._applySession(query, session);
+      return await query;
     } catch (error) {
       console.error("❌ [Repository] delete error:", error);
       throw error;
     }
   }
 
-  async findByProject(opportunityId, status = null, limit = null, cursor = null) {
+  async findByProject(opportunityId, status = null, limit = null, cursor = null, session = null) {
     try {
       const filter = {
         opportunityId: new mongoose.Types.ObjectId(opportunityId),
@@ -141,6 +165,7 @@ class VolunteerRepository {
         query = query.limit(Number(limit));
       }
 
+      query = this._applySession(query, session);
       return await query.lean();
     } catch (error) {
       console.error("❌ [Repository] findByProject error:", error);
@@ -148,55 +173,61 @@ class VolunteerRepository {
     }
   }
 
-  async findByVolPending(opportunityId) {
+  async findByVolPending(opportunityId, session = null) {
     try {
-      return await this.model
+      let query = this.model
         .find({
           opportunityId,
           status: "PENDING",
         })
         .populate("volunteerId", "fullName email avatar")
-        .sort({ createdAt: -1 })
-        .lean();
+        .sort({ createdAt: -1 });
+
+      query = this._applySession(query, session);
+      return await query.lean();
     } catch (error) {
       console.error("❌ [Repository] findByVolPending error:", error);
       throw error;
     }
   }
 
-  async findByVolApproved(opportunityId) {
+  async findByVolApproved(opportunityId, session = null) {
     try {
-      return await this.model
+      let query = this.model
         .find({
           opportunityId,
           status: "APPROVED",
         })
         .populate("volunteerId", "fullName email avatar")
-        .sort({ createdAt: -1 })
-        .lean();
+        .sort({ createdAt: -1 });
+
+      query = this._applySession(query, session);
+      return await query.lean();
     } catch (error) {
       console.error("❌ [Repository] findByVolApproved error:", error);
       throw error;
     }
   }
 
-  async findByVolRejected(opportunityId) {
+  async findByVolRejected(opportunityId, session = null) {
     try {
-      return await this.model
+      let query = this.model
         .find({
           opportunityId,
           status: "REJECTED",
         })
         .populate("volunteerId", "fullName email avatar")
-        .sort({ createdAt: -1 })
-        .lean();
+        .sort({ createdAt: -1 });
+
+      query = this._applySession(query, session);
+      return await query.lean();
     } catch (error) {
       console.error("❌ [Repository] findByVolRejected error:", error);
       throw error;
     }
   }
 
-  async findByUser(volunteerId, limit = null, cursor = null) {
+  async findByUser(volunteerId, limit = null, cursor = null, session = null) {
     try {
       const filter = { volunteerId };
 
@@ -213,6 +244,7 @@ class VolunteerRepository {
         query = query.limit(Number(limit));
       }
 
+      query = this._applySession(query, session);
       return await query.lean();
     } catch (error) {
       console.error("❌ [Repository] findByUser error:", error);
@@ -220,18 +252,20 @@ class VolunteerRepository {
     }
   }
 
-  async countByUser(volunteerId) {
+  async countByUser(volunteerId, session = null) {
     try {
-      return await this.model.countDocuments({ volunteerId });
+      let query = this.model.countDocuments({ volunteerId });
+      query = this._applySession(query, session);
+      return await query;
     } catch (error) {
       console.error("❌ [Repository] countByUser error:", error);
       throw error;
     }
   }
 
-  async findByUserWithProject(volunteerId) {
+  async findByUserWithProject(volunteerId, session = null) {
     try {
-      return await this.model
+      let query = this.model
         .find({ volunteerId })
         .populate({
           path: "opportunityId",
@@ -242,8 +276,10 @@ class VolunteerRepository {
             select: "fullName avatar",
           },
         })
-        .sort({ createdAt: -1 })
-        .lean();
+        .sort({ createdAt: -1 });
+
+      query = this._applySession(query, session);
+      return await query.lean();
     } catch (error) {
       console.error("❌ [Repository] findByUserWithProject error:", error);
       throw error;
@@ -252,4 +288,3 @@ class VolunteerRepository {
 }
 
 export default VolunteerRepository;
-

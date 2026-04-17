@@ -58,6 +58,29 @@ export default class ConversationService {
     return this.groupEventService.emitSystemMessage(payload);
   }
 
+  async publishConversationUpdate(conversation, extraParticipantIds = []) {
+    if (!conversation) return null;
+
+    const safeConversation =
+      conversation?._id || conversation?.id
+        ? conversation
+        : await this.reloadConversation(conversation);
+
+    if (!safeConversation) return null;
+
+    const participantIds = normalizeParticipantIds([
+      ...(safeConversation?.participants || []),
+      ...extraParticipantIds,
+    ]);
+
+    await this.publishService.publishConversationUpdated({
+      conversation: safeConversation,
+      participantIds,
+    });
+
+    return safeConversation;
+  }
+
   async uploadGroupAvatar(groupAvatarFile) {
     if (!groupAvatarFile) return "";
 
@@ -267,6 +290,17 @@ export default class ConversationService {
     return this.reloadConversation(conversation._id);
   }
 
+  async getProjectConversationDocument(projectId) {
+    if (!projectId) return null;
+
+    const existing =
+      await this.conversationRepository.findGroupConversationByProjectId(projectId);
+
+    if (!existing?._id) return null;
+
+    return this.conversationRepository.findById(existing._id);
+  }
+
   async syncApprovedVolunteerToProjectConversation({
     projectId,
     organizerId,
@@ -306,7 +340,9 @@ export default class ConversationService {
 
       const rawConversation = await this.conversationRepository.findById(createdConversationId);
       if (!rawConversation) {
-        return this.reloadConversation(createdConversationId);
+        const fallbackConversation = await this.reloadConversation(createdConversationId);
+        await this.publishConversationUpdate(fallbackConversation, [String(volunteerId)]);
+        return fallbackConversation;
       }
 
       const populatedConversation = await this.reloadConversation(createdConversationId);
@@ -327,7 +363,9 @@ export default class ConversationService {
         extraParticipantIds: [String(volunteerId)],
       });
 
-      return this.reloadConversation(createdConversationId);
+      const latestConversation = await this.reloadConversation(createdConversationId);
+      await this.publishConversationUpdate(latestConversation, [String(volunteerId)]);
+      return latestConversation;
     }
 
     return this.addMemberToProjectConversation({
@@ -358,7 +396,9 @@ export default class ConversationService {
     const targetId = String(participantId);
 
     if (existingIds.includes(targetId)) {
-      return this.reloadConversation(conversation._id);
+      const latestConversation = await this.reloadConversation(conversation._id);
+      await this.publishConversationUpdate(latestConversation, [targetId]);
+      return latestConversation;
     }
 
     const nextParticipantIds = uniqueIds([...existingIds, targetId]);
@@ -391,7 +431,79 @@ export default class ConversationService {
       extraParticipantIds: [targetId],
     });
 
-    return this.reloadConversation(conversation._id);
+    const latestConversation = await this.reloadConversation(conversation._id);
+    await this.publishConversationUpdate(latestConversation, [targetId]);
+    return latestConversation;
+  }
+
+  async removeMemberFromProjectConversation({
+    projectId,
+    participantId,
+    actorId = null,
+  }) {
+    if (!projectId || !participantId) {
+      throw new AppError("projectId and participantId are required", 400);
+    }
+
+    const conversation = await this.getProjectConversationDocument(projectId);
+    if (!conversation) return null;
+
+    const targetUserId = String(participantId);
+    const existingIds = normalizeParticipantIds(conversation.participants || []);
+
+    if (!existingIds.includes(targetUserId)) {
+      const latestConversation = await this.reloadConversation(conversation._id);
+      await this.publishConversationUpdate(latestConversation, [targetUserId]);
+      return latestConversation;
+    }
+
+    if (existingIds.length <= 1) {
+      throw new AppError(
+        "Cannot remove member from a group with only 1 participant left",
+        400
+      );
+    }
+
+    const populatedBefore = await this.reloadConversation(conversation._id);
+    const participantLookup = buildParticipantLookup(populatedBefore?.participants || []);
+    const removedUser = participantLookup.get(targetUserId);
+
+    conversation.participants = existingIds.filter((uid) => uid !== targetUserId);
+    conversation.groupAdmins = normalizeParticipantIds(conversation.groupAdmins || []).filter(
+      (uid) => uid !== targetUserId
+    );
+
+    const unreadCounts = getConversationUnreadCountsMap(conversation);
+    unreadCounts.delete(targetUserId);
+    conversation.unreadCounts = unreadCounts;
+
+    const promotedAdminId = this.transferAdminIfNeeded(conversation);
+
+    await saveConversationDocument(this.conversationRepository, conversation, {
+      touchUpdatedAt: true,
+    });
+
+    await this.emitSystemMessage({
+      conversation,
+      text: removedUser
+        ? `${getDisplayName(removedUser)} đã bị xóa khỏi nhóm`
+        : "Một thành viên đã bị xóa khỏi nhóm",
+      action: CHAT_GROUP_ACTIONS.MEMBER_REMOVED,
+      actorId: actorId || conversation.createdBy || null,
+      targetUserIds: [targetUserId],
+      extraParticipantIds: [targetUserId],
+    });
+
+    await this.emitAdminTransferredIfNeeded({
+      conversation,
+      promotedAdminId,
+      actorId: actorId || conversation.createdBy || null,
+      participantLookup,
+    });
+
+    const latestConversation = await this.reloadConversation(conversation._id);
+    await this.publishConversationUpdate(latestConversation, [targetUserId]);
+    return latestConversation;
   }
 
   async updateConversation(payload) {
@@ -478,7 +590,9 @@ export default class ConversationService {
     const actuallyAdded = incomingIds.filter((uid) => !existingIds.includes(String(uid)));
 
     if (!actuallyAdded.length) {
-      return this.reloadConversation(conversation._id);
+      const latestConversation = await this.reloadConversation(conversation._id);
+      await this.publishConversationUpdate(latestConversation, incomingIds);
+      return latestConversation;
     }
 
     const nextParticipantIds = uniqueIds([...existingIds, ...actuallyAdded]);
@@ -513,7 +627,9 @@ export default class ConversationService {
       extraParticipantIds: actuallyAdded,
     });
 
-    return this.reloadConversation(conversation._id);
+    const latestConversation = await this.reloadConversation(conversation._id);
+    await this.publishConversationUpdate(latestConversation, actuallyAdded);
+    return latestConversation;
   }
 
   async removeMember(payload) {
@@ -582,7 +698,9 @@ export default class ConversationService {
       participantLookup,
     });
 
-    return this.reloadConversation(conversation._id);
+    const latestConversation = await this.reloadConversation(conversation._id);
+    await this.publishConversationUpdate(latestConversation, [targetUserId]);
+    return latestConversation;
   }
 
   async leaveConversation(payload) {
@@ -644,6 +762,8 @@ export default class ConversationService {
       participantLookup,
     });
 
-    return this.reloadConversation(conversation._id);
+    const latestConversation = await this.reloadConversation(conversation._id);
+    await this.publishConversationUpdate(latestConversation, [String(currentUserId)]);
+    return latestConversation;
   }
 }

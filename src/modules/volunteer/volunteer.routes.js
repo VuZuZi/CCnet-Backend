@@ -9,12 +9,10 @@ const execute = (action) => (req, res, next) => {
   const controller = container.resolve('volunteerController');
 
   if (!controller) {
-    console.log('❌ Controller not found!');
     return res.status(500).json({ error: 'Controller not found' });
   }
 
   if (typeof controller[action] !== 'function') {
-    console.log(`❌ Action '${action}' not found in controller`);
     return res.status(500).json({ error: `Action ${action} not found` });
   }
 
@@ -34,58 +32,25 @@ const authorizeOrganizerOrAdmin = (req, res, next) => {
   });
 };
 
-/**
- * USER / VOLUNTEER SELF-SERVICE
- */
+router.post('/submit', authenticate, execute('applyVolunteer'));
 
-// Tạo đơn đăng ký
-router.post(
-  '/submit',
-  authenticate,
-  execute('applyVolunteer')
-);
+router.get('/application', authenticate, execute('application'));
 
-// Kiểm tra trạng thái đơn của chính mình theo project
-router.get(
-  '/application',
-  authenticate,
-  execute('application')
-);
+router.get('/me/projects', authenticate, execute('getMySupportedProjects'));
 
-// Lấy các project user đã/support/đăng ký
-router.get(
-  '/me/projects',
-  authenticate,
-  execute('getMySupportedProjects')
-);
+router.patch('/applications/:id', authenticate, execute('updateApplication'));
 
-// Cập nhật đơn của chính mình
-router.patch(
-  '/applications/:id',
-  authenticate,
-  execute('updateApplication')
-);
+router.patch('/applications/:id/cancel', authenticate, execute('cancelApplication'));
 
-// Hủy đơn của chính mình
-router.patch(
-  '/applications/:id/cancel',
-  authenticate,
-  execute('cancelApplication')
-);
+router.patch('/applications/:id/request-withdraw', authenticate, execute('requestWithdraw'));
 
-/**
- * ORGANIZER / ADMIN REVIEW FLOWS
- */
-
-// Lấy danh sách đơn theo project và status
 router.get(
   '/projects/:projectId/:status',
   authenticate,
   authorizeOrganizerOrAdmin,
-  execute('getProjectPendingApplications')
+  execute('getProjectApplications')
 );
 
-// Lấy danh sách đơn theo project với query status
 router.get(
   '/projects/:projectId',
   authenticate,
@@ -93,15 +58,8 @@ router.get(
   execute('getProjectApplications')
 );
 
-// Duyệt đơn
-router.patch(
-  '/:id/approve',
-  authenticate,
-  authorizeOrganizerOrAdmin,
-  execute('approveVolunteer')
-);
+router.patch('/:id/approve', authenticate, authorizeOrganizerOrAdmin, execute('approveVolunteer'));
 
-// Từ chối đơn
 router.patch(
   '/applications/:id/reject',
   authenticate,
@@ -109,7 +67,6 @@ router.patch(
   execute('rejectVolunteer')
 );
 
-// Khôi phục đơn về PENDING
 router.patch(
   '/applications/:id/restore',
   authenticate,
@@ -117,11 +74,20 @@ router.patch(
   execute('restoreVolunteer')
 );
 
-// Stats của user volunteer
-router.get(
-  '/stats/:id',
+router.patch(
+  '/applications/:id/approve-withdraw',
   authenticate,
-  execute('getStats')
+  authorizeOrganizerOrAdmin,
+  execute('approveWithdraw')
 );
+
+router.patch(
+  '/applications/:id/reject-withdraw',
+  authenticate,
+  authorizeOrganizerOrAdmin,
+  execute('rejectWithdraw')
+);
+
+router.get('/stats/:id', authenticate, execute('getStats'));
 
 export default router;
