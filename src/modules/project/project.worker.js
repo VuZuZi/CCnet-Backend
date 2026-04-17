@@ -64,7 +64,7 @@ export const processViewSync = async (job) => {
       });
 
       if (keysToDelete.length > 0) {
-        redisClient.del(...keysToDelete).catch(() => {});
+        redisClient.del(...keysToDelete).catch(() => { });
       }
 
       if (updates.length > 0) {
@@ -141,7 +141,7 @@ export const processRevisionTimeout = async (job) => {
 
   try {
     const project = await projectRepository.findById(projectId);
-    
+
     if (!project) {
       return { success: false, message: "Không tìm thấy dự án, có thể đã bị xóa." };
     }
@@ -153,7 +153,7 @@ export const processRevisionTimeout = async (job) => {
 
     await transactionManager.runInTransaction(async (session) => {
       const rejectionReason = "Hệ thống tự động từ chối do quá 14 ngày không bổ sung yêu cầu chỉnh sửa.";
-      
+
       await projectRepository.updateById(
         projectId,
         {
@@ -196,10 +196,11 @@ export const processRevisionTimeout = async (job) => {
 
 export const processFundingDeadlines = async (job) => {
   console.log(`[Worker] Starting job ${job.name}: Quét dự án hết hạn gọi vốn...`);
-  
+
   const container = getContainer();
   const projectRepository = container.resolve("projectRepository");
   const eventBus = container.resolve("eventBus");
+  const jobQueue = container.resolve("jobQueue");
 
   try {
     const now = new Date();
@@ -221,13 +222,20 @@ export const processFundingDeadlines = async (job) => {
       if (currentAmount < mvpAmount) {
         nextStatus = PROJECT_STATUS.FAILED_FUNDING;
         eventTitle = "Dự án gọi vốn không thành công";
-        eventMessage = `Dự án "${project.title}" đã kết thúc thời gian gọi vốn nhưng không đạt ngưỡng tối thiểu (MVP). Hệ thống sẽ chuyển sang trạng thái chờ hoàn tiền cho người ủng hộ.`;
-      
+        eventMessage = `Dự án "${project.title}" đã kết thúc thời gian gọi vốn nhưng không đạt ngưỡng tối thiểu (MVP). Hệ thống đang tiến hành hoàn tiền 100% vào ví cho tất cả người ủng hộ.`;
+
+        await jobQueue.addJob(
+          "financial-reconciliation",
+          "process-auto-refund",
+          { projectId: project._id },
+          { attempts: 3, backoff: { type: 'exponential', delay: 5000 } }
+        );
+
       } else if (currentAmount >= mvpAmount && currentAmount < targetAmount) {
         nextStatus = PROJECT_STATUS.ADJUSTMENT_REQUIRED;
         eventTitle = "Yêu cầu điều chỉnh kế hoạch dự án";
         eventMessage = `Dự án "${project.title}" đã đạt ngưỡng MVP nhưng chưa đạt 100% mục tiêu. Vui lòng nộp Kế hoạch điều chỉnh (Adjusted Plan) trong vòng 48 giờ.`;
-      
+
       } else {
         nextStatus = PROJECT_STATUS.EXECUTING;
         eventTitle = "Dự án gọi vốn thành công";
@@ -278,7 +286,7 @@ export const initProjectWorkers = () => {
         ) {
           return await processProjectFollower(job);
         }
-        
+
         if (job.name === "check-revision-timeout") {
           return await processRevisionTimeout(job);
         }

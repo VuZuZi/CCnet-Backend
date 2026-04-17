@@ -7,7 +7,10 @@ class EscrowRepository {
     }
 
     async findByProjectId(projectId, session = null) {
-        return await EscrowAccount.findOne({ projectId }).session(session).lean().exec();
+        return await EscrowAccount.findOne({ projectId })
+            .session(session)
+            .lean()
+            .exec();
     }
 
     async incrementBalance(projectId, amount, session = null) {
@@ -19,7 +22,7 @@ class EscrowRepository {
                     totalDeposited: amount > 0 ? amount : 0
                 }
             },
-            { new: true, session }
+            { new: true, runValidators: true, session }
         ).lean().exec();
     }
 
@@ -32,7 +35,7 @@ class EscrowRepository {
                     completedRefunds: amount
                 }
             },
-            { new: true, session }
+            { new: true, runValidators: true, session }
         ).lean().exec();
     }
 
@@ -41,11 +44,43 @@ class EscrowRepository {
             { projectId },
             {
                 $inc: {
-                    availableBalance: -originalAmount,
+                    availableBalance: -refundAmount,
                     completedRefunds: refundAmount,
-                    platformFeeCollected: penaltyFee
+                    retainedDonations: penaltyFee
                 }
             },
+            { new: true, runValidators: true, session }
+        ).lean().exec();
+    }
+
+    async getSystemTotalEscrow(session = null) {
+        const result = await EscrowAccount.aggregate([
+            { $group: { _id: null, total: { $sum: '$availableBalance' } } }
+        ]).session(session).exec();
+
+        return result.length > 0 ? result[0].total : 0;
+    }
+
+    async recordDisbursement(projectId, amount, session = null) {
+        return await EscrowAccount.findOneAndUpdate(
+            {
+                projectId: projectId,
+                availableBalance: { $gte: amount }
+            },
+            {
+                $inc: {
+                    availableBalance: -amount,
+                    totalDisbursed: amount
+                }
+            },
+            { new: true, runValidators: true, session }
+        ).lean().exec();
+    }
+
+    async sweepSurplus(projectId, amount, session = null) {
+        return await EscrowAccount.findOneAndUpdate(
+            { projectId },
+            { $inc: { availableBalance: -amount } },
             { new: true, runValidators: true, session }
         ).lean().exec();
     }

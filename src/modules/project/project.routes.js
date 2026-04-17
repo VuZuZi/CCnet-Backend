@@ -107,6 +107,9 @@ router.post(
   execute("toggleFeedCommentLike")
 );
 
+// [CTO ADD]: Placeholder cho Step 2 (Public Evidence API)
+// router.get("/:projectId/milestones/:milestoneId/evidence", execute("getMilestoneEvidencePublic"));
+
 router.get("/:id", optionalAuthenticate, execute("getDetail"));
 
 router.post(

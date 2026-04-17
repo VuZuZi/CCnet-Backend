@@ -1,0 +1,63 @@
+import { Router } from 'express';
+import { authenticate, authorize } from '../../middlewares/auth.middleware.js';
+import { scopePerRequest } from '../../middlewares/di.middleware.js';
+import { validateBody, validateParams, validateQuery } from '../../middlewares/validate.middleware.js';
+import {
+    createEvidenceSchema,
+    reviewEvidenceSchema,
+    evidenceParamsSchema,
+    getPublicEvidenceSchema,
+    listEvidenceQuerySchema
+} from './milestone-evidence.validation.js';
+
+const router = Router();
+router.use(scopePerRequest);
+
+const execute = (action) => (req, res, next) => {
+    const controller = req.scope.resolve('milestoneEvidenceController');
+    return controller[action](req, res, next);
+};
+
+router.get(
+    '/public/:projectId/:milestoneId',
+    validateParams(getPublicEvidenceSchema),
+    execute('getPublicEvidence')
+);
+
+
+router.get(
+    '/my-evidence',
+    authenticate,
+    authorize('organizer'),
+    validateQuery(listEvidenceQuerySchema),
+    execute('getMyEvidence')
+);
+
+
+router.get(
+    '/:id',
+    authenticate,
+    authorize('organizer', 'admin', 'manager'),
+    validateParams(evidenceParamsSchema),
+    execute('getEvidenceDetail')
+);
+
+router.post(
+    '/',
+    authenticate,
+    authorize('organizer'),
+    validateBody(createEvidenceSchema),
+    execute('submitEvidence')
+);
+
+
+router.patch(
+    '/:id/review',
+    authenticate,
+    authorize('admin', 'manager'),
+    validateParams(evidenceParamsSchema),
+    validateBody(reviewEvidenceSchema),
+    execute('reviewEvidence')
+);
+
+export default router;

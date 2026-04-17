@@ -7,8 +7,9 @@ import MailProvider from '../core/MailProvider.js';
 import CloudinaryProvider from '../core/CloudinaryProvider.js';
 import JobQueue from '../core/JobQueue.js';
 import TransactionManager from '../core/TransactionManager.js';
-import PayosProvider from '../core/payment/PayosProvider.js';
 import { registerTransactionListeners } from '../modules/transaction/transaction.listener.js';
+import SepayProvider from '../core/payment/sepay-provider.js';
+import TransactionSSEService from '../modules/transaction/services/transaction-sse.service.js';
 
 let container;
 
@@ -23,11 +24,13 @@ export const initializeContainer = () => {
     cloudinaryProvider: asClass(CloudinaryProvider).singleton(),
     jobQueue: asClass(JobQueue).singleton(),
     transactionManager: asClass(TransactionManager).singleton(),
-    paymentProvider: asClass(PayosProvider).singleton(),
+    paymentProvider: asClass(SepayProvider).singleton(),
+    transactionSseService: asClass(TransactionSSEService).singleton(),
   });
 
   container.loadModules(
     [
+      '!../modules/transaction/services/transaction-sse.service.js',
       '../modules/**/*.service.js',
       '../modules/**/*.repository.js',
       '../modules/**/*.controller.js',

@@ -39,13 +39,21 @@ const budgetItemSchema = z.object({
   note: z.string().max(500).optional()
 });
 
+const evidencePolicySchema = z.object({
+  requireFinancial: z.boolean().optional(),
+  requireGeoPhotos: z.coerce.number().min(0).optional(),
+  requireVolunteerLogs: z.boolean().optional()
+});
+
 const milestoneSchema = z.object({
   title: z.string().max(100, "Tiêu đề mốc tối đa 100 ký tự"),
   description: z.string().max(500, "Mô tả mốc tối đa 500 ký tự"),
   targetAmount: z.coerce.number().min(0, "Số tiền không được âm").optional().default(0),
   deliverables: z.string().max(1000, "Kết quả nghiệm thu quá dài").optional(),
   startDate: z.union([z.string().datetime({ offset: true }), z.date()]).nullable().optional(),
-  endDate: z.union([z.string().datetime({ offset: true }), z.date()]).nullable().optional()
+  endDate: z.union([z.string().datetime({ offset: true }), z.date()]).nullable().optional(),
+  location: locationSchema.optional(),
+  evidencePolicy: evidencePolicySchema.optional()
 });
 
 const volunteerRoleSchema = z.object({

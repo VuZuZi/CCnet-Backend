@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import exifr from 'exifr';
 import { encode } from 'blurhash';
 import { v4 as uuidv4 } from 'uuid';
 import AppError from '../../core/AppError.js';
@@ -8,6 +9,34 @@ class MediaService {
     this.mediaRepository = mediaRepository;
     this.cloudinaryProvider = cloudinaryProvider;
     this.jobQueue = jobQueue;
+  }
+
+  async _extractMetadata(buffer, clientLocation = null) {
+    let metadata = { lat: null, lng: null, capturedAt: null, source: 'NONE' };
+
+    try {
+      const exifData = await exifr.parse(buffer, { gps: true, exif: true });
+      if (exifData && exifData.latitude && exifData.longitude) {
+        metadata.lat = exifData.latitude;
+        metadata.lng = exifData.longitude;
+        metadata.capturedAt = exifData.DateTimeOriginal || exifData.CreateDate || new Date();
+        metadata.source = 'EXIF';
+      }
+    } catch (error) {
+      console.warn('[CTO Media Warning]: Không thể parse EXIF, file không có metadata hoặc bị lỗi.', error.message);
+    }
+
+    if (metadata.source === 'NONE' && clientLocation && clientLocation.lat && clientLocation.lng) {
+      metadata.lat = Number(clientLocation.lat);
+      metadata.lng = Number(clientLocation.lng);
+      metadata.capturedAt = new Date();
+      metadata.source = 'CLIENT';
+    }
+    else if (metadata.source === 'EXIF' && clientLocation && clientLocation.lat) {
+      metadata.source = 'MIXED';
+    }
+
+    return metadata;
   }
 
   async _processImage(buffer) {
@@ -52,51 +81,47 @@ class MediaService {
     }
   }
 
-  async uploadMultiple(files, userId, context = 'post') {
-    if (!files || files.length === 0) return [];
+  async uploadSingle(file, userId, context = 'general', clientLocation = null) {
+    if (!file) throw new AppError('Không tìm thấy file để xử lý', 400);
+    const sourceData = file.buffer || file.path;
 
+    const captureMetadata = await this._extractMetadata(sourceData, clientLocation);
+
+    const { buffer: optimizedBuffer, width, height } = await this._processImage(sourceData);
+
+    const folder = `users/${userId}/${context}`;
+
+    const [uploadResult, blurHash] = await Promise.all([
+      this.cloudinaryProvider.uploadImage(optimizedBuffer, folder, uuidv4()),
+      this._generateBlurHash(optimizedBuffer)
+    ]);
+
+    const mediaData = {
+      originalName: file.originalname || 'unknown',
+      publicId: uploadResult.public_id,
+      url: uploadResult.secure_url,
+      mimetype: 'image/webp',
+      size: uploadResult.bytes,
+      width: width,
+      height: height,
+      blurHash: blurHash,
+      captureMetadata,
+      uploadedBy: userId,
+      context
+    };
+
+    return await this.mediaRepository.create(mediaData);
+  }
+
+  async uploadMultiple(files, userId, context = 'post', clientLocation = null) {
+    if (!files || files.length === 0) return [];
     const results = [];
 
     for (const file of files) {
-      try {
-        const sourceData = file.path || file.buffer;
-        const { buffer: optimizedBuffer, width, height } = await this._processImage(sourceData);
-
-        const folder = `users/${userId}/${context}`;
-
-        const [uploadResult, blurHash] = await Promise.all([
-          this.cloudinaryProvider.uploadImage(optimizedBuffer, folder, uuidv4()),
-          this._generateBlurHash(optimizedBuffer)
-        ]);
-
-        const mediaData = {
-          originalName: file.originalname || 'unknown',
-          publicId: uploadResult.public_id,
-          url: uploadResult.secure_url,
-          mimetype: 'image/webp',
-          size: uploadResult.bytes,
-          width: width,
-          height: height,
-          blurHash: blurHash,
-          uploadedBy: userId,
-          context
-        };
-
-        const newMedia = await this.mediaRepository.create(mediaData);
-        results.push(newMedia);
-      } catch (error) {
-        console.error(`[CTO Error] Lỗi upload batch file:`, error);
-        throw new AppError(`Tải lên hình ảnh thất bại trong quá trình xử lý`, 500);
-      }
+      const result = await this.uploadSingle(file, userId, context, clientLocation);
+      results.push(result);
     }
-
     return results;
-  }
-
-  async uploadSingle(file, userId, context = 'general') {
-    if (!file) throw new AppError('Không tìm thấy file để xử lý', 400);
-    const [result] = await this.uploadMultiple([file], userId, context);
-    return result;
   }
 
   getUploadSignature(userId, context = 'project_cover') {
@@ -124,7 +149,7 @@ class MediaService {
     return await this.mediaRepository.create(mediaData);
   }
 
-  async uploadSmartMultiple(files, userId, context = 'general') {
+  async uploadSmartMultiple(files, userId, context = 'general', clientLocation = null) {
     if (!files || files.length === 0) return [];
 
     const results = [];
@@ -139,8 +164,11 @@ class MediaService {
         let finalHeight = 0;
         let blurHash = null;
         let finalMimetype = file.mimetype;
+        let captureMetadata = null;
 
         if (isImage) {
+          captureMetadata = await this._extractMetadata(sourceData, clientLocation);
+
           const processed = await this._processImage(sourceData);
           optimizedBuffer = processed.buffer;
           finalWidth = processed.width;
@@ -150,7 +178,7 @@ class MediaService {
         }
 
         const folder = `users/${userId}/${context}`;
-        
+
         const uploadResult = await this.cloudinaryProvider.uploadImage(optimizedBuffer, folder, uuidv4());
 
         const mediaData = {
@@ -162,6 +190,7 @@ class MediaService {
           width: finalWidth,
           height: finalHeight,
           blurHash: blurHash,
+          captureMetadata,
           uploadedBy: userId,
           context
         };
@@ -179,7 +208,7 @@ class MediaService {
 
   async deleteMedia(mediaId, userId, userRole) {
     const media = await this.mediaRepository.findById(mediaId);
-    
+
     if (!media) {
       throw new AppError('Không tìm thấy file media', 404);
     }

@@ -36,6 +36,18 @@ const envSchema = Joi.object({
   FRONTEND_URL: Joi.string().uri().optional(),
 
   NOTIFICATION_STREAM_CROSS_SITE: Joi.string().valid('true', 'false').default('false'),
+
+  PLATFORM_FEE_PERCENT: Joi.number().min(0).max(1).default(0.015),
+  
+  SEPAY_BANK_NAME: Joi.string().required(),
+  SEPAY_ACCOUNT_NUMBER: Joi.string().required(),
+  SEPAY_WEBHOOK_SECRET: Joi.string().required(),
+  SEPAY_API_TOKEN: Joi.string().required(),
+
+  PAYOS_CLIENT_ID: Joi.string().optional(),
+  PAYOS_API_KEY: Joi.string().optional(),
+  PAYOS_CHECKSUM_KEY: Joi.string().optional(),
+
 }).unknown();
 
 const { error, value: envVars } = envSchema.validate(process.env);
@@ -113,8 +125,17 @@ export const config = {
   },
 
   payos: {
-    clientId: process.env.PAYOS_CLIENT_ID,
-    apiKey: process.env.PAYOS_API_KEY,
-    checksumKey: process.env.PAYOS_CHECKSUM_KEY,
-  }
+    clientId: envVars.PAYOS_CLIENT_ID,
+    apiKey: envVars.PAYOS_API_KEY,
+    checksumKey: envVars.PAYOS_CHECKSUM_KEY,
+  },
+
+  sepay: {
+    bankName: envVars.SEPAY_BANK_NAME,
+    accountNumber: envVars.SEPAY_ACCOUNT_NUMBER,
+    webhookSecret: envVars.SEPAY_WEBHOOK_SECRET,
+    apiToken: envVars.SEPAY_API_TOKEN
+  },
+  
+  platformFeePercent: envVars.PLATFORM_FEE_PERCENT,
 };

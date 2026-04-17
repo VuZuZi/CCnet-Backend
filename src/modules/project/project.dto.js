@@ -1,4 +1,4 @@
-import { PROJECT_TYPE } from "./project.constant.js";
+import { PROJECT_TYPE, PROJECT_STATUS } from "./project.constant.js";
 
 export class ProjectDTO {
     static toPublicDetail(project, escrow = null) {
@@ -13,10 +13,7 @@ export class ProjectDTO {
         sensitiveFields.forEach(f => delete data[f]);
 
         if (data.projectType === PROJECT_TYPE.VOLUNTEER_ONLY) {
-            const financialFields = [
-                'targetAmount', 'currentAmount', 'mvpAmount',
-                'budgetBreakdown'
-            ];
+            const financialFields = ['targetAmount', 'currentAmount', 'mvpAmount', 'budgetBreakdown'];
             financialFields.forEach(f => delete data[f]);
 
             if (data.milestones) {
@@ -25,13 +22,28 @@ export class ProjectDTO {
                     return rest;
                 });
             }
-        } else if (data.projectType === PROJECT_TYPE.FUNDED && escrow) {
+        } else if (data.projectType === PROJECT_TYPE.FUNDED) {
             data.financialDetail = {
-                availableBalance: escrow.availableBalance || 0,
-                pendingRefunds: escrow.pendingRefunds || 0,
-                totalDeposited: escrow.totalDeposited || 0,
-                totalDisbursed: escrow.totalDisbursed || 0
+                totalDeposited: escrow?.totalDeposited || 0,
+                totalDisbursed: escrow?.totalDisbursed || 0,
+                availableBalance: escrow?.availableBalance || 0,
+                pendingRefunds: escrow?.pendingRefunds || 0,
+                completedRefunds: escrow?.completedRefunds || 0,
+                retainedDonations: escrow?.retainedDonations || 0
             };
+
+            if (data.milestones) {
+                data.milestones = data.milestones.map(m => {
+                    if (m.status === 'PENDING' && m.disbursementRequestId) {
+                        m.disbursementStatus = 'IN_PROGRESS';
+                    }
+                    return m;
+                });
+            }
+
+            if ([PROJECT_STATUS.COMPLETED_SUCCESSFULLY, PROJECT_STATUS.COMPLETED_PARTIAL].includes(data.status)) {
+                data.finalSettlement = project.postProjectSummary || null;
+            }
         }
 
         return data;
@@ -45,7 +57,7 @@ export class ProjectDTO {
         data.rejectionReason = internalData.rejectionReason;
         data.riskFlags = internalData.riskFlags;
         data.aiRiskScore = internalData.aiRiskScore;
-
+        
         return data;
     }
 }

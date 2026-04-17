@@ -1088,6 +1088,26 @@ class ProjectService {
     };
   }
 
+  _applyMilestoneSmartDefaults(milestones, fallbackProjectLocation) {
+    if (!milestones || !Array.isArray(milestones)) return [];
+
+    return milestones.map(m => {
+      const targetAmt = m.targetAmount || 0;
+
+      const smartPolicy = {
+        requireFinancial: targetAmt > 0,
+        requireGeoPhotos: targetAmt === 0 ? 1 : 0,
+        requireVolunteerLogs: m.evidencePolicy?.requireVolunteerLogs || false
+      };
+
+      return {
+        ...m,
+        location: m.location || fallbackProjectLocation,
+        evidencePolicy: smartPolicy
+      };
+    });
+  }
+
   async createDraftProject(organizerId, projectData) {
     const coverPayload = Array.isArray(projectData.coverMedia)
       ? projectData.coverMedia
@@ -1170,6 +1190,12 @@ class ProjectService {
           }
 
           const { coverMedia: _, documents: __, ...otherProjectData } = projectData;
+
+          otherProjectData.milestones = this._applyMilestoneSmartDefaults(
+            otherProjectData.milestones,
+            otherProjectData.location
+          );
+
           const newProjectData = {
             ...otherProjectData,
             stats: { targetVolunteers, currentVolunteers: 0 },
@@ -1374,6 +1400,15 @@ class ProjectService {
                 actualIdsToDelete.map((id) => this.mediaRepository.deleteById(id, session))
               );
             }
+          }
+
+          const fallbackLocation = finalUpdateData.location || existingProject.location;
+
+          if (finalUpdateData.milestones) {
+            finalUpdateData.milestones = this._applyMilestoneSmartDefaults(
+              finalUpdateData.milestones,
+              fallbackLocation
+            );
           }
 
           const resultDoc = await this.projectRepository.updateDraftAtomic(

@@ -13,6 +13,7 @@ const escrowSchema = new mongoose.Schema({
     completedRefunds: { type: Number, default: 0, min: 0 },
     totalDisbursed: { type: Number, default: 0, min: 0 },
     platformFeeCollected: { type: Number, default: 0, min: 0 },
+    retainedDonations: { type: Number, default: 0, min: 0 },
     disputedAmount: { type: Number, default: 0, min: 0 },
 
     availableBalance: { type: Number, default: 0, min: 0 },
