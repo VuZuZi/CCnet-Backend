@@ -194,6 +194,76 @@ export const processRevisionTimeout = async (job) => {
   }
 };
 
+export const processFundingDeadlines = async (job) => {
+  console.log(`[Worker] Starting job ${job.name}: Quét dự án hết hạn gọi vốn...`);
+  
+  const container = getContainer();
+  const projectRepository = container.resolve("projectRepository");
+  const eventBus = container.resolve("eventBus");
+
+  try {
+    const now = new Date();
+    const expiredProjects = await projectRepository.findExpiredFundingProjects(now, 50);
+
+    if (!expiredProjects || expiredProjects.length === 0) {
+      return { success: true, message: "Không có dự án nào quá hạn gọi vốn." };
+    }
+
+    let processedCount = 0;
+
+    for (const project of expiredProjects) {
+      let nextStatus = null;
+      let eventTitle = "";
+      let eventMessage = "";
+
+      const { currentAmount, targetAmount, mvpAmount } = project;
+
+      if (currentAmount < mvpAmount) {
+        nextStatus = PROJECT_STATUS.FAILED_FUNDING;
+        eventTitle = "Dự án gọi vốn không thành công";
+        eventMessage = `Dự án "${project.title}" đã kết thúc thời gian gọi vốn nhưng không đạt ngưỡng tối thiểu (MVP). Hệ thống sẽ chuyển sang trạng thái chờ hoàn tiền cho người ủng hộ.`;
+      
+      } else if (currentAmount >= mvpAmount && currentAmount < targetAmount) {
+        nextStatus = PROJECT_STATUS.ADJUSTMENT_REQUIRED;
+        eventTitle = "Yêu cầu điều chỉnh kế hoạch dự án";
+        eventMessage = `Dự án "${project.title}" đã đạt ngưỡng MVP nhưng chưa đạt 100% mục tiêu. Vui lòng nộp Kế hoạch điều chỉnh (Adjusted Plan) trong vòng 48 giờ.`;
+      
+      } else {
+        nextStatus = PROJECT_STATUS.EXECUTING;
+        eventTitle = "Dự án gọi vốn thành công";
+        eventMessage = `Chúc mừng! Dự án "${project.title}" đã đạt mục tiêu gọi vốn và chính thức chuyển sang giai đoạn Thực thi.`;
+      }
+
+      await projectRepository.transitionStatus(
+        project._id,
+        PROJECT_STATUS.FUNDING,
+        nextStatus
+      );
+
+      if (eventBus && typeof eventBus.emit === "function") {
+        eventBus.emit(DOMAIN_EVENTS.PROJECT_STATUS_UPDATED, {
+          recipientIds: [String(project.organizerId)],
+          actorId: "system",
+          projectId: project._id,
+          projectName: project.title,
+          status: nextStatus,
+          title: eventTitle,
+          message: eventMessage,
+          actionUrl: `/projects/${project._id}`
+        });
+      }
+
+      processedCount++;
+    }
+
+    console.log(`[Worker] Đã quét và xử lý trạng thái cho ${processedCount} dự án quá hạn.`);
+    return { success: true, processedCount };
+  } catch (error) {
+    console.error(`[Worker] [CRITICAL] Lỗi xử lý Funding Deadlines:`, error.message);
+    throw error;
+  }
+};
+
 export const initProjectWorkers = () => {
   try {
     const container = getContainer();
@@ -213,6 +283,10 @@ export const initProjectWorkers = () => {
           return await processRevisionTimeout(job);
         }
 
+        if (job.name === "check-funding-deadlines") {
+          return await processFundingDeadlines(job);
+        }
+
         return await processViewSync(job);
       },
       {
@@ -227,6 +301,16 @@ export const initProjectWorkers = () => {
       {
         repeat: { pattern: "*/5 * * * *" },
         jobId: "unique-sync-views-job",
+      },
+    );
+
+    jobQueue.addJob(
+      "project-maintenance",
+      "check-funding-deadlines",
+      {},
+      {
+        repeat: { pattern: "*/10 * * * *" },
+        jobId: "unique-funding-deadlines-job",
       },
     );
 

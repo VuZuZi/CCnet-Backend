@@ -21,7 +21,7 @@ class ProjectFeedService {
     return project;
   }
 
-  async _canInteract(project, userId) {
+  async _canPost(project, userId) {
     if (!userId) return false;
     if (String(project.organizerId) === String(userId)) return true;
 
@@ -33,29 +33,34 @@ class ProjectFeedService {
     return Boolean(application && application.status === "APPROVED");
   }
 
+  _canEngage(userId) {
+    return Boolean(userId);
+  }
+
   async getPosts(projectId, { limit = 10, cursor = null, userId = null } = {}) {
     const project = await this._getProjectOrThrow(projectId);
+
     const posts = await this.projectFeedRepository.listPosts(project._id, {
       limit,
       cursor,
     });
 
-    const commentsMap = await this.projectFeedRepository.listLatestCommentsByPostIds(
-      posts.map((p) => p._id),
-      2,
-    );
+    const commentsMap =
+      await this.projectFeedRepository.listLatestCommentsByPostIds(
+        posts.map((p) => p._id),
+        2,
+      );
 
     const enriched = posts.map((p) => {
       const latestComments = commentsMap.get(String(p._id)) || [];
-      const likedByMe = userId
-        ? (p.likedBy || []).some((id) => String(id) === String(userId))
-        : false;
 
       return {
         ...p,
         author: p.authorId,
         authorId: undefined,
-        likedByMe,
+        likedByMe: userId
+          ? (p.likedBy || []).some((id) => String(id) === String(userId))
+          : false,
         latestComments: latestComments.map((c) => ({
           ...c,
           author: c.authorId,
@@ -75,8 +80,8 @@ class ProjectFeedService {
 
   async createPost(projectId, { userId, content = "", media = null }) {
     const project = await this._getProjectOrThrow(projectId);
-    const can = await this._canInteract(project, userId);
 
+    const can = await this._canPost(project, userId);
     if (!can) {
       throw new AppError(
         "Chỉ nhà tổ chức hoặc tình nguyện viên đã được duyệt mới có thể đăng bài.",
@@ -102,16 +107,16 @@ class ProjectFeedService {
           {
             url: uploadedUrl.secure_url,
             publicId: uploadedUrl.public_id,
-            mediaType: media.mimetype?.startsWith("video") ? "video" : "image",
+            mediaType: media.mimetype?.startsWith("video")
+              ? "video"
+              : "image",
           },
         ];
-      } catch (error) {
-        throw new AppError("Lỗi khi tải lên media. Vui lòng thử lại.", 500);
+      } catch {
+        throw new AppError("Lỗi khi tải lên media.", 500);
       } finally {
         if (media.path && fs.existsSync(media.path)) {
-          fsPromises
-            .unlink(media.path)
-            .catch((err) => console.error("Error cleaning up temp file:", err));
+          fsPromises.unlink(media.path).catch(() => {});
         }
       }
     }
@@ -124,6 +129,7 @@ class ProjectFeedService {
     });
 
     const full = await this.projectFeedRepository.findPostById(created._id);
+
     return {
       ...full,
       author: full.authorId,
@@ -134,21 +140,17 @@ class ProjectFeedService {
   }
 
   async createComment(projectId, postId, { userId, content }) {
-    const project = await this._getProjectOrThrow(projectId);
-    const can = await this._canInteract(project, userId);
+    await this._getProjectOrThrow(projectId);
 
-    if (!can) {
-      throw new AppError(
-        "Chỉ nhà tổ chức hoặc tình nguyện viên đã được duyệt mới có thể bình luận.",
-        403,
-      );
+    if (!this._canEngage(userId)) {
+      throw new AppError("Bạn cần đăng nhập để bình luận.", 403);
     }
 
     const trimmed = String(content || "").trim();
     if (!trimmed) throw new AppError("Bình luận không được rỗng.", 400);
 
     const created = await this.projectFeedRepository.createComment({
-      projectId: project._id,
+      projectId,
       postId,
       authorId: userId,
       content: trimmed,
@@ -157,6 +159,7 @@ class ProjectFeedService {
     await this.projectFeedRepository.incrementPostCommentsCount(postId, 1);
 
     const full = await this.projectFeedRepository.findCommentById(created._id);
+
     return {
       ...full,
       author: full.authorId,
@@ -165,7 +168,11 @@ class ProjectFeedService {
     };
   }
 
-  async listComments(projectId, postId, { limit = 20, cursor = null, userId = null } = {}) {
+  async listComments(
+    projectId,
+    postId,
+    { limit = 20, cursor = null, userId = null } = {},
+  ) {
     await this._getProjectOrThrow(projectId);
 
     const comments = await this.projectFeedRepository.listComments(postId, {
@@ -189,12 +196,17 @@ class ProjectFeedService {
   }
 
   async togglePostLike(projectId, postId, userId) {
-    const project = await this._getProjectOrThrow(projectId);
-    const can = await this._canInteract(project, userId);
+    await this._getProjectOrThrow(projectId);
 
-    if (!can) throw new AppError("Bạn không có quyền thả tim.", 403);
+    if (!this._canEngage(userId)) {
+      throw new AppError("Bạn cần đăng nhập để thả tim.", 403);
+    }
 
-    const result = await this.projectFeedRepository.togglePostLike(postId, userId);
+    const result = await this.projectFeedRepository.togglePostLike(
+      postId,
+      userId,
+    );
+
     if (!result) throw new AppError("Không tìm thấy bài viết.", 404);
 
     return {
@@ -209,15 +221,17 @@ class ProjectFeedService {
   }
 
   async toggleCommentLike(projectId, commentId, userId) {
-    const project = await this._getProjectOrThrow(projectId);
-    const can = await this._canInteract(project, userId);
+    await this._getProjectOrThrow(projectId);
 
-    if (!can) throw new AppError("Bạn không có quyền thả tim.", 403);
+    if (!this._canEngage(userId)) {
+      throw new AppError("Bạn cần đăng nhập để thả tim.", 403);
+    }
 
     const result = await this.projectFeedRepository.toggleCommentLike(
       commentId,
       userId,
     );
+
     if (!result) throw new AppError("Không tìm thấy bình luận.", 404);
 
     return {

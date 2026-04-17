@@ -57,7 +57,8 @@ class ProjectController {
 
   getFeatured = async (req, res, next) => {
     try {
-      const result = await this.projectService.getFeaturedProjects();
+      const userId = getUserId(req);
+      const result = await this.projectService.getFeaturedProjects(userId);
 
       return ApiResponse.success(
         res,
@@ -85,9 +86,17 @@ class ProjectController {
 
   getExploreProjects = async (req, res, next) => {
     try {
-      const result = await this.projectService.getExploreProjects(req.query);
+      const userId = getUserId(req);
+      const result = await this.projectService.getExploreProjects(
+        req.query,
+        userId,
+      );
 
-      return ApiResponse.success(res, result, "Lấy danh sách dự án thành công");
+      return ApiResponse.success(
+        res,
+        result,
+        "Lấy danh sách dự án thành công",
+      );
     } catch (error) {
       next(error);
     }
@@ -100,7 +109,11 @@ class ProjectController {
         getUserId(req),
       );
 
-      return ApiResponse.success(res, result, "Lấy chi tiết dự án thành công");
+      return ApiResponse.success(
+        res,
+        result,
+        "Lấy chi tiết dự án thành công",
+      );
     } catch (error) {
       next(error);
     }
@@ -184,7 +197,11 @@ class ProjectController {
         status: "pending",
       });
 
-      return ApiResponse.created(res, report, "Báo cáo dự án đã gửi thành công");
+      return ApiResponse.created(
+        res,
+        report,
+        "Báo cáo dự án đã gửi thành công",
+      );
     } catch (error) {
       next(error);
     }

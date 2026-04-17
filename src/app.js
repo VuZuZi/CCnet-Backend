@@ -7,9 +7,9 @@ import {
 } from "./config/express.js";
 import { configureRoutes } from "./config/routes.js";
 import {
+  getContainer,
   initializeContainer,
   registerModule,
-  getContainer,
 } from "./container/index.js";
 import { createConfiguredNotificationModule } from "./config/notification.js";
 
@@ -23,6 +23,7 @@ export const createApp = async () => {
   const app = express();
 
   initializeContainer();
+  getContainer().resolve("paymentProvider");
 
   const notificationModule = await createConfiguredNotificationModule();
   const container = getContainer();
@@ -32,49 +33,49 @@ export const createApp = async () => {
       ...(notificationModule.services?.notificationService
         ? {
             notificationService: asValue(
-              notificationModule.services.notificationService
+              notificationModule.services.notificationService,
             ),
           }
         : {}),
       ...(notificationModule.services?.notificationSettingService
         ? {
             notificationSettingService: asValue(
-              notificationModule.services.notificationSettingService
+              notificationModule.services.notificationSettingService,
             ),
           }
         : {}),
       ...(notificationModule.services?.notificationSSEService
         ? {
             notificationSSEService: asValue(
-              notificationModule.services.notificationSSEService
+              notificationModule.services.notificationSSEService,
             ),
           }
         : {}),
       ...(notificationModule.services?.notificationBroadcastService
         ? {
             notificationBroadcastService: asValue(
-              notificationModule.services.notificationBroadcastService
+              notificationModule.services.notificationBroadcastService,
             ),
           }
         : {}),
       ...(notificationModule.services?.notificationRealtimeGateway
         ? {
             notificationRealtimeGateway: asValue(
-              notificationModule.services.notificationRealtimeGateway
+              notificationModule.services.notificationRealtimeGateway,
             ),
           }
         : {}),
       ...(notificationModule.repositories?.notificationRepository
         ? {
             notificationRepository: asValue(
-              notificationModule.repositories.notificationRepository
+              notificationModule.repositories.notificationRepository,
             ),
           }
         : {}),
       ...(notificationModule.repositories?.notificationSettingRepository
         ? {
             notificationSettingRepository: asValue(
-              notificationModule.repositories.notificationSettingRepository
+              notificationModule.repositories.notificationSettingRepository,
             ),
           }
         : {}),

@@ -46,7 +46,10 @@ export const PROJECT_CATEGORY = Object.freeze({
 export const MILESTONE_STATUS = Object.freeze({
   PENDING: "PENDING",
   PROCESSING: "PROCESSING",
+  DELAYED: "DELAYED",
   COMPLETED: "COMPLETED",
+  PARTIALLY_DISBURSED: "PARTIALLY_DISBURSED",
+  FAILED: "FAILED",
 });
 
 export const PROJECT_TYPE = Object.freeze({

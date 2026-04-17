@@ -12,6 +12,7 @@ import { registerOrganizerRequestSubmittedNotificationListener } from "./listene
 import { registerOrganizerRequestNotificationListener } from "./listeners/organizerRequest.notification.listener.js";
 import { registerSystemNotificationListener } from "./listeners/system.notification.listener.js";
 import { registerPostNotificationListener } from "./listeners/post.notification.listener.js";
+import { registerTransactionNotificationListener } from "./listeners/transaction.notification.listener.js";
 import { NOTIFICATION_DEFAULTS } from "./constants/notification.constants.js";
 import { InMemoryStreamSessionStore } from "./infrastructure/inMemoryStreamSessionStore.js";
 import { InMemoryNotificationClientRegistry } from "./infrastructure/inMemoryNotificationClientRegistry.js";
@@ -152,6 +153,14 @@ function registerDomainListeners({
   registerSystemNotificationListener({
     eventBus,
     notificationBroadcastService,
+    logger,
+  });
+
+  registerTransactionNotificationListener({
+    eventBus,
+    notificationService,
+    mailProvider,
+    userRepository,
     logger,
   });
 

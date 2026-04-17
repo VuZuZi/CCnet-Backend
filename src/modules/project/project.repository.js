@@ -10,6 +10,9 @@ import {
 
 const PROJECT_CARD_PROJECTION = {
   title: 1,
+  slug: 1,
+  summary: 1,
+  description: 1,
   coverMedia: 1,
   category: 1,
   targetAmount: 1,
@@ -17,6 +20,7 @@ const PROJECT_CARD_PROJECTION = {
   "location.address": 1,
   isUrgent: 1,
   endDate: 1,
+  startDate: 1,
   stats: 1,
   organizerId: 1,
   needsVolunteers: 1,
@@ -24,7 +28,7 @@ const PROJECT_CARD_PROJECTION = {
   projectType: 1,
   volunteerRoles: 1,
   status: 1,
-  startDate: 1,
+  createdAt: 1,
 };
 
 const ORGANIZER_PROJECT_PROJECTION = {
@@ -44,6 +48,11 @@ const ORGANIZER_PROJECT_PROJECTION = {
   startDate: 1,
   endDate: 1,
   "location.address": 1,
+};
+
+const ORGANIZER_CARD_POPULATE = {
+  path: "organizerId",
+  select: "fullName avatar",
 };
 
 const toObjectId = (value) =>
@@ -67,15 +76,14 @@ const buildWorkspaceStatusFilter = (status) => {
   return status;
 };
 
-const buildPublicProjectsFilter = (filter = {}) => ({
-  ...filter,
-  status: { $in: PUBLIC_PROJECT_STATUSES },
-});
-
 const VOLUNTEER_ONLY_SYNCABLE_STATUSES = new Set([
   PROJECT_STATUS.RECRUITING,
   PROJECT_STATUS.EXECUTING,
 ]);
+
+function escapeRegex(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 class ProjectRepository {
   async create(projectData, session = null) {
@@ -83,11 +91,21 @@ class ProjectRepository {
     return docs[0];
   }
 
+  async incrementFunding(projectId, amount, session = null) {
+    return await Project.findByIdAndUpdate(
+      projectId,
+      { $inc: { currentAmount: amount } },
+      { new: true, session }
+    )
+      .lean()
+      .exec();
+  }
+
   async updateById(projectId, updateData, session = null) {
     return await Project.findByIdAndUpdate(
       projectId,
       { $set: updateData },
-      { new: true, runValidators: true, session },
+      { new: true, runValidators: true, session }
     )
       .lean()
       .exec();
@@ -102,7 +120,7 @@ class ProjectRepository {
         status: fromStatus,
       },
       { $set: { status: toStatus } },
-      { new: true, session },
+      { new: true, session }
     )
       .lean()
       .exec();
@@ -139,24 +157,22 @@ class ProjectRepository {
         nextStatus = PROJECT_STATUS.EXECUTING;
       }
     } else if (project.status === PROJECT_STATUS.EXECUTING) {
-      const shouldReturnToRecruiting =
+      const shouldReturn =
         !reachedStartDate &&
         targetVolunteers > 0 &&
         currentVolunteers < targetVolunteers;
 
-      if (shouldReturnToRecruiting) {
+      if (shouldReturn) {
         nextStatus = PROJECT_STATUS.RECRUITING;
       }
     }
 
-    if (nextStatus === project.status) {
-      return project;
-    }
+    if (nextStatus === project.status) return project;
 
     return await Project.findByIdAndUpdate(
       projectId,
       { $set: { status: nextStatus } },
-      { new: true, session },
+      { new: true, session }
     )
       .lean()
       .exec();
@@ -167,7 +183,7 @@ class ProjectRepository {
       return await Project.findByIdAndUpdate(
         projectId,
         { $inc: increments },
-        { new: true, session },
+        { new: true, session }
       )
         .lean()
         .exec();
@@ -207,7 +223,7 @@ class ProjectRepository {
           },
         },
       ],
-      { new: true, session },
+      { new: true, session }
     )
       .lean()
       .exec();
@@ -231,7 +247,25 @@ class ProjectRepository {
       endDate: { $gt: new Date() },
     })
       .select(PROJECT_CARD_PROJECTION)
+      .populate(ORGANIZER_CARD_POPULATE)
       .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean()
+      .exec();
+  }
+
+  async findCandidateFeaturedProjects(limit = 24) {
+    return await Project.find({
+      status: { $in: PUBLIC_PROJECT_STATUSES },
+    })
+      .select(PROJECT_CARD_PROJECTION)
+      .populate(ORGANIZER_CARD_POPULATE)
+      .sort({
+        isUrgent: -1,
+        "stats.viewCount": -1,
+        "stats.followerCount": -1,
+        createdAt: -1,
+      })
       .limit(limit)
       .lean()
       .exec();
@@ -244,6 +278,7 @@ class ProjectRepository {
       isVolunteerFull: false,
     })
       .select(PROJECT_CARD_PROJECTION)
+      .populate(ORGANIZER_CARD_POPULATE)
       .sort({ createdAt: -1 })
       .limit(limit)
       .lean()
@@ -253,33 +288,40 @@ class ProjectRepository {
   async findAllProjects({
     filter = {},
     skip = 0,
-    limit = 10,
-    sort = { createdAt: -1 },
+    limit = 9,
+    sortType = "newest",
     textSearch = null,
   }) {
-    const queryFilter = buildPublicProjectsFilter(filter);
-    let finalSort = sort;
-    let projection = { ...PROJECT_CARD_PROJECTION };
+    const queryFilter = {
+      status: { $in: PUBLIC_PROJECT_STATUSES },
+      ...filter,
+    };
 
-    if (textSearch) {
-      queryFilter.$text = { $search: textSearch };
-      projection = {
-        ...projection,
-        score: { $meta: "textScore" },
+    let finalSort = { createdAt: -1 };
+
+    if (sortType === "trending") {
+      finalSort = { "stats.viewCount": -1, createdAt: -1 };
+    } else if (sortType === "ending_soon") {
+      finalSort = { endDate: 1, createdAt: -1 };
+    }
+
+    if (textSearch && String(textSearch).trim()) {
+      queryFilter["location.address"] = {
+        $regex: escapeRegex(textSearch),
+        $options: "i",
       };
-      finalSort = { score: { $meta: "textScore" } };
     }
 
     const [projects, total] = await Promise.all([
       Project.find(queryFilter)
-        .select(projection)
+        .select(PROJECT_CARD_PROJECTION)
+        .populate(ORGANIZER_CARD_POPULATE)
         .sort(finalSort)
         .skip(skip)
         .limit(limit)
-        .maxTimeMS(3000)
         .lean()
         .exec(),
-      Project.countDocuments(queryFilter).maxTimeMS(2000).exec(),
+      Project.countDocuments(queryFilter),
     ]);
 
     return { projects, total };
@@ -330,35 +372,40 @@ class ProjectRepository {
       },
     ]);
 
-    return stats.length > 0
-      ? stats[0]
-      : {
-          totalFundsRaised: 0,
-          activeProjects: 0,
-          pendingProjects: 0,
-        };
+    return stats[0] || {
+      totalFundsRaised: 0,
+      activeProjects: 0,
+      pendingProjects: 0,
+    };
   }
 
-  async findOrganizerProjects({ organizerId, status, skip = 0, limit = 10 }) {
+  async findOrganizerProjects({
+    organizerId,
+    status,
+    sortType = "newest",
+    skip = 0,
+    limit = 10,
+  }) {
     const filter = {
       organizerId: toObjectId(organizerId),
     };
 
-    const normalizedStatusFilter = buildWorkspaceStatusFilter(status);
-    if (normalizedStatusFilter) {
-      filter.status = normalizedStatusFilter;
-    }
+    const statusFilter = buildWorkspaceStatusFilter(status);
+    if (statusFilter) filter.status = statusFilter;
+
+    const finalSort =
+      sortType === "oldest" ? { createdAt: 1 } : { createdAt: -1 };
 
     const [projects, total] = await Promise.all([
       Project.find(filter)
         .select(ORGANIZER_PROJECT_PROJECTION)
-        .sort({ createdAt: -1 })
+        .populate(ORGANIZER_CARD_POPULATE)
+        .sort(finalSort)
         .skip(skip)
         .limit(limit)
-        .maxTimeMS(3000)
         .lean()
         .exec(),
-      Project.countDocuments(filter).exec(),
+      Project.countDocuments(filter),
     ]);
 
     return { projects, total };
@@ -376,8 +423,21 @@ class ProjectRepository {
         status: PROJECT_STATUS.DRAFT,
       },
       { $set: updateData },
-      { new: true, runValidators: true, session },
+      { new: true, runValidators: true, session }
     )
+      .lean()
+      .exec();
+  }
+
+  async findExpiredFundingProjects(currentDate, limit = 50) {
+    return await Project.find({
+      status: PROJECT_STATUS.FUNDING,
+      endDate: { $lt: currentDate },
+    })
+      .select(
+        "_id title currentAmount targetAmount mvpAmount organizerId endDate status"
+      )
+      .limit(limit)
       .lean()
       .exec();
   }

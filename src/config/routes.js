@@ -9,6 +9,9 @@ import followRoutes from "../modules/follow/follow.routes.js";
 import projectRoutes from "../modules/project/project.routes.js";
 import volunteerRoutes from "../modules/volunteer/volunteer.routes.js";
 import helpRequestRoutes from "../modules/helpRequest/helpRequest.routes.js";
+import transactionRoutes from "../modules/transaction/transaction.routes.js";
+import bankAccountRoutes from "../modules/bankAccount/bankAccount.routes.js";
+import walletRoutes from "../modules/wallet/wallet.routes.js";
 import {
   organizerRequestUserRouter,
   organizerRequestAdminRouter,
@@ -32,6 +35,9 @@ export const configureRoutes = (app, { notificationModule }) => {
     { path: "/organizer-requests", handler: organizerRequestUserRouter },
     { path: "/admin/organizer-requests", handler: organizerRequestAdminRouter },
     { path: "/notifications", handler: notificationModule.router },
+    { path: "/transactions", handler: transactionRoutes },
+    { path: "/bank-accounts", handler: bankAccountRoutes },
+    { path: "/wallets", handler: walletRoutes },
   ];
 
   routes.forEach(({ path, handler }) => {
