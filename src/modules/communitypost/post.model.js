@@ -103,6 +103,8 @@ const postSchema = new mongoose.Schema(
       validate: [(val) => val.length <= 30, "Tối đa 30 hashtags"],
     },
 
+    isEdited: { type: Boolean, default: false },
+
     isDeleted: { type: Boolean, default: false, select: false },
     deletedAt: { type: Date, select: false },
   },

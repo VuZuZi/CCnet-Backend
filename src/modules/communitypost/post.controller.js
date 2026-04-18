@@ -32,7 +32,8 @@ class PostController {
 
   getPostById = async (req, res, next) => {
     try {
-      const post = await this.postService.getPostById(req.params.id);
+      const currentUserId = req.user?.userId || null;
+      const post = await this.postService.getPostById(req.params.id, currentUserId);
       if (!post) {
         return res.status(404).json({
           status: "fail",
@@ -119,16 +120,17 @@ class PostController {
     }
   };
 
-  // 🚨 HÀM GET COMMENTS MỚI NÈ: Nằm ngay ngắn trong class
   getComments = async (req, res, next) => {
     try {
       const page = parseInt(req.query.page, 10) || 1;
-      const sort = req.query.sort || "relevant"; // Hứng biến sort
+      const sort = req.query.sort || "relevant";
+      const currentUserId = req.user?.userId || null;
 
       const comments = await this.postService.getComments({
         postId: req.params.id,
         page,
         sort,
+        viewerId: currentUserId,
       });
       return ApiResponse.success(res, comments);
     } catch (error) {
@@ -179,8 +181,6 @@ class PostController {
   };
   toggleSavePost = async (req, res, next) => {
     try {
-      // req.params.id là ID bài viết
-      // req.user.userId là ID của người dùng đang thực hiện hành động
       const result = await this.postService.toggleSavePost(
         req.params.id,
         req.user.userId,
