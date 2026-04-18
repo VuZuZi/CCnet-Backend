@@ -42,9 +42,20 @@ const disbursementRequestSchema = new mongoose.Schema(
             enum: ['FULL', 'SUPPLEMENTAL'],
             default: 'FULL'
         },
-        requestedAmount: { type: Number, required: true, min: 1000 },
-        approvedAmount: { type: Number, default: 0, min: 0 },
+        requestedAmount: { type: Number, required: true, min: 0 },
+        approvedAmount: { type: Number, default: null, min: 0 },
         disputedAmount: { type: Number, default: 0, min: 0 },
+        disputedAmountStatus: {
+            type: String,
+            enum: ['PENDING_RESUBMIT', 'WAIVED', 'RESUBMITTED'],
+            default: null
+        },
+
+        parentRequestId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'DisbursementRequest',
+            default: null
+        },
 
         bankAccountSnapshot: {
             type: bankAccountSnapshotSchema,

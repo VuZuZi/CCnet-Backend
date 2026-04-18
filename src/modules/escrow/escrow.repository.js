@@ -1,10 +1,10 @@
 import EscrowAccount from "./escrow.model.js";
 
 class EscrowRepository {
-  async create(data, session = null) {
-    const docs = await EscrowAccount.create([data], { session });
-    return docs[0];
-  }
+    async create(data, session = null) {
+        const docs = await EscrowAccount.create([data], { session });
+        return docs[0];
+    }
 
     async findByProjectId(projectId, session = null) {
         return await EscrowAccount.findOne({ projectId })
@@ -61,16 +61,64 @@ class EscrowRepository {
         return result.length > 0 ? result[0].total : 0;
     }
 
-    async recordDisbursement(projectId, amount, session = null) {
+    // async recordDisbursement(projectId, amount, session = null) {
+    //     return await EscrowAccount.findOneAndUpdate(
+    //         {
+    //             projectId: projectId,
+    //             availableBalance: { $gte: amount }
+    //         },
+    //         {
+    //             $inc: {
+    //                 availableBalance: -amount,
+    //                 totalDisbursed: amount
+    //             }
+    //         },
+    //         { new: true, runValidators: true, session }
+    //     ).lean().exec();
+    // }
+
+    async reserveDisbursement(projectId, amount, session = null) {
         return await EscrowAccount.findOneAndUpdate(
             {
-                projectId: projectId,
+                projectId,
                 availableBalance: { $gte: amount }
             },
             {
                 $inc: {
                     availableBalance: -amount,
+                    pendingDisbursementAmount: amount
+                }
+            },
+            { new: true, runValidators: true, session }
+        ).lean().exec();
+    }
+
+    async commitDisbursement(projectId, amount, session = null) {
+        return await EscrowAccount.findOneAndUpdate(
+            {
+                projectId,
+                pendingDisbursementAmount: { $gte: amount }
+            },
+            {
+                $inc: {
+                    pendingDisbursementAmount: -amount,
                     totalDisbursed: amount
+                }
+            },
+            { new: true, runValidators: true, session }
+        ).lean().exec();
+    }
+
+    async releaseDisbursement(projectId, amount, session = null) {
+        return await EscrowAccount.findOneAndUpdate(
+            {
+                projectId,
+                pendingDisbursementAmount: { $gte: amount }
+            },
+            {
+                $inc: {
+                    pendingDisbursementAmount: -amount,
+                    availableBalance: amount
                 }
             },
             { new: true, runValidators: true, session }

@@ -7,7 +7,8 @@ import {
     reviewEvidenceSchema,
     evidenceParamsSchema,
     getPublicEvidenceSchema,
-    listEvidenceQuerySchema
+    listEvidenceQuerySchema,
+    patchEvidenceSchema
 } from './milestone-evidence.validation.js';
 
 const router = Router();
@@ -58,6 +59,15 @@ router.patch(
     validateParams(evidenceParamsSchema),
     validateBody(reviewEvidenceSchema),
     execute('reviewEvidence')
+);
+
+router.patch(
+    '/:id',
+    authenticate,
+    authorize('organizer'),
+    validateParams(evidenceParamsSchema),
+    validateBody(patchEvidenceSchema),
+    execute('patchEvidence')
 );
 
 export default router;

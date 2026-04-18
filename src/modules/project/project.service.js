@@ -447,9 +447,27 @@ class ProjectService {
     const idsToCheck = [];
     const newItemsToCheck = [];
 
-    for (const item of mediaArray) {
-      if (item._id) idsToCheck.push(item._id);
-      else if (item.publicId && item.url) newItemsToCheck.push(item);
+    for (const item of newItemsToCheck) {
+      const existing = existingPublicIdMap.get(item.publicId);
+
+      if (existing) {
+        if (existing.uploadedBy.toString() === organizerId.toString()) {
+          validMediaIds.add(existing._id.toString());
+        }
+      } else {
+        newMediaToInsert.push({
+          originalName: item.originalName || "unknown_file",
+          url: item.url,
+          publicId: item.publicId,
+          mimetype: item.mimetype || (item.mediaType === "video" ? "video/mp4" : "image/jpeg"),
+          size: item.size || 0,
+          width: item.width || 0,
+          height: item.height || 0,
+          uploadedBy: organizerId,
+          context,
+          captureMetadata: { source: 'NONE' }
+        });
+      }
     }
 
     if (idsToCheck.length > 0) {

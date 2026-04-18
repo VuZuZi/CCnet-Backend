@@ -78,6 +78,17 @@ class DisbursementController {
             next(error);
         }
     };
+
+    updateBankAccount = async (req, res, next) => {
+        try {
+            const { id } = req.params;
+            const organizerId = req.user.userId;
+            const result = await this.disbursementService.updateHoldRequestBankAccount(id, organizerId, req.body);
+            return ApiResponse.success(res, result, 'Cập nhật tài khoản ngân hàng thành công. Yêu cầu đã được đẩy lại cho Kế toán.');
+        } catch (error) {
+            next(error);
+        }
+    };
 }
 
 export default DisbursementController;

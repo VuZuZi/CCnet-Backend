@@ -40,12 +40,16 @@ class MilestoneEvidenceRepository {
             milestoneId,
             status: 'APPROVED'
         })
-        .populate({
-            path: 'mediaIds',
-            select: 'url originalName mimetype size blurHash width height'
-        })
-        .lean()
-        .exec();
+            .populate({
+                path: 'mediaIds',
+                select: 'url originalName mimetype size blurHash width height captureMetadata'
+            })
+            .populate({
+                path: 'financialReport.expenseItems.receiptMediaId',
+                select: 'url originalName mimetype size blurHash width height captureMetadata'
+            })
+            .lean()
+            .exec();
     }
 
     async findAndCountByOrganizer(organizerId, { projectId, status, skip = 0, limit = 10 }) {
@@ -72,6 +76,28 @@ class MilestoneEvidenceRepository {
             projectId,
             milestoneId
         }).session(session).lean().exec();
+    }
+
+    async upsertEvidenceAtomic(projectId, milestoneId, payload, session = null) {
+        const updatedEvidence = await MilestoneEvidence.findOneAndUpdate(
+            {
+                projectId,
+                milestoneId,
+                status: { $in: ['REJECTED', 'REVISION_REQUESTED'] }
+            },
+            { $set: payload },
+            { new: true, runValidators: true, session }
+        ).lean().exec();
+
+        if (updatedEvidence) return updatedEvidence;
+
+        try {
+            const docs = await MilestoneEvidence.create([payload], { session });
+            return docs[0].toObject();
+        } catch (error) {
+            if (error.code === 11000) return null; 
+            throw error;
+        }
     }
 }
 

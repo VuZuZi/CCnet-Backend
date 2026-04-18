@@ -28,6 +28,12 @@ const transactionSchema = new mongoose.Schema({
         index: true
     },
 
+    organizerRef: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        index: true
+    },
+
     gatewayTransactionId: {
         type: String,
         unique: true,
@@ -59,9 +65,41 @@ const transactionSchema = new mongoose.Schema({
 });
 
 transactionSchema.pre(['findOneAndDelete', 'deleteOne', 'deleteMany'], function (next) {
-    next(new Error("CRITICAL: Transactions are strictly immutable and cannot be deleted."));
+    next(new Error("CRITICAL_IMMUTABILITY_ERROR: Transactions are strictly immutable and cannot be deleted."));
 });
 
-const IMMUTABLE_FIELDS = ['amount', 'grossAmount', 'platformFee', 'netAmount', 'currency', 'projectId', 'donorRef', 'type'];
+const IMMUTABLE_FIELDS = [
+    'amount', 'grossAmount', 'platformFee', 'netAmount',
+    'currency', 'projectId', 'donorRef', 'organizerRef', 'type', 'gatewayTransactionId'
+];
+
+transactionSchema.pre('save', function (next) {
+    if (!this.isNew) {
+        for (const field of IMMUTABLE_FIELDS) {
+            if (this.isModified(field)) {
+                return next(new Error(`CRITICAL_IMMUTABILITY_ERROR: Ledger field '${field}' cannot be modified after creation.`));
+            }
+        }
+    }
+    next();
+});
+
+transactionSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], function (next) {
+    const update = this.getUpdate();
+    if (!update) return next();
+
+    const restrictedOperators = ['$set', '$inc', '$unset', '$mul', '$rename'];
+
+    for (const op of restrictedOperators) {
+        if (update[op]) {
+            for (const field of IMMUTABLE_FIELDS) {
+                if (update[op][field] !== undefined) {
+                    return next(new Error(`CRITICAL_IMMUTABILITY_ERROR: Ledger field '${field}' cannot be modified via ${op} operator.`));
+                }
+            }
+        }
+    }
+    next();
+});
 
 export default mongoose.model('Transaction', transactionSchema);

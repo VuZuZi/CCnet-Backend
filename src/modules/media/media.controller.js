@@ -51,10 +51,21 @@ class MediaController {
       };
 
       const mediaList = await this.mediaService.uploadSmartMultiple(files, userId, context, clientLocation);
-
       const responseData = req.file ? mediaList[0] : mediaList;
 
-      return ApiResponse.created(res, { media: responseData }, 'Tải lên thành công');
+      const hasGPS = req.file
+        ? responseData.captureMetadata?.source !== 'NONE'
+        : mediaList.every(m => m.captureMetadata?.source !== 'NONE');
+
+      const warning = hasGPS
+        ? undefined
+        : 'Cảnh báo: Ảnh không chứa siêu dữ liệu tọa độ (GPS). Nếu dùng để nộp báo cáo thực địa, hệ thống sẽ không thể tự động duyệt.';
+
+      return ApiResponse.created(res, {
+        media: responseData,
+        hasGPS,
+        warning
+      }, 'Tải lên thành công');
     } catch (error) {
       next(error);
     }

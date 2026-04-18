@@ -3,12 +3,13 @@ import { z } from 'zod';
 export const createDisbursementSchema = z.object({
     projectId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'ID Dự án không hợp lệ'),
     milestoneId: z.string().uuid('Milestone ID phải là định dạng UUID'),
-    requestedAmount: z.number().min(0, 'Số tiền yêu cầu giải ngân không được âm')
+    requestedAmount: z.coerce.number().int('Số tiền phải là số nguyên').min(0, 'Số tiền yêu cầu giải ngân không được âm')
 }).strict();
 
 export const approveDisbursementSchema = z.object({
     decision: z.enum(['APPROVED', 'REJECTED', 'HOLD']),
-    note: z.string().optional()
+    approvedAmount: z.coerce.number().int('Số tiền phải là số nguyên').min(0, 'Số tiền duyệt không được âm').optional(),
+    note: z.string().min(5, 'Vui lòng ghi chú lý do duyệt/từ chối').optional()
 }).strict();
 
 export const confirmTransferSchema = z.object({
@@ -24,8 +25,12 @@ export const listRequestsQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(100).optional().default(10),
     projectId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'ID Dự án không hợp lệ').optional(),
     status: z.string().optional()
-}).strict();
+});
 
 export const disbursementParamsSchema = z.object({
-    id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'ID Request không hợp lệ')
+    id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Disbursement ID không hợp lệ')
+}).strict();
+
+export const updateHoldRequestSchema = z.object({
+    bankAccountId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'ID Tài khoản ngân hàng không hợp lệ')
 }).strict();

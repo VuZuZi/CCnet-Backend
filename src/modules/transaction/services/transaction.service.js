@@ -1,6 +1,8 @@
+import crypto from 'crypto';
 import AppError from "../../../core/AppError.js";
+import MoneyMath from "../../../core/MoneyMath.js";
 import { DOMAIN_EVENTS } from "../../../config/notification.js";
-import { PROJECT_STATUS } from "../../project/project.constant.js";
+import { PROJECT_STATUS, PROJECT_TYPE } from "../../project/project.constant.js";
 import { USER_REFUND_POLICY } from "../transaction.constant.js";
 
 class TransactionService {
@@ -40,20 +42,31 @@ class TransactionService {
         this.webhookAuditLogRepository = webhookAuditLogRepository;
     }
 
-    _calculateForward(amount) {
-        const feeRate = this.config?.platformFeePercent || 0.015;
-        const multiplier = Math.round(feeRate * 1000);
-        const platformFee = Math.floor((amount * multiplier) / 1000);
-        const grossAmount = amount + platformFee;
-        return { grossAmount, platformFee };
-    }
+    async getPublicProjectDisbursements(projectId, query) {
+        const project = await this.projectRepository.findById(projectId);
+        
+        if (!project) {
+            throw new AppError("Không tìm thấy dự án", 404);
+        }
 
-    _calculateProRata(transferAmount) {
-        const feeRate = this.config?.platformFeePercent || 0.015;
-        const multiplier = Math.round(feeRate * 1000);
-        const netAmount = Math.floor((transferAmount * 1000) / (1000 + multiplier));
-        const platformFee = transferAmount - netAmount;
-        return { netAmount, platformFee };
+        if (project.projectType !== PROJECT_TYPE.FUNDED) {
+            throw new AppError("Dự án tình nguyện không có giao dịch giải ngân tài chính", 400);
+        }
+
+        const { page, limit } = query;
+        const skip = (page - 1) * limit;
+
+        const result = await this.transactionRepository.findPublicDisbursementsByProject(projectId, skip, limit);
+
+        return {
+            disbursements: result.transactions,
+            pagination: {
+                total: result.total,
+                page,
+                limit,
+                totalPages: Math.ceil(result.total / limit)
+            }
+        };
     }
 
     _checkFundingConstraints(project) {
@@ -70,6 +83,7 @@ class TransactionService {
 
     async initiateDonation(donorId, payload) {
         const { projectId, amount, paymentMethod, isAnonymous, message } = payload;
+        const safeAmount = MoneyMath.toIntegerAmount(amount);
 
         const project = await this.projectRepository.findById(projectId);
         if (!project) throw new AppError("Không tìm thấy dự án", 404);
@@ -78,18 +92,18 @@ class TransactionService {
 
         if (paymentMethod === 'WALLET') {
             const wallet = await this.walletRepository.findByUserId(donorId);
-            if (wallet.balance < amount) {
+            if (wallet.balance < safeAmount) {
                 throw new AppError(`Số dư ví không đủ. Hiện tại: ${wallet.balance.toLocaleString()} VNĐ`, 400);
             }
 
-            const result = await this.transactionManager.runInTransaction(async (session) => {
-                await this.walletRepository.incrementBalance(donorId, -amount, session);
+            const result = await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
+                await this.walletRepository.incrementBalance(donorId, -safeAmount, session);
 
                 const transaction = await this.transactionRepository.create({
                     type: 'DONATION_FROM_WALLET',
-                    amount: amount,
-                    grossAmount: amount,
-                    netAmount: amount,
+                    amount: safeAmount,
+                    grossAmount: safeAmount,
+                    netAmount: safeAmount,
                     platformFee: 0,
                     projectId,
                     donorRef: donorId,
@@ -97,8 +111,8 @@ class TransactionService {
                     isAnonymous
                 }, session);
 
-                const updatedEscrow = await this.escrowRepository.incrementBalance(projectId, amount, session);
-                const updatedProject = await this.projectRepository.incrementFunding(projectId, amount, session);
+                const updatedEscrow = await this.escrowRepository.incrementBalance(projectId, safeAmount, session);
+                const updatedProject = await this.projectRepository.incrementFunding(projectId, safeAmount, session);
 
                 let isHardCapped = false;
                 if (updatedProject.targetAmount > 0) {
@@ -109,27 +123,25 @@ class TransactionService {
                     }
                 }
 
-                return { tx: transaction, escrow: updatedEscrow, project: updatedProject, isHardCapped };
-            });
-
-            if (this.eventBus) {
                 let donorName = "Nhà hảo tâm ẩn danh";
                 if (!isAnonymous) {
                     const donor = await this.userRepository.findById(donorId);
                     if (donor) donorName = donor.fullName || "Nhà hảo tâm";
                 }
 
-                this.eventBus.emit(DOMAIN_EVENTS.DONATION_SUCCESSFUL, {
-                    transactionId: String(result.tx._id),
-                    projectId: String(result.tx.projectId),
-                    projectName: result.project.title,
-                    organizerId: String(result.project.organizerId),
+                dispatchEvent(DOMAIN_EVENTS.DONATION_SUCCESSFUL, {
+                    transactionId: String(transaction._id),
+                    projectId: String(projectId),
+                    projectName: updatedProject.title,
+                    organizerId: String(updatedProject.organizerId),
                     donorId: String(donorId),
                     donorName: donorName,
-                    amount: amount,
-                    currentEscrowBalance: result.escrow.availableBalance
+                    amount: safeAmount,
+                    currentEscrowBalance: updatedEscrow.availableBalance
                 });
-            }
+
+                return { tx: transaction, isHardCapped };
+            });
 
             return {
                 transactionId: result.tx._id,
@@ -142,19 +154,21 @@ class TransactionService {
         const redisClient = this.redis.getClient();
         const now = new Date();
         const datePrefix = `${now.getFullYear().toString().slice(-2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-        const redisKey = `tx:seq:sepay:${datePrefix}`;
-
+        
+        const redisKey = `sepay:${datePrefix}:seq`;
         const seq = await redisClient.incr(redisKey);
         if (seq === 1) await redisClient.expire(redisKey, 172800);
 
         const gatewayTransactionId = `${datePrefix}${String(seq).padStart(4, '0')}`;
-        const { grossAmount, platformFee } = this._calculateForward(amount);
+        
+        const feeRate = this.config?.platformFeePercent || 0.015;
+        const { grossAmount, platformFee } = MoneyMath.calculateForward(safeAmount, feeRate);
 
         const transaction = await this.transactionRepository.create({
             type: 'DONATION',
-            amount: amount,
+            amount: safeAmount,
             grossAmount: grossAmount,
-            netAmount: amount,
+            netAmount: safeAmount,
             platformFee: platformFee,
             projectId,
             donorRef: donorId,
@@ -165,7 +179,6 @@ class TransactionService {
         });
 
         const transferMemo = `SEVQR DONATE ${gatewayTransactionId}`;
-
         const paymentData = await this.paymentProvider.createPaymentLink({
             orderCode: gatewayTransactionId,
             amount: grossAmount,
@@ -178,7 +191,7 @@ class TransactionService {
             qrCode: paymentData.qrCode,
             transferMemo: paymentData.transferMemo,
             paymentMethod: 'BANK_TRANSFER',
-            breakdown: { baseAmount: amount, fee: platformFee, totalRequired: grossAmount }
+            breakdown: { baseAmount: safeAmount, fee: platformFee, totalRequired: grossAmount }
         };
     }
 
@@ -192,8 +205,7 @@ class TransactionService {
 
         try {
             const verifiedData = this.paymentProvider.verifyWebhookData(headers, webhookBody);
-
-            const transferAmount = Number(verifiedData.transferAmount || 0);
+            const transferAmount = MoneyMath.toIntegerAmount(verifiedData.transferAmount || 0);
             const bankRef = String(verifiedData.referenceCode || verifiedData.id || '');
             const content = String(verifiedData.content || '').toUpperCase();
 
@@ -205,8 +217,11 @@ class TransactionService {
             }
 
             const redisClient = this.redis.getClient();
-            const lockKey = `lock:webhook:${bankRef}`;
-            const acquired = await redisClient.set(lockKey, 'LOCKED', 'NX', 'EX', 30);
+            
+            const lockKey = `webhook:${bankRef}:lock`;
+            const lockValue = crypto.randomBytes(16).toString('hex');
+            
+            const acquired = await redisClient.set(lockKey, lockValue, 'NX', 'PX', 30000);
 
             if (!acquired) {
                 await this.webhookAuditLogRepository.updateStatus(auditLog._id, 'FAILED', { errorMessage: 'Concurrent processing lock' });
@@ -249,7 +264,14 @@ class TransactionService {
                 return processResult;
 
             } finally {
-                await redisClient.del(lockKey);
+                const releaseScript = `
+                    if redis.call("get", KEYS[1]) == ARGV[1] then
+                        return redis.call("del", KEYS[1])
+                    else
+                        return 0
+                    end
+                `;
+                await redisClient.eval(releaseScript, 1, lockKey, lockValue);
             }
 
         } catch (error) {
@@ -257,7 +279,6 @@ class TransactionService {
             await this.webhookAuditLogRepository.updateStatus(auditLog._id, 'FAILED', {
                 errorMessage: errorMessage
             });
-
             throw error;
         }
     }
@@ -272,12 +293,11 @@ class TransactionService {
         return [...new Set([...matches10, ...matchesLegacy])];
     }
 
-    // Thay thế nguyên bản hàm _processMatchedDonation
-
     async _processMatchedDonation(baseTx, transferAmount, bankRef, rawWebhook) {
-        const { netAmount, platformFee } = this._calculateProRata(transferAmount);
+        const feeRate = this.config?.platformFeePercent || 0.015;
+        const { netAmount, platformFee } = MoneyMath.calculateProRata(transferAmount, feeRate);
 
-        const result = await this.transactionManager.runInTransaction(async (session) => {
+        const result = await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
             const currentTx = await this.transactionRepository.updateStatusIfPending(
                 baseTx.gatewayTransactionId,
                 'COMPLETED',
@@ -309,7 +329,24 @@ class TransactionService {
                 }
             }
 
-            return { tx: currentTx, escrow: updatedEscrow, project: updatedProject, isHardCapped, status: 'success' };
+            let donorName = "Nhà hảo tâm ẩn danh";
+            if (currentTx.donorRef && !currentTx.isAnonymous) {
+                const donor = await this.userRepository.findById(currentTx.donorRef);
+                if (donor) donorName = donor.fullName || "Nhà hảo tâm";
+            }
+
+            dispatchEvent(DOMAIN_EVENTS.DONATION_SUCCESSFUL, {
+                transactionId: String(currentTx._id),
+                projectId: String(currentTx.projectId),
+                projectName: updatedProject.title,
+                donorId: currentTx.donorRef ? String(currentTx.donorRef) : null,
+                donorName: donorName,
+                amount: transferAmount,
+                netAmount: currentTx.netAmount,
+                currentEscrowBalance: updatedEscrow.availableBalance
+            });
+
+            return { tx: currentTx, status: 'success' };
         });
 
         if (result.status === 'success') {
@@ -321,29 +358,10 @@ class TransactionService {
                     amount: transferAmount,
                     netAmount: (result.tx.netAmount || transferAmount)
                 });
-
-                await redisClient.publish(`tx_status:${result.tx._id.toString()}`, statusPayload); // [FIXED]
+                
+                await redisClient.publish(`tx_status:${result.tx._id.toString()}`, statusPayload);
             } catch (err) {
-                console.error('[Redis PubSub] Lỗi publish tx_status:', err.message);
-            }
-
-            if (this.eventBus) {
-                let donorName = "Nhà hảo tâm ẩn danh";
-                if (result.tx.donorRef && !result.tx.isAnonymous) {
-                    const donor = await this.userRepository.findById(result.tx.donorRef);
-                    if (donor) donorName = donor.fullName || "Nhà hảo tâm";
-                }
-
-                this.eventBus.emit(DOMAIN_EVENTS.DONATION_SUCCESSFUL, {
-                    transactionId: String(result.tx._id),
-                    projectId: String(result.tx.projectId),
-                    projectName: result.project.title,
-                    donorId: result.tx.donorRef ? String(result.tx.donorRef) : null,
-                    donorName: donorName,
-                    amount: transferAmount,
-                    netAmount: result.tx.netAmount,
-                    currentEscrowBalance: result.escrow.availableBalance
-                });
+                console.error('[Redis PubSub] Lỗi publish transaction status:', err.message);
             }
         }
 
@@ -576,7 +594,6 @@ class TransactionService {
             userConfirmedPaid: updatedTx.userConfirmedPaid, userConfirmedAt: updatedTx.userConfirmedAt
         };
     }
-
 
     _getVietnamTMinus1Bounds(executionDate = new Date()) {
         const tMinus1 = new Date(executionDate);

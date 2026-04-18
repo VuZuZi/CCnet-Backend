@@ -8,7 +8,8 @@ import {
     confirmTransferSchema,
     disbursementParamsSchema,
     listRequestsQuerySchema,
-    failTransferSchema
+    failTransferSchema,
+    updateHoldRequestSchema
 } from './disbursement.validation.js';
 
 const router = Router();
@@ -68,6 +69,15 @@ router.patch(
     validateParams(disbursementParamsSchema),
     validateBody(failTransferSchema),
     execute('failTransfer')
+);
+
+router.patch(
+    '/:id/bank-account',
+    authenticate,
+    authorize('organizer'),
+    validateParams(disbursementParamsSchema),
+    validateBody(updateHoldRequestSchema),
+    execute('updateBankAccount')
 );
 
 export default router;

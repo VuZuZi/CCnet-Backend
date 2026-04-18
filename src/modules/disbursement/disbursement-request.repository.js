@@ -4,7 +4,7 @@ import DisbursementRequest from './disbursement-request.model.js';
 class DisbursementRequestRepository {
     async create(data, session = null) {
         const docs = await DisbursementRequest.create([data], { session });
-        return docs[0];
+        return docs[0].toObject();
     }
 
     async findById(id, session = null) {
@@ -45,20 +45,34 @@ class DisbursementRequestRepository {
             .exec();
     }
 
-    async addApproval(id, approvalData, newStatus, session = null) {
-        return await DisbursementRequest.findByIdAndUpdate(
-            id,
+    async addApprovalAtomic(id, managerId, approvalData, session = null) {
+        return await DisbursementRequest.findOneAndUpdate(
             {
-                $push: { approvals: approvalData },
-                $set: { status: newStatus }
+                _id: id,
+                status: { $in: ['PENDING', 'PARTIALLY_APPROVED'] },
+                'approvals.managerId': { $ne: managerId }
+            },
+            {
+                $push: { approvals: approvalData }
             },
             { new: true, runValidators: true, session }
         ).lean().exec();
     }
 
-    async markAsTransferred(id, bankTransactionRef, transferredBy, session = null) {
+    async updateStatusWithPayload(id, newStatus, extraPayload = {}, session = null) {
         return await DisbursementRequest.findByIdAndUpdate(
             id,
+            { $set: { status: newStatus, ...extraPayload } },
+            { new: true, runValidators: true, session }
+        ).lean().exec();
+    }
+
+    async markAsTransferredAtomic(id, bankTransactionRef, transferredBy, session = null) {
+        return await DisbursementRequest.findOneAndUpdate(
+            {
+                _id: id,
+                status: 'APPROVED_PENDING_TRANSFER'
+            },
             {
                 $set: {
                     status: 'COMPLETED',
@@ -89,14 +103,6 @@ class DisbursementRequestRepository {
         ]).session(session).exec();
 
         return result.length > 0 ? result[0].total : 0;
-    }
-
-    async updateStatus(id, status, session = null) {
-        return await DisbursementRequest.findByIdAndUpdate(
-            id,
-            { $set: { status } },
-            { new: true, runValidators: true, session }
-        ).lean().exec();
     }
 }
 

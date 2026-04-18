@@ -1,9 +1,17 @@
 import mongoose from 'mongoose';
 
+const expenseItemSchema = new mongoose.Schema({
+    itemName: { type: String, required: true, trim: true },
+    amount: { type: Number, required: true, min: 0 },
+    note: { type: String, trim: true },
+    receiptMediaId: { type: mongoose.Schema.Types.ObjectId, ref: 'Media', default: null }
+}, { _id: false });
+
 const financialReportSchema = new mongoose.Schema(
     {
         spentAmount: { type: Number, required: true, min: 0 },
         unspentAmount: { type: Number, required: true, min: 0 },
+        expenseItems: { type: [expenseItemSchema], default: [] },
         note: { type: String, trim: true }
     },
     { _id: false }
@@ -65,8 +73,8 @@ const milestoneEvidenceSchema = new mongoose.Schema(
 
 milestoneEvidenceSchema.index({ projectId: 1, status: 1 });
 milestoneEvidenceSchema.index(
-    { projectId: 1, milestoneId: 1, status: 1 },
-    { unique: true, partialFilterExpression: { status: 'PENDING' } }
+    { projectId: 1, milestoneId: 1 },
+    { unique: true }
 );
 
 export default mongoose.model('MilestoneEvidence', milestoneEvidenceSchema);

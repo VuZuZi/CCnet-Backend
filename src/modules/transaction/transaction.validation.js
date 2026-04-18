@@ -57,3 +57,8 @@ export const updateMessageSchema = z.object({
 }).strict().refine(data => data.message !== undefined || data.isAnonymous !== undefined, {
     message: "Cần cung cấp ít nhất lời nhắn hoặc trạng thái ẩn danh"
 });
+
+export const getProjectDisbursementsQuerySchema = z.object({
+    page: z.coerce.number().min(1, "Page phải lớn hơn hoặc bằng 1").optional().default(1),
+    limit: z.coerce.number().min(1, "Limit phải lớn hơn 0").max(50, "Limit tối đa là 50").optional().default(10)
+}).strict();

@@ -86,10 +86,10 @@ class SepayProvider {
 
             const providedToken = authHeader.split(' ')[1];
 
-            const isMatch = crypto.timingSafeEqual(
-                Buffer.from(providedToken),
-                Buffer.from(this.config.webhookSecret)
-            );
+            const providedHash = crypto.createHash('sha256').update(providedToken).digest();
+            const secretHash = crypto.createHash('sha256').update(this.config.webhookSecret).digest();
+
+            const isMatch = crypto.timingSafeEqual(providedHash, secretHash);
 
             if (!isMatch) {
                 throw new AppError('Sai chữ ký Webhook từ SePay. Giao dịch bị từ chối.', 403);
