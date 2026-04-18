@@ -101,7 +101,8 @@ export const PostValidation = {
       limit: z.coerce.number().positive().optional(),
       page: z.coerce.number().positive().optional(),
       cursor: objectId.optional(),
-      type: z.enum(["for-you", "following"]).optional(),
+      type: z.enum(["for-you", "following", "profile"]).optional(),
+      profileUserId: objectId.optional(),
     }),
   }),
 

@@ -11,13 +11,11 @@ class PostService {
     redis,
     eventBus,
   }) {
-    Object.assign(this, {
-      postRepository,
-      mediaService,
-      userRepository,
-      redis,
-      eventBus,
-    });
+    this.postRepository = postRepository;
+    this.mediaService = mediaService;
+    this.userRepository = userRepository;
+    this.redis = redis;
+    this.eventBus = eventBus;
     this.TTL = { FEED: 60, POST: 300 };
   }
 
@@ -319,16 +317,18 @@ class PostService {
     return result;
   }
 
-  async getNewsFeed({ cursor, limit = 10, userId, type }) {
+  async getNewsFeed({ cursor, limit = 10, userId, type, profileUserId = null }) {
     let filter = { status: "active" };
-    let isPublicFeed = type !== "following";
+    const isProfileFeed = type === "profile";
+    let isPublicFeed = type === "for-you";
 
     if (type === "following") {
       if (!userId) throw new AppError("Vui lòng đăng nhập", 401);
 
-      const followingDocs = await Follow.find({ followerId: userId })
-        .select("followingId")
-        .lean();
+      const followingDocs = await Follow.aggregate([
+        { $match: { followerId: userId } },
+        { $project: { followingId: 1 } },
+      ]);
 
       const followingIds = followingDocs.map((d) => d.followingId);
 
@@ -337,6 +337,19 @@ class PostService {
       }
 
       filter["author._id"] = { $in: followingIds };
+    } else if (isProfileFeed) {
+      const profileOwnerId = profileUserId || userId;
+
+      if (!profileOwnerId) {
+        return { data: [], paging: { nextCursor: null, hasMore: false } };
+      }
+
+      filter["author._id"] = profileOwnerId;
+
+      const isOwnerView = userId && String(userId) === String(profileOwnerId);
+      if (!isOwnerView) {
+        filter.privacy = "public";
+      }
     } else {
       filter.privacy = "public";
     }
