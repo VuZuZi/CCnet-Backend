@@ -49,10 +49,6 @@ class AdminService {
     return this.adminProjectService.updateProjectStatus(...args);
   }
 
-  deleteProject(...args) {
-    return this.adminProjectService.deleteProject(...args);
-  }
-
   resolveReportWithActions(...args) {
     return this.adminReportService.resolveReportWithActions(...args);
   }

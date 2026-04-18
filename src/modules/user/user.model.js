@@ -1,6 +1,42 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
+const pointLocationSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      enum: ["Point"],
+      default: "Point",
+    },
+    coordinates: {
+      type: [Number],
+      default: undefined,
+    },
+    address: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+  },
+  { _id: false }
+);
+
+const organizationSchema = new mongoose.Schema(
+  {
+    name: { type: String, trim: true, default: "" },
+    type: { type: String, trim: true, default: "" },
+    website: { type: String, trim: true, default: "" },
+    location: { type: pointLocationSchema, default: null },
+    verifiedAt: { type: Date, default: null },
+    requestId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "OrganizerRequest",
+      default: null,
+    },
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
   {
     email: {
@@ -25,7 +61,7 @@ const userSchema = new mongoose.Schema(
 
     fullName: { type: String, required: true, trim: true },
     phone: { type: String, trim: true, default: "" },
-    location: { type: String, trim: true, default: "" },
+    location: { type: pointLocationSchema, default: null },
 
     headline: { type: String, trim: true, default: "" },
     about: { type: String, trim: true, default: "" },
@@ -48,9 +84,11 @@ const userSchema = new mongoose.Schema(
 
     role: {
       type: String,
-      enum: ["user", "admin", "organizer", "Organizer"],
+      enum: ["user", "admin", "organizer"],
       default: "user",
     },
+
+    organization: { type: organizationSchema, default: null },
 
     coolingPeriodEnd: {
       type: Date,
