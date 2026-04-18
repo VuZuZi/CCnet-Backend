@@ -174,12 +174,9 @@ class UserService {
     await this.cloudinaryProvider.deleteImage(publicId);
     await this.mediaRepository.deleteByPublicId(publicId);
   }
-  async getSuggestedUsers(currentUserId, limit = 5) {
-    const followingIds =
-      await this.followRepository.findFollowingIds(currentUserId);
-    const excludedIds = [...followingIds, currentUserId];
 
-    return await this.userRepository.findSuggestedUsers(excludedIds, limit);
+  async getSuggestedUsers(currentUserId, limit) {
+    return await this.userRepository.getSuggestedUsers(currentUserId, limit);
   }
 
   async changeCoverPhoto(userId, file) {

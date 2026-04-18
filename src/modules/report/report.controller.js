@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { getContainer } from "../../container/index.js";
 
 class ReportController {
+  // Create a new report
   async createReport(req, res, next) {
     try {
       if (!req.user) {

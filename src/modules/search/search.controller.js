@@ -7,11 +7,7 @@ import {
 
 function getCurrentUserId(req) {
   return (
-    req.user?.userId ||
-    req.user?._id ||
-    req.user?.id ||
-    req.user?.sub ||
-    null
+    req.user?.userId || req.user?._id || req.user?.id || req.user?.sub || null
   );
 }
 
@@ -42,7 +38,7 @@ class SearchController {
   markCommunityPostViewed = async (req, res, next) => {
     try {
       const { error, value } = markCommunityPostViewedSchema.validate(
-        req.params
+        req.params,
       );
       if (error) {
         throw new AppError(error.details[0].message, 400);
@@ -55,7 +51,7 @@ class SearchController {
 
       const data = await this.searchService.markCommunityPostViewed(
         userId,
-        value.postId
+        value.postId,
       );
 
       return ApiResponse.success(res, data, "Post marked as viewed");
