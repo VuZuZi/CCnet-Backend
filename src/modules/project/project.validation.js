@@ -244,6 +244,43 @@ export const exploreQuerySchema = z.object({
   status: z.string().optional()
 }).strict();
 
+export const mapQuerySchema = z.object({
+  north: z.coerce.number().min(-90).max(90).optional(),
+  south: z.coerce.number().min(-90).max(90).optional(),
+  east: z.coerce.number().min(-180).max(180).optional(),
+  west: z.coerce.number().min(-180).max(180).optional(),
+  zoom: z.coerce.number().min(1).max(18).optional().default(6),
+  category: z.enum(Object.values(PROJECT_CATEGORY)).optional(),
+  organizerScope: z.enum(["ALL", "FOLLOWED"]).optional().default("ALL"),
+  search: z.string().trim().max(100).optional(),
+}).strict().superRefine((data, ctx) => {
+  const hasAnyBound =
+    data.north !== undefined ||
+    data.south !== undefined ||
+    data.east !== undefined ||
+    data.west !== undefined;
+
+  const hasAllBounds =
+    data.north !== undefined &&
+    data.south !== undefined &&
+    data.east !== undefined &&
+    data.west !== undefined;
+
+  if (hasAnyBound && !hasAllBounds) {
+    addIssue(ctx, ["north"], "Bắt buộc phải truyền đầy đủ north, south, east, west.");
+  }
+
+  if (hasAllBounds) {
+    if (data.north <= data.south) {
+      addIssue(ctx, ["north"], "north phải lớn hơn south.");
+    }
+
+    if (data.east <= data.west) {
+      addIssue(ctx, ["east"], "east phải lớn hơn west.");
+    }
+  }
+});
+
 export const workspaceQuerySchema = z.object({
   page: z.coerce.number().int().min(1, "Page phải lớn hơn 0").optional().default(1),
   limit: z.coerce.number().int().min(1).max(100, "Limit tối đa là 100").optional().default(10),

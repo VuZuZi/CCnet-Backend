@@ -23,6 +23,7 @@ const milestoneSchema = new mongoose.Schema(
     title: { type: String, required: true, trim: true, maxlength: 100 },
     description: { type: String, required: true, trim: true, maxlength: 500 },
     targetAmount: { type: Number, default: 0, min: 0 },
+    deliverables: { type: String, trim: true, default: "", maxlength: 1000 },
     startDate: { type: Date, default: null },
     endDate: { type: Date, default: null },
     location: {
@@ -32,9 +33,12 @@ const milestoneSchema = new mongoose.Schema(
     },
     evidencePolicy: {
       type: evidencePolicySchema,
-      default: () => ({ requireFinancial: false, requireGeoPhotos: 0 })
+      default: () => ({
+        requireFinancial: false,
+        requireGeoPhotos: 0,
+        requireVolunteerLogs: false
+      })
     },
-
     status: {
       type: String,
       enum: Object.values(MILESTONE_STATUS),
@@ -148,14 +152,11 @@ const projectSchema = new mongoose.Schema(
     startDate: { type: Date, default: null },
     endDate: { type: Date, default: null },
     isUrgent: { type: Boolean, default: false, index: true },
-
     isOverFunded: { type: Boolean, default: false },
     isLocked: { type: Boolean, default: false },
-
     pauseReason: { type: String, default: null },
     aiRiskScore: { type: Number, min: 0, max: 100, default: null },
     riskFlags: [{ type: String }],
-
     approvedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -166,13 +167,11 @@ const projectSchema = new mongoose.Schema(
     revisionRequestedAt: { type: Date, default: null },
     revisionCount: { type: Number, default: 0 },
     rejectionReason: { type: String, default: null },
-
     fromHelpRequestId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "HelpRequest",
       default: null,
     },
-
     stats: {
       donorCount: { type: Number, default: 0 },
       viewCount: { type: Number, default: 0 },
@@ -223,7 +222,7 @@ projectSchema.pre(
     try {
       let currentDoc = {};
       if (newStartDate === undefined || newEndDate === undefined) {
-        currentDoc = await this.model.findOne(this.getQuery()).select('startDate endDate').lean();
+        currentDoc = await this.model.findOne(this.getQuery()).select("startDate endDate").lean();
         if (!currentDoc) return next();
       }
 

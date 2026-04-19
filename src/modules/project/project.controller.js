@@ -102,6 +102,21 @@ class ProjectController {
     }
   };
 
+  getMapProjects = async (req, res, next) => {
+    try {
+      const userId = getUserId(req);
+      const result = await this.projectService.getMapProjects(req.query, userId);
+
+      return ApiResponse.success(
+        res,
+        result,
+        "Lấy dữ liệu bản đồ dự án thành công",
+      );
+    } catch (error) {
+      next(error);
+    }
+  };
+
   getDetail = async (req, res, next) => {
     try {
       const result = await this.projectService.getProjectDetail(

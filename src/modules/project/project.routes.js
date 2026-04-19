@@ -24,6 +24,7 @@ import {
   updateDraftSchema,
   exploreQuerySchema,
   workspaceQuerySchema,
+  mapQuerySchema,
 } from "./project.validation.js";
 
 const router = Router();
@@ -101,6 +102,13 @@ router.get(
 );
 
 router.get(
+  "/map",
+  optionalAuthenticate,
+  validateQuery(mapQuerySchema),
+  execute("getMapProjects")
+);
+
+router.get(
   "/organizer/stats",
   ...organizerOnly,
   execute("getWorkspaceStats")
@@ -145,9 +153,6 @@ router.post(
   authenticate,
   execute("toggleFeedCommentLike")
 );
-
-// [CTO ADD]: Placeholder cho Step 2 (Public Evidence API)
-// router.get("/:projectId/milestones/:milestoneId/evidence", execute("getMilestoneEvidencePublic"));
 
 router.get("/:id", optionalAuthenticate, execute("getDetail"));
 
