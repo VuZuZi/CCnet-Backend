@@ -117,6 +117,22 @@ const buildViewerContext = (viewer = null) => {
   };
 };
 
+const normalizeMapItem = (helpRequest) => ({
+  id: String(helpRequest?._id || ''),
+  title: helpRequest?.title || 'Yêu cầu trợ giúp',
+  story: helpRequest?.story || '',
+  urgencyLevel: helpRequest?.urgencyLevel || 'MEDIUM',
+  category: helpRequest?.category || 'KHAC',
+  status: helpRequest?.status || '',
+  amountNeeded: Number(helpRequest?.amountNeeded || 0),
+  address: helpRequest?.location?.address || 'Chưa có địa điểm cụ thể',
+  coordinates: Array.isArray(helpRequest?.location?.coordinates)
+    ? helpRequest.location.coordinates
+    : [0, 0],
+  location: helpRequest?.location || null,
+  createdAt: helpRequest?.createdAt || null,
+});
+
 export default class HelpRequestService {
   constructor({
     helprequestRepository,
@@ -242,6 +258,100 @@ export default class HelpRequestService {
       ...options,
       populate: ['requester', 'assignedOrganizer'],
     });
+  }
+
+  async getHelpRequestMap(query = {}, viewer = null) {
+    const context = buildViewerContext(viewer);
+
+    const north = Number(query.north);
+    const south = Number(query.south);
+    const east = Number(query.east);
+    const west = Number(query.west);
+    const zoom = Number(query.zoom || 6);
+    const category = query.category ? String(query.category).trim() : '';
+    const urgencyLevel = query.urgencyLevel ? String(query.urgencyLevel).trim() : '';
+    const search = query.search ? String(query.search).trim() : '';
+
+    if (
+      !Number.isFinite(north) ||
+      !Number.isFinite(south) ||
+      !Number.isFinite(east) ||
+      !Number.isFinite(west)
+    ) {
+      throw new AppError('Viewport không hợp lệ', 400);
+    }
+
+    if (north <= south) {
+      throw new AppError('north phải lớn hơn south', 400);
+    }
+
+    if (east <= west) {
+      throw new AppError('east phải lớn hơn west', 400);
+    }
+
+    const filter = {
+      isDeleted: false,
+      location: {
+        $geoWithin: {
+          $box: [
+            [west, south],
+            [east, north],
+          ],
+        },
+      },
+    };
+
+    if (!context.isAdmin) {
+      filter.status = { $in: ['VERIFIED', 'IN_PROGRESS', 'COMPLETED'] };
+    }
+
+    if (category) {
+      filter.category = category;
+    }
+
+    if (urgencyLevel) {
+      filter.urgencyLevel = urgencyLevel;
+    }
+
+    if (search) {
+      const regex = { $regex: search, $options: 'i' };
+      filter.$or = [
+        { title: regex },
+        { story: regex },
+        { 'location.address': regex },
+      ];
+    }
+
+    const result = await this.helpRequestRepository.findMany(filter, {
+      page: 1,
+      limit: 1000,
+      sort: { createdAt: -1 },
+      populate: ['requester', 'assignedOrganizer'],
+    });
+
+    const items = Array.isArray(result?.data) ? result.data : [];
+    const normalizedItems = items
+      .map(normalizeMapItem)
+      .filter(
+        (item) =>
+          Array.isArray(item.coordinates) &&
+          item.coordinates.length === 2 &&
+          Number.isFinite(Number(item.coordinates[0])) &&
+          Number.isFinite(Number(item.coordinates[1]))
+      );
+
+    return {
+      mode: 'item',
+      items: normalizedItems,
+      panelItems: normalizedItems,
+      summary: {
+        totalVisible: normalizedItems.length,
+        itemCount: normalizedItems.length,
+        clusterCount: 0,
+        requestCount: normalizedItems.length,
+        zoom,
+      },
+    };
   }
 
   async getMyHelpRequests(userId, filters = {}, options = {}) {

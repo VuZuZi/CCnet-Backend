@@ -156,3 +156,32 @@ export const getNearbyRequestsSchema = z.object({
     limit: z.string().regex(/^\d+$/).optional().default('10'),
   }),
 });
+
+export const getHelpRequestMapSchema = z.object({
+  query: z.object({
+    north: z.coerce.number().min(-90).max(90),
+    south: z.coerce.number().min(-90).max(90),
+    east: z.coerce.number().min(-180).max(180),
+    west: z.coerce.number().min(-180).max(180),
+    zoom: z.coerce.number().min(0).max(18).optional().default(6),
+    category: z.enum(CATEGORIES).optional(),
+    urgencyLevel: z.enum(URGENCY_LEVELS).optional(),
+    search: z.string().max(120).optional(),
+  }).superRefine((value, ctx) => {
+    if (value.north <= value.south) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['north'],
+        message: 'north phải lớn hơn south',
+      });
+    }
+
+    if (value.east <= value.west) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['east'],
+        message: 'east phải lớn hơn west',
+      });
+    }
+  }),
+});

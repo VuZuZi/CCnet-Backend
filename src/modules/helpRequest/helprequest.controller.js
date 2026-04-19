@@ -51,6 +51,15 @@ export default class HelpRequestController {
     }
   };
 
+  getHelpRequestMap = async (req, res, next) => {
+    try {
+      const result = await this.helpRequestService.getHelpRequestMap(req.query, req.user || null);
+      return Response.success(res, result);
+    } catch (error) {
+      next(error);
+    }
+  };
+
   getMyHelpRequests = async (req, res, next) => {
     try {
       const {

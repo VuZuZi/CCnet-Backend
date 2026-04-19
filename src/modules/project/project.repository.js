@@ -31,6 +31,30 @@ const PROJECT_CARD_PROJECTION = {
   createdAt: 1,
 };
 
+const MAP_PROJECT_PROJECTION = {
+  title: 1,
+  slug: 1,
+  summary: 1,
+  description: 1,
+  coverMedia: 1,
+  category: 1,
+  targetAmount: 1,
+  currentAmount: 1,
+  "location.address": 1,
+  "location.coordinates": 1,
+  isUrgent: 1,
+  endDate: 1,
+  startDate: 1,
+  stats: 1,
+  organizerId: 1,
+  needsVolunteers: 1,
+  isVolunteerFull: 1,
+  projectType: 1,
+  volunteerRoles: 1,
+  status: 1,
+  createdAt: 1,
+};
+
 const ORGANIZER_PROJECT_PROJECTION = {
   title: 1,
   coverMedia: 1,
@@ -83,6 +107,31 @@ const VOLUNTEER_ONLY_SYNCABLE_STATUSES = new Set([
 
 function escapeRegex(value = "") {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeSearchText(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function matchesMapSearch(project, keyword) {
+  if (!keyword) return true;
+
+  const normalizedKeyword = normalizeSearchText(keyword);
+  if (!normalizedKeyword) return true;
+
+  const title = normalizeSearchText(project?.title || "");
+  const address = normalizeSearchText(project?.location?.address || "");
+  const organizerName = normalizeSearchText(project?.organizerId?.fullName || "");
+
+  return (
+    title.includes(normalizedKeyword) ||
+    address.includes(normalizedKeyword) ||
+    organizerName.includes(normalizedKeyword)
+  );
 }
 
 class ProjectRepository {
@@ -327,6 +376,43 @@ class ProjectRepository {
     return { projects, total };
   }
 
+  async findProjectsForMap({
+    filter = {},
+    limit = 300,
+    sortType = "newest",
+    textSearch = "",
+  } = {}) {
+    const queryFilter = {
+      status: { $in: PUBLIC_PROJECT_STATUSES },
+      ...filter,
+    };
+
+    let finalSort = { createdAt: -1 };
+
+    if (sortType === "ending_soon") {
+      finalSort = { endDate: 1, createdAt: -1 };
+    } else if (sortType === "trending") {
+      finalSort = { "stats.viewCount": -1, createdAt: -1 };
+    }
+
+    const projects = await Project.find(queryFilter)
+      .select(MAP_PROJECT_PROJECTION)
+      .populate(ORGANIZER_CARD_POPULATE)
+      .sort(finalSort)
+      .limit(limit)
+      .lean()
+      .exec();
+
+    const filteredProjects = textSearch
+      ? projects.filter((project) => matchesMapSearch(project, textSearch))
+      : projects;
+
+    return {
+      projects: filteredProjects,
+      total: filteredProjects.length,
+    };
+  }
+
   async findByIdWithDetails(projectId) {
     if (!isValidObjectId(projectId)) return null;
 
@@ -447,7 +533,9 @@ class ProjectRepository {
       projectId,
       { $inc: { currentAmount: -amount } },
       { new: true, session, runValidators: true }
-    ).lean().exec();
+    )
+      .lean()
+      .exec();
   }
 
   async updateMilestoneStatus(projectId, milestoneId, status, session = null) {
@@ -455,7 +543,9 @@ class ProjectRepository {
       { _id: projectId, "milestones.milestoneId": milestoneId },
       { $set: { "milestones.$.status": status } },
       { new: true, session }
-    ).lean().exec();
+    )
+      .lean()
+      .exec();
   }
 }
 
