@@ -203,14 +203,6 @@ class UserService {
     await this.cloudinaryProvider.deleteImage(publicId);
     await this.mediaRepository.deleteByPublicId(publicId);
   }
-<<<<<<< feature/Dungfix18-4
-=======
-
-  async getSuggestedUsers(currentUserId, limit = 5) {
-    const followingIds =
-      await this.followRepository.findFollowingIds(currentUserId);
-    const excludedIds = [...followingIds, currentUserId];
->>>>>>> dev
 
   async getSuggestedUsers(currentUserId, limit) {
     return await this.userRepository.getSuggestedUsers(currentUserId, limit);

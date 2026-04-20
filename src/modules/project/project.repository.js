@@ -18,6 +18,31 @@ const PROJECT_CARD_PROJECTION = {
   targetAmount: 1,
   currentAmount: 1,
   "location.address": 1,
+  "location.coordinates": 1,
+  isUrgent: 1,
+  endDate: 1,
+  startDate: 1,
+  stats: 1,
+  organizerId: 1,
+  needsVolunteers: 1,
+  isVolunteerFull: 1,
+  projectType: 1,
+  volunteerRoles: 1,
+  status: 1,
+  createdAt: 1,
+};
+
+const MAP_PROJECT_PROJECTION = {
+  title: 1,
+  slug: 1,
+  summary: 1,
+  description: 1,
+  coverMedia: 1,
+  category: 1,
+  targetAmount: 1,
+  currentAmount: 1,
+  "location.address": 1,
+  "location.coordinates": 1,
   isUrgent: 1,
   endDate: 1,
   startDate: 1,
@@ -85,6 +110,31 @@ function escapeRegex(value = "") {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function normalizeSearchText(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function matchesMapSearch(project, keyword) {
+  if (!keyword) return true;
+
+  const normalizedKeyword = normalizeSearchText(keyword);
+  if (!normalizedKeyword) return true;
+
+  const title = normalizeSearchText(project?.title || "");
+  const address = normalizeSearchText(project?.location?.address || "");
+  const organizerName = normalizeSearchText(project?.organizerId?.fullName || "");
+
+  return (
+    title.includes(normalizedKeyword) ||
+    address.includes(normalizedKeyword) ||
+    organizerName.includes(normalizedKeyword)
+  );
+}
+
 class ProjectRepository {
   async create(projectData, session = null) {
     const docs = await Project.create([projectData], { session });
@@ -95,7 +145,7 @@ class ProjectRepository {
     return await Project.findByIdAndUpdate(
       projectId,
       { $inc: { currentAmount: amount } },
-      { new: true, runValidators: true, session }
+      { new: true, runValidators: true, session },
     )
       .lean()
       .exec();
@@ -105,7 +155,7 @@ class ProjectRepository {
     return await Project.findByIdAndUpdate(
       projectId,
       { $set: updateData },
-      { new: true, runValidators: true, session }
+      { new: true, runValidators: true, session },
     )
       .lean()
       .exec();
@@ -120,7 +170,7 @@ class ProjectRepository {
         status: fromStatus,
       },
       { $set: { status: toStatus } },
-      { new: true, session }
+      { new: true, session },
     )
       .lean()
       .exec();
@@ -129,7 +179,10 @@ class ProjectRepository {
   async syncVolunteerOnlyExecutionStatus(projectId, session = null) {
     if (!isValidObjectId(projectId)) return null;
 
-    const project = await Project.findById(projectId).session(session).lean().exec();
+    const project = await Project.findById(projectId)
+      .session(session)
+      .lean()
+      .exec();
     if (!project) return null;
 
     if (project.projectType !== PROJECT_TYPE.VOLUNTEER_ONLY) {
@@ -172,7 +225,7 @@ class ProjectRepository {
     return await Project.findByIdAndUpdate(
       projectId,
       { $set: { status: nextStatus } },
-      { new: true, session }
+      { new: true, session },
     )
       .lean()
       .exec();
@@ -183,7 +236,7 @@ class ProjectRepository {
       return await Project.findByIdAndUpdate(
         projectId,
         { $inc: increments },
-        { new: true, runValidators: true, session }
+        { new: true, runValidators: true, session },
       )
         .lean()
         .exec();
@@ -223,7 +276,7 @@ class ProjectRepository {
           },
         },
       ],
-      { new: true, session }
+      { new: true, session },
     )
       .lean()
       .exec();
@@ -327,6 +380,43 @@ class ProjectRepository {
     return { projects, total };
   }
 
+  async findProjectsForMap({
+    filter = {},
+    limit = 300,
+    sortType = "newest",
+    textSearch = "",
+  } = {}) {
+    const queryFilter = {
+      status: { $in: PUBLIC_PROJECT_STATUSES },
+      ...filter,
+    };
+
+    let finalSort = { createdAt: -1 };
+
+    if (sortType === "ending_soon") {
+      finalSort = { endDate: 1, createdAt: -1 };
+    } else if (sortType === "trending") {
+      finalSort = { "stats.viewCount": -1, createdAt: -1 };
+    }
+
+    const projects = await Project.find(queryFilter)
+      .select(MAP_PROJECT_PROJECTION)
+      .populate(ORGANIZER_CARD_POPULATE)
+      .sort(finalSort)
+      .limit(limit)
+      .lean()
+      .exec();
+
+    const filteredProjects = textSearch
+      ? projects.filter((project) => matchesMapSearch(project, textSearch))
+      : projects;
+
+    return {
+      projects: filteredProjects,
+      total: filteredProjects.length,
+    };
+  }
+
   async findByIdWithDetails(projectId) {
     if (!isValidObjectId(projectId)) return null;
 
@@ -372,11 +462,13 @@ class ProjectRepository {
       },
     ]);
 
-    return stats[0] || {
-      totalFundsRaised: 0,
-      activeProjects: 0,
-      pendingProjects: 0,
-    };
+    return (
+      stats[0] || {
+        totalFundsRaised: 0,
+        activeProjects: 0,
+        pendingProjects: 0,
+      }
+    );
   }
 
   async findOrganizerProjects({
@@ -423,7 +515,7 @@ class ProjectRepository {
         status: PROJECT_STATUS.DRAFT,
       },
       { $set: updateData },
-      { new: true, runValidators: true, session }
+      { new: true, runValidators: true, session },
     )
       .lean()
       .exec();
@@ -435,7 +527,7 @@ class ProjectRepository {
       endDate: { $lt: currentDate },
     })
       .select(
-        "_id title currentAmount targetAmount mvpAmount organizerId endDate status"
+        "_id title currentAmount targetAmount mvpAmount organizerId endDate status",
       )
       .limit(limit)
       .lean()
@@ -446,16 +538,20 @@ class ProjectRepository {
     return await Project.findByIdAndUpdate(
       projectId,
       { $inc: { currentAmount: -amount } },
-      { new: true, session, runValidators: true }
-    ).lean().exec();
+      { new: true, session, runValidators: true },
+    )
+      .lean()
+      .exec();
   }
 
   async updateMilestoneStatus(projectId, milestoneId, status, session = null) {
     return await Project.findOneAndUpdate(
       { _id: projectId, "milestones.milestoneId": milestoneId },
       { $set: { "milestones.$.status": status } },
-      { new: true, session }
-    ).lean().exec();
+      { new: true, session },
+    )
+      .lean()
+      .exec();
   }
 }
 
