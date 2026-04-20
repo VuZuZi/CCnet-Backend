@@ -1,3 +1,4 @@
+import Follow from "../follow/follow.model.js";
 import User from "./user.model.js";
 import mongoose from "mongoose";
 
@@ -19,13 +20,101 @@ class UserRepository {
       .select("+password +googleId +avatarPublicId +coverPhotoPublicId")
       .exec();
   }
-  async findSuggestedUsers(excludedIds, limit = 5) {
-    return await User.find({ _id: { $nin: excludedIds } })
-      .select("_id fullName username avatar role")
-      .limit(limit)
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec();
+  async getSuggestedUsers(currentUserId, limit = 5) {
+    try {
+      // 1. Khởi tạo mảng chứa các ID cần loại trừ (không gợi ý)
+      let excludedIds = [];
+
+      if (currentUserId && mongoose.Types.ObjectId.isValid(currentUserId)) {
+        const objectId = new mongoose.Types.ObjectId(currentUserId);
+
+        excludedIds.push(objectId);
+
+        const followingRecords = await Follow.find({
+          followerId: objectId,
+        }).lean();
+        const followingIds = followingRecords.map(
+          (record) => record.followingId,
+        );
+        excludedIds.push(...followingIds);
+      }
+
+      // 3. Đưa danh sách loại trừ vào điều kiện Match
+      const matchCondition = {
+        role: { $in: ["organizer", "Organizer", "ORGANIZER"] },
+        isActive: true,
+        // Dùng $nin (Not In) để loại bỏ những ID nằm trong mảng excludedIds
+        _id: { $nin: excludedIds },
+      };
+
+      const suggestedOrganizers = await User.aggregate([
+        {
+          $match: matchCondition,
+        },
+        {
+          $lookup: {
+            from: "projects",
+            localField: "_id",
+            foreignField: "organizerId",
+            as: "projects",
+          },
+        },
+        {
+          $addFields: {
+            projectCount: { $size: "$projects" },
+            kycScore: {
+              $switch: {
+                branches: [
+                  // Dùng $ifNull trực tiếp trong điều kiện so sánh
+                  {
+                    case: { $eq: [{ $ifNull: ["$kyc.tier", 0] }, 3] },
+                    then: 3000,
+                  },
+                  {
+                    case: { $eq: [{ $ifNull: ["$kyc.tier", 0] }, 2] },
+                    then: 2000,
+                  },
+                  {
+                    case: { $eq: [{ $ifNull: ["$kyc.tier", 0] }, 1] },
+                    then: 1000,
+                  },
+                ],
+                default: 0,
+              },
+            },
+          },
+        },
+
+        {
+          $sort: {
+            totalScore: -1,
+            projectCount: -1,
+            createdAt: -1,
+          },
+        },
+        {
+          $limit: limit,
+        },
+        {
+          $project: {
+            _id: 1,
+            fullName: 1,
+            username: 1,
+            avatar: 1,
+            role: 1,
+            kyc: {
+              tier: { $ifNull: ["$kyc.tier", 0] },
+            },
+            projectCount: 1,
+          },
+        },
+      ]);
+
+      return suggestedOrganizers;
+    } catch (error) {
+      console.error("Lỗi aggregation Suggested Organizers:", error);
+      throw error;
+    }
   }
 
   async findOrganizers({ search = "" } = {}) {
@@ -38,13 +127,14 @@ class UserRepository {
       query.$or = [
         { fullName: { $regex: search, $options: "i" } },
         { email: { $regex: search, $options: "i" } },
-        { location: { $regex: search, $options: "i" } },
+        { "location.address": { $regex: search, $options: "i" } },
+        { "organization.name": { $regex: search, $options: "i" } },
       ];
     }
 
     return await User.find(query)
       .select(
-        "_id fullName email avatar role location headline about skills phone followersCount followingCount level title createdAt",
+        "_id fullName email avatar role location organization headline about skills phone followersCount followingCount level title createdAt kyc"
       )
       .lean()
       .exec();
@@ -76,7 +166,7 @@ class UserRepository {
     return await User.findByIdAndUpdate(
       userId,
       { $inc: counters },
-      { new: true },
+      { new: true }
     )
       .lean()
       .exec();
@@ -110,16 +200,17 @@ class UserRepository {
   async updateKycStatusBatch(userIds, status) {
     return await User.updateMany(
       { _id: { $in: userIds } },
-      { $set: { "kyc.status": status } },
+      { $set: { "kyc.status": status } }
     ).exec();
   }
+
   async toggleSavePost(userId, postId) {
     const user = await User.findById(userId);
     if (!user) throw new Error("User not found");
 
     const savedPostsArray = user.savedPosts || [];
     const isSaved = savedPostsArray.some(
-      (savedId) => savedId.toString() === postId.toString(),
+      (savedId) => savedId.toString() === postId.toString()
     );
 
     const validPostId = new mongoose.Types.ObjectId(postId);

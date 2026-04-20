@@ -299,6 +299,37 @@ export default class HelpRequestController {
     }
   };
 
+  getMapRequests = async (req, res, next) => {
+    try {
+      const {
+        north,
+        south,
+        east,
+        west,
+        zoom = 6,
+        category,
+        urgencyLevel,
+        search,
+      } = req.query;
+
+      const filters = {
+        north: north !== undefined ? Number(north) : undefined,
+        south: south !== undefined ? Number(south) : undefined,
+        east: east !== undefined ? Number(east) : undefined,
+        west: west !== undefined ? Number(west) : undefined,
+        zoom: Number(zoom),
+        category,
+        urgencyLevel,
+        search,
+      };
+
+      const result = await this.helpRequestService.getMapRequests(req.user || null, filters);
+      return Response.success(res, result);
+    } catch (error) {
+      next(error);
+    }
+  };
+
   getStats = async (req, res, next) => {
     try {
       const stats = await this.helpRequestService.getStats();

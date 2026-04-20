@@ -155,22 +155,6 @@ class AdminController {
       next(e);
     }
   };
-
-  deleteProject = async (req, res, next) => {
-    try {
-      const { reason } = req.body || {};
-
-      await this.adminService.deleteProject(
-        req.params.id,
-        reason,
-        req.user?.userId || req.user?._id || null
-      );
-
-      res.status(204).send();
-    } catch (e) {
-      next(e);
-    }
-  };
 }
 
 export default AdminController;

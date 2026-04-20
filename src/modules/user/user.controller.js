@@ -92,10 +92,12 @@ class UserController {
   getSuggestedUsers = async (req, res, next) => {
     try {
       const limit = parseInt(req.query.limit, 10) || 5;
-      const users = await this.userService.getSuggestedUsers(
-        req.user.userId,
-        limit,
-      );
+
+      // 👇 AN TOÀN: Lấy userId nếu có, không có thì gán null
+      const userId = req.user?.userId || req.user?._id || req.user?.id || null;
+
+      const users = await this.userService.getSuggestedUsers(userId, limit);
+
       return ApiResponse.success(
         res,
         { users },

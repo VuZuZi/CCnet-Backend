@@ -103,10 +103,6 @@ class AdminProjectRepository {
       .lean()
       .exec();
   }
-
-  async deleteProject(id) {
-    return await Project.findByIdAndDelete(id);
-  }
 }
 
 export default AdminProjectRepository;

@@ -32,7 +32,6 @@ const commentShortSchema = new mongoose.Schema(
   { _id: false },
 );
 
-// 👇 SCHEMA MỚI ĐỂ LƯU THÔNG TIN BÀI SHARE
 const sharedEntitySchema = new mongoose.Schema(
   {
     entityId: { type: mongoose.Schema.Types.ObjectId, required: true },
@@ -44,6 +43,14 @@ const sharedEntitySchema = new mongoose.Schema(
     title: { type: String, required: true },
     thumbnail: { type: String }, // Link ảnh cover của project
     description: { type: String, maxlength: 500 },
+    
+    // 👇 CÁC TRƯỜNG BỔ SUNG ĐỂ ĐỒNG BỘ VỚI FRONTEND 👇
+    ownerName: { type: String }, // Tên người đăng/tổ chức
+    location: { type: String }, // Địa điểm thực hiện
+    endDateText: { type: String }, // Text hiển thị thời gian (VD: "Còn 5 ngày")
+    fundingPercent: { type: Number, default: 0 }, // Phần trăm gây quỹ
+    isFunded: { type: Boolean, default: false }, // Cờ đánh dấu có gây quỹ không
+    isUrgent: { type: Boolean, default: false } // Cờ khẩn cấp
   },
   { _id: false },
 );
