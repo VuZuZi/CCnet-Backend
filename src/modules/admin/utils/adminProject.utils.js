@@ -239,13 +239,6 @@ export function buildProjectStatusNotificationMessage(
     };
   }
 
-  if (status === "DELETED") {
-    return {
-      title: "Project deleted by admin",
-      message: `Your project "${projectTitle}" has been deleted by admin. Reason: ${feedback || "No reason provided"}.`,
-    };
-  }
-
   if (
     status === PROJECT_STATUS.PENDING_APPROVAL ||
     status === PROJECT_STATUS.UNDER_REVIEW

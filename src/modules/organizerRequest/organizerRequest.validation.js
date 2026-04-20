@@ -5,13 +5,30 @@ const VN_PHONE_REGEX = /^(?:\+84|0)(?:3|5|7|8|9)\d{8}$/;
 const BANK_ACCOUNT_REGEX = /^\d{8,19}$/;
 const ACCOUNT_NAME_REGEX = /^[\p{L}\s.'-]{2,150}$/u;
 
+const pointLocationSchema = z
+  .object({
+    type: z.literal("Point"),
+    coordinates: z.array(z.number()).length(2, "Vui lòng chọn địa chỉ hợp lệ"),
+    address: z.string().trim().min(3, "Vui lòng chọn địa chỉ hợp lệ"),
+  })
+  .refine(
+    (value) =>
+      Array.isArray(value.coordinates) &&
+      value.coordinates.length === 2 &&
+      Number.isFinite(value.coordinates[0]) &&
+      Number.isFinite(value.coordinates[1]),
+    {
+      message: "Vui lòng chọn địa chỉ hợp lệ",
+      path: ["coordinates"],
+    }
+  );
+
 const documentPayloadSchema = z
   .object({
     id: z.string().optional(),
     _id: z.string().optional(),
     publicId: z.string().optional(),
     blurHash: z.string().nullable().optional(),
-
     fileName: z.string().min(1, "Tên file là bắt buộc"),
     mimeType: z.string().min(1, "Loại file là bắt buộc"),
     size: z.coerce.number().min(0).optional(),
@@ -38,7 +55,7 @@ export const submitOrganizerRequestSchema = z
       .regex(VN_PHONE_REGEX, "Số điện thoại không đúng định dạng Việt Nam")
       .optional()
       .or(z.literal("")),
-    locationSnapshot: z.string().max(150).optional().default(""),
+    locationSnapshot: pointLocationSchema,
     organizationName: z.string().min(2).max(200),
     organizationType: z.enum(Object.values(ORGANIZATION_TYPE)),
     organizationWebsite: z
@@ -78,10 +95,7 @@ export const approveOrganizerRequestSchema = z
 
 export const declineOrganizerRequestSchema = z
   .object({
-    reviewReason: z
-      .string()
-      .min(5, "Lý do từ chối tối thiểu 5 ký tự")
-      .max(1000),
+    reviewReason: z.string().min(5, "Lý do từ chối tối thiểu 5 ký tự").max(1000),
   })
   .strict();
 

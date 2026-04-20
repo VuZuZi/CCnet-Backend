@@ -6,12 +6,13 @@ const normalizeRole = (role = '') => role.toString().trim().toLowerCase();
 
 const PUBLIC_VISIBLE_STATUSES = ['VERIFIED', 'IN_PROGRESS', 'COMPLETED'];
 const ASSIGNABLE_STATUSES = ['VERIFIED', 'IN_PROGRESS'];
+const MAP_PANEL_LIMIT = 50;
 
 const parseCoordinates = (value) => {
   if (!value) return null;
 
   if (Array.isArray(value) && value.length === 2) {
-    const [lng, lat] = value;
+    const [lng, lat] = value.map(Number);
     if (Number.isFinite(lng) && Number.isFinite(lat)) {
       return [lng, lat];
     }
@@ -19,14 +20,14 @@ const parseCoordinates = (value) => {
 
   if (typeof value === 'object') {
     if (Array.isArray(value.coordinates) && value.coordinates.length === 2) {
-      const [lng, lat] = value.coordinates;
+      const [lng, lat] = value.coordinates.map(Number);
       if (Number.isFinite(lng) && Number.isFinite(lat)) {
         return [lng, lat];
       }
     }
 
-    if (Number.isFinite(value.lng) && Number.isFinite(value.lat)) {
-      return [value.lng, value.lat];
+    if (Number.isFinite(Number(value.lng)) && Number.isFinite(Number(value.lat))) {
+      return [Number(value.lng), Number(value.lat)];
     }
   }
 
@@ -116,6 +117,82 @@ const buildViewerContext = (viewer = null) => {
     isAuthenticated: Boolean(viewer?.userId || viewer?.id),
   };
 };
+
+const normalizeBounds = (filters = {}) => {
+  const north = Number(filters.north);
+  const south = Number(filters.south);
+  const east = Number(filters.east);
+  const west = Number(filters.west);
+
+  if (
+    !Number.isFinite(north) ||
+    !Number.isFinite(south) ||
+    !Number.isFinite(east) ||
+    !Number.isFinite(west)
+  ) {
+    return null;
+  }
+
+  return {
+    north: Math.max(north, south),
+    south: Math.min(north, south),
+    east: Math.max(east, west),
+    west: Math.min(east, west),
+  };
+};
+
+const isPointWithinBounds = (lng, lat, bounds) => {
+  if (!bounds) return true;
+  return lat <= bounds.north && lat >= bounds.south && lng <= bounds.east && lng >= bounds.west;
+};
+
+const getMapClusterCellSize = (zoom) => {
+  if (zoom >= 16) return 0;
+  if (zoom >= 14) return 0.015;
+  if (zoom >= 12) return 0.03;
+  if (zoom >= 10) return 0.06;
+  if (zoom >= 8) return 0.12;
+  if (zoom >= 7) return 0.2;
+  if (zoom >= 6) return 0.35;
+  if (zoom >= 5) return 0.6;
+  return 1.2;
+};
+
+const getExpandZoom = (zoom) => {
+  return Math.min(Math.max(Number(zoom || 6) + 2, 8), 18);
+};
+
+const buildClusterKey = (lng, lat, cellSize) => {
+  const lngBucket = Math.floor(lng / cellSize);
+  const latBucket = Math.floor(lat / cellSize);
+  return `${lngBucket}:${latBucket}`;
+};
+
+const mapHelpRequestItem = (item) => {
+  const coordinates = parseCoordinates(item?.location?.coordinates || item?.coordinates);
+  if (!coordinates) return null;
+
+  return {
+    id: String(item._id || item.id || ''),
+    title: item.title || 'Yêu cầu trợ giúp',
+    story: item.story || '',
+    category: item.category || 'KHAC',
+    urgencyLevel: item.urgencyLevel || 'MEDIUM',
+    status: item.status || '',
+    address: item.location?.address || item.address || 'Chưa có địa điểm cụ thể',
+    amountNeeded: Number(item.amountNeeded || 0),
+    coordinates,
+    createdAt: item.createdAt || null,
+  };
+};
+
+const buildMapSummary = ({ mode, zoom, items, clusters }) => ({
+  totalVisible: Number(items.length),
+  itemCount: Number(items.length),
+  clusterCount: Number(clusters.length),
+  requestCount: Number(items.length),
+  zoom: Number(zoom || 6),
+});
 
 export default class HelpRequestService {
   constructor({
@@ -807,6 +884,236 @@ export default class HelpRequestService {
     }
 
     return this.helpRequestRepository.findNearby(coordinates, maxDistance, options);
+  }
+
+  async getMapRequests(viewer = null, filters = {}) {
+    const context = buildViewerContext(viewer);
+    const bounds = normalizeBounds(filters);
+    const zoom = Number(filters.zoom || 6);
+    const keyword = String(filters.search || '').trim().toLowerCase();
+
+    const query = {
+      isDeleted: false,
+    };
+
+    if (!context.isAdmin) {
+      query.status = { $in: PUBLIC_VISIBLE_STATUSES };
+    }
+
+    if (filters.category) {
+      query.category = filters.category;
+    }
+
+    if (filters.urgencyLevel) {
+      query.urgencyLevel = filters.urgencyLevel;
+    }
+
+    const result = await this.helpRequestRepository.findMany(query, {
+      page: 1,
+      limit: 1000,
+      sort: { createdAt: -1 },
+      select:
+        '_id title story category urgencyLevel status location amountNeeded createdAt',
+    });
+
+    const allItems = (result?.data || [])
+      .map(mapHelpRequestItem)
+      .filter(Boolean)
+      .filter((item) => {
+        const [lng, lat] = item.coordinates;
+        return isPointWithinBounds(lng, lat, bounds);
+      })
+      .filter((item) => {
+        if (!keyword) return true;
+
+        const haystack = [
+          item.title,
+          item.story,
+          item.address,
+          item.category,
+          item.urgencyLevel,
+          item.status,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+
+        return haystack.includes(keyword);
+      });
+
+    if (zoom >= 12) {
+      return {
+        mode: 'item',
+        items: allItems.map((item) => ({
+          id: item.id,
+          title: item.title,
+          story: item.story,
+          category: item.category,
+          urgencyLevel: item.urgencyLevel,
+          status: item.status,
+          address: item.address,
+          amountNeeded: item.amountNeeded,
+          coordinates: item.coordinates,
+          createdAt: item.createdAt,
+        })),
+        panelItems: allItems.slice(0, MAP_PANEL_LIMIT).map((item) => ({
+          id: item.id,
+          title: item.title,
+          story: item.story,
+          category: item.category,
+          urgencyLevel: item.urgencyLevel,
+          status: item.status,
+          address: item.address,
+          amountNeeded: item.amountNeeded,
+          coordinates: item.coordinates,
+          createdAt: item.createdAt,
+        })),
+        summary: buildMapSummary({
+          mode: 'item',
+          zoom,
+          items: allItems,
+          clusters: [],
+        }),
+      };
+    }
+
+    const cellSize = getMapClusterCellSize(zoom);
+    const clusterMap = new Map();
+
+    for (const item of allItems) {
+      const [lng, lat] = item.coordinates;
+      const key = buildClusterKey(lng, lat, cellSize);
+
+      if (!clusterMap.has(key)) {
+        clusterMap.set(key, {
+          rawClusterId: key,
+          clusterId: key,
+          count: 0,
+          latitudeSum: 0,
+          longitudeSum: 0,
+          firstCreatedAt: item.createdAt ? new Date(item.createdAt).getTime() : 0,
+          items: [],
+        });
+      }
+
+      const cluster = clusterMap.get(key);
+      cluster.count += 1;
+      cluster.latitudeSum += lat;
+      cluster.longitudeSum += lng;
+      cluster.items.push(item);
+
+      const createdAtTime = item.createdAt ? new Date(item.createdAt).getTime() : 0;
+      if (createdAtTime > cluster.firstCreatedAt) {
+        cluster.firstCreatedAt = createdAtTime;
+      }
+    }
+
+    const items = [];
+    const panelItems = [];
+    const clusters = [];
+
+    for (const cluster of clusterMap.values()) {
+      if (cluster.count === 1) {
+        const item = cluster.items[0];
+        items.push({
+          id: item.id,
+          title: item.title,
+          story: item.story,
+          category: item.category,
+          urgencyLevel: item.urgencyLevel,
+          status: item.status,
+          address: item.address,
+          amountNeeded: item.amountNeeded,
+          coordinates: item.coordinates,
+          createdAt: item.createdAt,
+        });
+
+        if (panelItems.length < MAP_PANEL_LIMIT) {
+          panelItems.push({
+            id: item.id,
+            title: item.title,
+            story: item.story,
+            category: item.category,
+            urgencyLevel: item.urgencyLevel,
+            status: item.status,
+            address: item.address,
+            amountNeeded: item.amountNeeded,
+            coordinates: item.coordinates,
+            createdAt: item.createdAt,
+          });
+        }
+
+        continue;
+      }
+
+      const latitude = cluster.latitudeSum / cluster.count;
+      const longitude = cluster.longitudeSum / cluster.count;
+
+      items.push({
+        type: 'cluster',
+        clusterId: cluster.clusterId,
+        rawClusterId: cluster.rawClusterId,
+        count: cluster.count,
+        latitude,
+        longitude,
+        expandZoom: getExpandZoom(zoom),
+      });
+
+      clusters.push({
+        type: 'cluster',
+        clusterId: cluster.clusterId,
+        rawClusterId: cluster.rawClusterId,
+        count: cluster.count,
+        latitude,
+        longitude,
+        expandZoom: getExpandZoom(zoom),
+      });
+
+      const sortedClusterItems = [...cluster.items].sort((a, b) => {
+        const urgencyRank = {
+          CRITICAL: 4,
+          HIGH: 3,
+          MEDIUM: 2,
+          LOW: 1,
+        };
+
+        const urgencyDiff =
+          (urgencyRank[b.urgencyLevel] || 0) - (urgencyRank[a.urgencyLevel] || 0);
+
+        if (urgencyDiff !== 0) return urgencyDiff;
+
+        return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      });
+
+      for (const item of sortedClusterItems) {
+        if (panelItems.length >= MAP_PANEL_LIMIT) break;
+
+        panelItems.push({
+          id: item.id,
+          title: item.title,
+          story: item.story,
+          category: item.category,
+          urgencyLevel: item.urgencyLevel,
+          status: item.status,
+          address: item.address,
+          amountNeeded: item.amountNeeded,
+          coordinates: item.coordinates,
+          createdAt: item.createdAt,
+        });
+      }
+    }
+
+    return {
+      mode: 'cluster',
+      items,
+      panelItems,
+      summary: buildMapSummary({
+        mode: 'cluster',
+        zoom,
+        items: allItems,
+        clusters,
+      }),
+    };
   }
 
   async getStats() {

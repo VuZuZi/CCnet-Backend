@@ -18,6 +18,7 @@ import {
   getOrganizerSuggestionsSchema,
   getOrganizerAssignedRequestsSchema,
   organizerRespondAssignmentSchema,
+  getMapRequestsSchema,
 } from './helprequest.validation.js';
 
 const router = Router();
@@ -48,6 +49,13 @@ router.get(
   optionalAuthenticate,
   validate(getNearbyRequestsSchema),
   execute('getNearbyRequests')
+);
+
+router.get(
+  '/map',
+  optionalAuthenticate,
+  validate(getMapRequestsSchema),
+  execute('getMapRequests')
 );
 
 router.get(
