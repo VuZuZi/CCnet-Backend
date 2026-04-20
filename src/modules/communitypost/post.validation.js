@@ -31,6 +31,12 @@ const sharedEntitySchema = z.object({
   title: z.string(),
   thumbnail: z.string().optional(),
   description: z.string().optional(),
+  ownerName: z.string().optional(),
+  location: z.string().optional(),
+  endDateText: z.string().optional(),
+  fundingPercent: z.number().optional(),
+  isFunded: z.boolean().optional(),
+  isUrgent: z.boolean().optional()
 });
 
 export const PostValidation = {
