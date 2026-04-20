@@ -1,6 +1,32 @@
-import AppError from '../../core/AppError.js';
-import { ORGANIZER_REQUEST_STATUS } from './organizerRequest.constant.js';
-import { DOMAIN_EVENTS } from '../../config/notification.js';
+import AppError from "../../core/AppError.js";
+import { ORGANIZER_REQUEST_STATUS } from "./organizerRequest.constant.js";
+import { DOMAIN_EVENTS } from "../../config/notification.js";
+
+const normalizeLocation = (location) => {
+  if (!location || typeof location !== "object") return null;
+
+  const address =
+    typeof location.address === "string" ? location.address.trim() : "";
+  const coordinates = Array.isArray(location.coordinates)
+    ? location.coordinates.map((value) => Number(value))
+    : [];
+
+  if (
+    location.type !== "Point" ||
+    !address ||
+    coordinates.length !== 2 ||
+    !Number.isFinite(coordinates[0]) ||
+    !Number.isFinite(coordinates[1])
+  ) {
+    return null;
+  }
+
+  return {
+    type: "Point",
+    address,
+    coordinates,
+  };
+};
 
 class OrganizerRequestService {
   constructor({
@@ -19,8 +45,8 @@ class OrganizerRequestService {
     this.adminRepository = adminRepository;
   }
 
-  _ensureReason(reason, message = 'Lý do là bắt buộc') {
-    const normalizedReason = String(reason || '').trim();
+  _ensureReason(reason, message = "Lý do là bắt buộc") {
+    const normalizedReason = String(reason || "").trim();
     if (!normalizedReason) {
       throw new AppError(message, 400);
     }
@@ -39,8 +65,8 @@ class OrganizerRequestService {
 
     await this.adminRepository.createAdminActionLog({
       actorId,
-      actorRole: 'admin',
-      targetType: 'organizer_request',
+      actorRole: "admin",
+      targetType: "organizer_request",
       targetId: request._id,
       action,
       reason,
@@ -55,175 +81,102 @@ class OrganizerRequestService {
     });
   }
 
-// async submitMyRequest(userId, payload) {
-//     const user = await this.userRepository.findById(userId);
-
-//     if (!user) throw new AppError('Không tìm thấy người dùng', 404);
-//     if (!user.isEmailVerified) throw new AppError('Bạn cần xác minh email trước khi đăng ký Organizer', 400);
-//     if (String(user.role || '').toLowerCase() === 'organizer') throw new AppError('Tài khoản này đã là Organizer', 400);
-
-//     const activePipeline = await this.organizerRequestRepository.findActivePipelineByUserId(userId);
-//     if (activePipeline) {
-//       throw new AppError('Bạn đang có một hồ sơ chờ xử lý. Không thể gửi thêm.', 409);
-//     }
-
-//     const latestRequest = await this.organizerRequestRepository.findLatestByUserId(userId);
-//     const resubmissionCount = latestRequest ? (latestRequest.resubmissionCount || 0) + 1 : 0;
-
-//     return await this.transactionManager.runInTransaction(async (session) => {
-//       const normalizedUserName = user.fullName.trim().toLowerCase();
-//       const normalizedBankName = payload.bankAccountName.trim().toLowerCase();
-//       const isNameMatch = normalizedUserName === normalizedBankName;
-
-//       const nextStatus = ORGANIZER_REQUEST_STATUS.AWAITING_MICRO_DEPOSIT;
-//       const microDepositAmount = Math.floor(Math.random() * 4000) + 1000;
-
-//       console.log("💰 [DEV ONLY] Số tiền Micro-deposit FE cần nhập là:", microDepositAmount);
-
-//       let notes = payload.notes || '';
-//       let riskFlags = [];
-
-//       if (!isNameMatch) {
-//         riskFlags.push('NAME_MISMATCH');
-//         const warningText = `[SYSTEM FLAG] CẢNH BÁO: Tên chủ tài khoản ngân hàng (${payload.bankAccountName}) không khớp hoàn toàn với tên đăng ký User Profile (${user.fullName}).`;
-//         notes = notes ? `${warningText}\n\nGhi chú của user:\n${notes}` : warningText;
-//       }
-
-//       const bankData = {
-//         userId,
-//         bankName: payload.bankName,
-//         accountNumber: payload.bankAccountNumber,
-//         accountName: payload.bankAccountName,
-//         isVerified: false,
-//         microDepositAmount,
-//         status: 'ACTIVE'
-//       };
-//       const newBank = await this.bankAccountRepository.create(bankData, session);
-
-//       const requestData = {
-//         userId,
-//         fullNameSnapshot: payload.fullNameSnapshot || user.fullName || '',
-//         emailSnapshot: payload.emailSnapshot || user.email || '',
-//         phoneSnapshot: payload.phoneSnapshot || user.phone || '',
-//         locationSnapshot: payload.locationSnapshot || user.location || '',
-//         organizationName: payload.organizationName,
-//         organizationType: payload.organizationType,
-//         organizationWebsite: payload.organizationWebsite || '',
-
-//         idCardFront: payload.idCardFront,
-//         idCardBack: payload.idCardBack,
-//         selfie: payload.selfie,
-//         businessLicense: payload.businessLicense || null,
-//         bankProof: payload.bankProof || null,
-
-//         bankAccountId: newBank._id,
-
-//         bankName: payload.bankName,
-//         bankAccountNumber: payload.bankAccountNumber,
-//         bankAccountName: payload.bankAccountName,
-//         notes,
-//         riskFlags,
-//         aiRiskScore: isNameMatch ? 0 : 50,
-//         resubmissionCount,
-
-//         status: nextStatus,
-//         submittedAt: new Date()
-//       };
-
-//       const newRequest = await this.organizerRequestRepository.create(requestData, session);
-
-//       await this.userRepository.updateById(userId, { 'kyc.status': 'PENDING' }, session);
-
-//       this._safeEmitSubmittedEvent(newRequest, user);
-
-//       return newRequest;
-//     });
-//   }
-
-async submitMyRequest(userId, payload) {
+  async submitMyRequest(userId, payload) {
     const user = await this.userRepository.findById(userId);
 
-    if (!user) throw new AppError('Không tìm thấy người dùng', 404);
-    if (!user.isEmailVerified) throw new AppError('Bạn cần xác minh email trước khi đăng ký Organizer', 400);
-    if (String(user.role || '').toLowerCase() === 'organizer') throw new AppError('Tài khoản này đã là Organizer', 400);
-
-    const activePipeline = await this.organizerRequestRepository.findActivePipelineByUserId(userId);
-    if (activePipeline) {
-      throw new AppError('Bạn đang có một hồ sơ chờ xử lý. Không thể gửi thêm.', 409);
+    if (!user) throw new AppError("Không tìm thấy người dùng", 404);
+    if (!user.isEmailVerified) {
+      throw new AppError(
+        "Bạn cần xác minh email trước khi đăng ký Organizer",
+        400
+      );
+    }
+    if (String(user.role || "").toLowerCase() === "organizer") {
+      throw new AppError("Tài khoản này đã là Organizer", 400);
     }
 
-    const latestRequest = await this.organizerRequestRepository.findLatestByUserId(userId);
-    const resubmissionCount = latestRequest ? (latestRequest.resubmissionCount || 0) + 1 : 0;
+    const activePipeline =
+      await this.organizerRequestRepository.findActivePipelineByUserId(userId);
+    if (activePipeline) {
+      throw new AppError(
+        "Bạn đang có một hồ sơ chờ xử lý. Không thể gửi thêm.",
+        409
+      );
+    }
+
+    const latestRequest =
+      await this.organizerRequestRepository.findLatestByUserId(userId);
+    const resubmissionCount = latestRequest
+      ? (latestRequest.resubmissionCount || 0) + 1
+      : 0;
 
     return await this.transactionManager.runInTransaction(async (session) => {
       const normalizedUserName = user.fullName.trim().toLowerCase();
       const normalizedBankName = payload.bankAccountName.trim().toLowerCase();
       const isNameMatch = normalizedUserName === normalizedBankName;
 
-      // ==========================================
-      // [CTO Fix & Tech Debt]: MVP Bypass Micro-Deposit
-      // TODO [Tech Debt]: Tương lai tích hợp cổng thanh toán (BaaS) -> Bỏ comment out luồng AWAITING_MICRO_DEPOSIT
-      // Hiện tại: Auto-pass đẩy thẳng lên PENDING cho Admin duyệt tay.
-      // ==========================================
-      const nextStatus = ORGANIZER_REQUEST_STATUS.PENDING; 
-      const microDepositAmount = null; 
+      const nextStatus = ORGANIZER_REQUEST_STATUS.PENDING;
+      const microDepositAmount = null;
 
-      let notes = payload.notes || '';
-      let riskFlags = [];
+      let notes = payload.notes || "";
+      const riskFlags = [];
 
-      // Vẫn giữ hệ thống cảnh báo (Cực kỳ quan trọng vì Admin giờ phải duyệt tay 100%)
       if (!isNameMatch) {
-        riskFlags.push('NAME_MISMATCH');
+        riskFlags.push("NAME_MISMATCH");
         const warningText = `[SYSTEM FLAG] CẢNH BÁO: Tên chủ tài khoản ngân hàng (${payload.bankAccountName}) không khớp hoàn toàn với tên đăng ký User Profile (${user.fullName}).`;
-        notes = notes ? `${warningText}\n\nGhi chú của user:\n${notes}` : warningText;
+        notes = notes
+          ? `${warningText}\n\nGhi chú của user:\n${notes}`
+          : warningText;
       }
 
-      // Lưu Bank (Chưa verify)
       const bankData = {
         userId,
         bankName: payload.bankName,
         accountNumber: payload.bankAccountNumber,
         accountName: payload.bankAccountName,
-        isVerified: false, // Để False vì Admin sẽ check bằng mắt
+        isVerified: false,
         microDepositAmount,
-        status: 'ACTIVE'
+        status: "ACTIVE",
       };
       const newBank = await this.bankAccountRepository.create(bankData, session);
 
-      // Lưu Request
       const requestData = {
         userId,
-        fullNameSnapshot: payload.fullNameSnapshot || user.fullName || '',
-        emailSnapshot: payload.emailSnapshot || user.email || '',
-        phoneSnapshot: payload.phoneSnapshot || user.phone || '',
-        locationSnapshot: payload.locationSnapshot || user.location || '',
+        fullNameSnapshot: payload.fullNameSnapshot || user.fullName || "",
+        emailSnapshot: payload.emailSnapshot || user.email || "",
+        phoneSnapshot: payload.phoneSnapshot || user.phone || "",
+        locationSnapshot:
+          normalizeLocation(payload.locationSnapshot) || user.location || null,
         organizationName: payload.organizationName,
         organizationType: payload.organizationType,
-        organizationWebsite: payload.organizationWebsite || '',
-
+        organizationWebsite: payload.organizationWebsite || "",
         idCardFront: payload.idCardFront,
         idCardBack: payload.idCardBack,
-        selfie: payload.selfie, 
+        selfie: payload.selfie,
         businessLicense: payload.businessLicense || null,
         bankProof: payload.bankProof || null,
-
         bankAccountId: newBank._id,
-
         bankName: payload.bankName,
         bankAccountNumber: payload.bankAccountNumber,
         bankAccountName: payload.bankAccountName,
-        notes, 
-        riskFlags, 
-        aiRiskScore: isNameMatch ? 0 : 50, 
+        notes,
+        riskFlags,
+        aiRiskScore: isNameMatch ? 0 : 50,
         resubmissionCount,
-
         status: nextStatus,
-        submittedAt: new Date()
+        submittedAt: new Date(),
       };
 
-      const newRequest = await this.organizerRequestRepository.create(requestData, session);
+      const newRequest = await this.organizerRequestRepository.create(
+        requestData,
+        session
+      );
 
-      await this.userRepository.updateById(userId, { 'kyc.status': 'PENDING' }, session);
+      await this.userRepository.updateById(
+        userId,
+        { "kyc.status": "PENDING" },
+        session
+      );
 
       this._safeEmitSubmittedEvent(newRequest, user);
 
@@ -235,48 +188,66 @@ async submitMyRequest(userId, payload) {
     return await this.transactionManager.runInTransaction(async (session) => {
       const request = await this.organizerRequestRepository.findById(requestId);
 
-      if (!request || String(request.userId._id || request.userId) !== String(userId)) {
-        throw new AppError('Không tìm thấy yêu cầu', 404);
+      if (
+        !request ||
+        String(request.userId._id || request.userId) !== String(userId)
+      ) {
+        throw new AppError("Không tìm thấy yêu cầu", 404);
       }
 
       if (request.status !== ORGANIZER_REQUEST_STATUS.AWAITING_MICRO_DEPOSIT) {
-        throw new AppError('Yêu cầu không ở trạng thái chờ xác nhận giao dịch.', 400);
+        throw new AppError(
+          "Yêu cầu không ở trạng thái chờ xác nhận giao dịch.",
+          400
+        );
       }
 
-      const bankAccount = await this.bankAccountRepository.findById(request.bankAccountId);
-      if (!bankAccount) throw new AppError('Lỗi dữ liệu ngân hàng', 500);
+      const bankAccount = await this.bankAccountRepository.findById(
+        request.bankAccountId
+      );
+      if (!bankAccount) throw new AppError("Lỗi dữ liệu ngân hàng", 500);
 
       if (bankAccount.microDepositAmount !== Number(inputAmount)) {
-        throw new AppError('Số tiền xác nhận không chính xác.', 400);
+        throw new AppError("Số tiền xác nhận không chính xác.", 400);
       }
 
-      const existingAccounts = await this.bankAccountRepository.findByAccountNumber(
-        bankAccount.accountNumber,
-        bankAccount.bankName
-      );
+      const existingAccounts =
+        await this.bankAccountRepository.findByAccountNumber(
+          bankAccount.accountNumber,
+          bankAccount.bankName
+        );
 
       const linkedUserIds = existingAccounts
-        .map(acc => String(acc.userId))
-        .filter(id => id !== String(userId));
+        .map((acc) => String(acc.userId))
+        .filter((id) => id !== String(userId));
 
       const isCrossLinked = linkedUserIds.length > 0;
-      let reviewNote = '';
+      let reviewNote = "";
 
       if (isCrossLinked) {
-        reviewNote = '[SYSTEM FLAG] Số tài khoản này đang được liên kết với user khác trên hệ thống.';
+        reviewNote =
+          "[SYSTEM FLAG] Số tài khoản này đang được liên kết với user khác trên hệ thống.";
       }
 
-      await this.bankAccountRepository.updateById(bankAccount._id, {
-        isVerified: true,
-        isCrossLinked,
-        crossLinkedToUserIds: isCrossLinked ? linkedUserIds : []
-      }, session);
+      await this.bankAccountRepository.updateById(
+        bankAccount._id,
+        {
+          isVerified: true,
+          isCrossLinked,
+          crossLinkedToUserIds: isCrossLinked ? linkedUserIds : [],
+        },
+        session
+      );
 
-      const updatedRequest = await this.organizerRequestRepository.updateById(requestId, {
-        status: ORGANIZER_REQUEST_STATUS.PENDING,
-        notes: isCrossLinked ? reviewNote : request.notes,
-        riskFlags: isCrossLinked ? ['CROSS_LINKED_BANK'] : []
-      }, session);
+      const updatedRequest = await this.organizerRequestRepository.updateById(
+        requestId,
+        {
+          status: ORGANIZER_REQUEST_STATUS.PENDING,
+          notes: isCrossLinked ? reviewNote : request.notes,
+          riskFlags: isCrossLinked ? ["CROSS_LINKED_BANK"] : [],
+        },
+        session
+      );
 
       return updatedRequest;
     });
@@ -294,7 +265,7 @@ async submitMyRequest(userId, payload) {
     const request = await this.organizerRequestRepository.findById(requestId);
 
     if (!request) {
-      throw new AppError('Không tìm thấy hồ sơ Organizer', 404);
+      throw new AppError("Không tìm thấy hồ sơ Organizer", 404);
     }
 
     return request;
@@ -302,7 +273,10 @@ async submitMyRequest(userId, payload) {
 
   async getAdminActionLogs(query = {}) {
     if (!this.adminRepository?.findOrganizerRequestActionLogs) {
-      throw new AppError('Organizer action log repository is not available', 500);
+      throw new AppError(
+        "Organizer action log repository is not available",
+        500
+      );
     }
 
     return await this.adminRepository.findOrganizerRequestActionLogs(query);
@@ -311,57 +285,77 @@ async submitMyRequest(userId, payload) {
   async approveRequest(requestId, adminId, reviewReason) {
     const normalizedReason = this._ensureReason(
       reviewReason,
-      'Lý do duyệt là bắt buộc'
+      "Lý do duyệt là bắt buộc"
     );
 
     return await this.transactionManager.runInTransaction(async (session) => {
       const request = await this.organizerRequestRepository.findById(requestId);
 
       if (!request) {
-        throw new AppError('Không tìm thấy hồ sơ Organizer', 404);
+        throw new AppError("Không tìm thấy hồ sơ Organizer", 404);
       }
 
       if (request.status !== ORGANIZER_REQUEST_STATUS.PENDING) {
-        throw new AppError('Chỉ có thể duyệt hồ sơ đang ở trạng thái chờ PENDING', 400);
+        throw new AppError(
+          "Chỉ có thể duyệt hồ sơ đang ở trạng thái chờ PENDING",
+          400
+        );
       }
 
       const userId = request.userId?._id || request.userId;
       const user = await this.userRepository.findById(userId);
 
       if (!user) {
-        throw new AppError('Người dùng nộp hồ sơ không tồn tại', 404);
+        throw new AppError("Người dùng nộp hồ sơ không tồn tại", 404);
       }
 
       const previousState = {
         status: request.status,
         reviewedBy: request.reviewedBy || null,
         reviewedAt: request.reviewedAt || null,
-        reviewReason: request.reviewReason || '',
+        reviewReason: request.reviewReason || "",
       };
 
-      const updatedRequest = await this.organizerRequestRepository.updateById(requestId, {
-        status: ORGANIZER_REQUEST_STATUS.APPROVED,
-        reviewedBy: adminId,
-        reviewedAt: new Date(),
-        reviewReason: normalizedReason,
-      }, session);
+      const updatedRequest = await this.organizerRequestRepository.updateById(
+        requestId,
+        {
+          status: ORGANIZER_REQUEST_STATUS.APPROVED,
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+          reviewReason: normalizedReason,
+        },
+        session
+      );
 
+      const verifiedAt = new Date();
       const kycExpiryDate = new Date();
       kycExpiryDate.setFullYear(kycExpiryDate.getFullYear() + 1);
 
-      await this.userRepository.updateById(user._id, {
-        role: 'Organizer',
-        kyc: {
-          tier: 1,
-          status: 'VERIFIED',
-          verifiedAt: new Date(),
-          expiresAt: kycExpiryDate
-        }
-      }, session);
+      await this.userRepository.updateById(
+        user._id,
+        {
+          role: "organizer",
+          organization: {
+            name: request.organizationName || "",
+            type: request.organizationType || "",
+            website: request.organizationWebsite || "",
+            location: normalizeLocation(request.locationSnapshot),
+            verifiedAt,
+            requestId: request._id,
+          },
+          kyc: {
+            tier: 2,
+            status: "VERIFIED",
+            verifiedAt,
+            expiresAt: kycExpiryDate,
+          },
+        },
+        session
+      );
 
       await this._logOrganizerAdminAction({
         actorId: adminId,
-        action: 'APPROVE_ORGANIZER_REQUEST',
+        action: "APPROVE_ORGANIZER_REQUEST",
         reason: normalizedReason,
         request: updatedRequest,
         previousState,
@@ -375,7 +369,7 @@ async submitMyRequest(userId, payload) {
 
       await this.emitOrganizerRequestUpdated(updatedRequest, {
         actorId: adminId,
-        message: 'Hồ sơ Organizer của bạn đã được duyệt.',
+        message: "Hồ sơ Organizer của bạn đã được duyệt.",
       });
 
       return updatedRequest;
@@ -385,18 +379,21 @@ async submitMyRequest(userId, payload) {
   async declineRequest(requestId, adminId, reviewReason) {
     const normalizedReason = this._ensureReason(
       reviewReason,
-      'Lý do từ chối là bắt buộc'
+      "Lý do từ chối là bắt buộc"
     );
 
     return await this.transactionManager.runInTransaction(async (session) => {
       const request = await this.organizerRequestRepository.findById(requestId);
 
       if (!request) {
-        throw new AppError('Không tìm thấy hồ sơ Organizer', 404);
+        throw new AppError("Không tìm thấy hồ sơ Organizer", 404);
       }
 
-      if (request.status !== ORGANIZER_REQUEST_STATUS.PENDING && request.status !== ORGANIZER_REQUEST_STATUS.SYSTEM_CHECKING) {
-        throw new AppError('Chỉ có thể từ chối hồ sơ đang chờ duyệt', 400);
+      if (
+        request.status !== ORGANIZER_REQUEST_STATUS.PENDING &&
+        request.status !== ORGANIZER_REQUEST_STATUS.SYSTEM_CHECKING
+      ) {
+        throw new AppError("Chỉ có thể từ chối hồ sơ đang chờ duyệt", 400);
       }
 
       const userId = request.userId?._id || request.userId;
@@ -405,23 +402,31 @@ async submitMyRequest(userId, payload) {
         status: request.status,
         reviewedBy: request.reviewedBy || null,
         reviewedAt: request.reviewedAt || null,
-        reviewReason: request.reviewReason || '',
+        reviewReason: request.reviewReason || "",
       };
 
-      const updatedRequest = await this.organizerRequestRepository.updateById(requestId, {
-        status: ORGANIZER_REQUEST_STATUS.DECLINED,
-        reviewedBy: adminId,
-        reviewedAt: new Date(),
-        reviewReason: normalizedReason,
-      }, session);
+      const updatedRequest = await this.organizerRequestRepository.updateById(
+        requestId,
+        {
+          status: ORGANIZER_REQUEST_STATUS.DECLINED,
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+          reviewReason: normalizedReason,
+        },
+        session
+      );
 
-      await this.userRepository.updateById(userId, {
-        'kyc.status': 'UNVERIFIED'
-      }, session);
+      await this.userRepository.updateById(
+        userId,
+        {
+          "kyc.status": "UNVERIFIED",
+        },
+        session
+      );
 
       await this._logOrganizerAdminAction({
         actorId: adminId,
-        action: 'DECLINE_ORGANIZER_REQUEST',
+        action: "DECLINE_ORGANIZER_REQUEST",
         reason: normalizedReason,
         request: updatedRequest,
         previousState,
@@ -435,7 +440,7 @@ async submitMyRequest(userId, payload) {
 
       await this.emitOrganizerRequestUpdated(updatedRequest, {
         actorId: adminId,
-        message: 'Hồ sơ Organizer của bạn đã bị từ chối.',
+        message: "Hồ sơ Organizer của bạn đã bị từ chối.",
       });
 
       return updatedRequest;
@@ -448,15 +453,18 @@ async submitMyRequest(userId, payload) {
       await this.eventBus.emit(DOMAIN_EVENTS.ORGANIZER_REQUEST_SUBMITTED, {
         actorId: request.userId,
         requestId: request._id,
-        applicantName: user.fullName || request.fullNameSnapshot || '',
-        applicantEmail: user.email || request.emailSnapshot || '',
-        organizationName: request.organizationName || '',
+        applicantName: user.fullName || request.fullNameSnapshot || "",
+        applicantEmail: user.email || request.emailSnapshot || "",
+        organizationName: request.organizationName || "",
         status: request.status,
         actionUrl: `/admin/organizers/${request._id}`,
-        message: 'Có một hồ sơ đăng ký Organizer mới đang xử lý/chờ duyệt.',
+        message: "Có một hồ sơ đăng ký Organizer mới đang xử lý/chờ duyệt.",
       });
     } catch (error) {
-      console.error('[EventBus] Non-critical notification failed:', error.message);
+      console.error(
+        "[EventBus] Non-critical notification failed:",
+        error.message
+      );
     }
   }
 
@@ -465,8 +473,12 @@ async submitMyRequest(userId, payload) {
       if (!request?.userId) return;
       if (!this.eventBus) return;
 
-      const recipientId = typeof request.userId === 'object' ? request.userId._id : request.userId;
-      const reviewerName = typeof request.reviewedBy === 'object' ? request.reviewedBy.fullName || '' : '';
+      const recipientId =
+        typeof request.userId === "object" ? request.userId._id : request.userId;
+      const reviewerName =
+        typeof request.reviewedBy === "object"
+          ? request.reviewedBy.fullName || ""
+          : "";
 
       await this.eventBus.emit(DOMAIN_EVENTS.ORGANIZER_REQUEST_UPDATED, {
         recipientId,
@@ -475,10 +487,13 @@ async submitMyRequest(userId, payload) {
         status: request.status,
         reviewerName,
         message,
-        actionUrl: '/organizer/request',
+        actionUrl: "/organizer/request",
       });
     } catch (error) {
-      console.error('[EventBus] Notification updated failed:', error.message);
+      console.error(
+        "[EventBus] Notification updated failed:",
+        error.message
+      );
     }
   }
 }

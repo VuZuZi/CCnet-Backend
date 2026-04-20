@@ -20,6 +20,7 @@ class UserRepository {
       .select("+password +googleId +avatarPublicId +coverPhotoPublicId")
       .exec();
   }
+<<<<<<< feature/Dungfix18-4
   async getSuggestedUsers(currentUserId, limit = 5) {
     try {
       // 1. Khởi tạo mảng chứa các ID cần loại trừ (không gợi ý)
@@ -115,6 +116,16 @@ class UserRepository {
       console.error("Lỗi aggregation Suggested Organizers:", error);
       throw error;
     }
+=======
+
+  async findSuggestedUsers(excludedIds, limit = 5) {
+    return await User.find({ _id: { $nin: excludedIds } })
+      .select("_id fullName username avatar role")
+      .limit(limit)
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec();
+>>>>>>> dev
   }
 
   async findOrganizers({ search = "" } = {}) {
@@ -127,13 +138,14 @@ class UserRepository {
       query.$or = [
         { fullName: { $regex: search, $options: "i" } },
         { email: { $regex: search, $options: "i" } },
-        { location: { $regex: search, $options: "i" } },
+        { "location.address": { $regex: search, $options: "i" } },
+        { "organization.name": { $regex: search, $options: "i" } },
       ];
     }
 
     return await User.find(query)
       .select(
-        "_id fullName email avatar role location headline about skills phone followersCount followingCount level title createdAt",
+        "_id fullName email avatar role location organization headline about skills phone followersCount followingCount level title createdAt kyc"
       )
       .lean()
       .exec();
@@ -165,7 +177,7 @@ class UserRepository {
     return await User.findByIdAndUpdate(
       userId,
       { $inc: counters },
-      { new: true },
+      { new: true }
     )
       .lean()
       .exec();
@@ -199,16 +211,17 @@ class UserRepository {
   async updateKycStatusBatch(userIds, status) {
     return await User.updateMany(
       { _id: { $in: userIds } },
-      { $set: { "kyc.status": status } },
+      { $set: { "kyc.status": status } }
     ).exec();
   }
+
   async toggleSavePost(userId, postId) {
     const user = await User.findById(userId);
     if (!user) throw new Error("User not found");
 
     const savedPostsArray = user.savedPosts || [];
     const isSaved = savedPostsArray.some(
-      (savedId) => savedId.toString() === postId.toString(),
+      (savedId) => savedId.toString() === postId.toString()
     );
 
     const validPostId = new mongoose.Types.ObjectId(postId);

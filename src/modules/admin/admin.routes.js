@@ -44,10 +44,6 @@ router.patch("/projects/:id/status", (req, res, next) =>
   getController().updateProjectStatus(req, res, next)
 );
 
-router.delete("/projects/:id", (req, res, next) =>
-  getController().deleteProject(req, res, next)
-);
-
 router.get("/reports", (req, res, next) =>
   getController().getReports(req, res, next)
 );
