@@ -20,7 +20,6 @@ class UserRepository {
       .select("+password +googleId +avatarPublicId +coverPhotoPublicId")
       .exec();
   }
-<<<<<<< feature/Dungfix18-4
   async getSuggestedUsers(currentUserId, limit = 5) {
     try {
       // 1. Khởi tạo mảng chứa các ID cần loại trừ (không gợi ý)
@@ -116,16 +115,6 @@ class UserRepository {
       console.error("Lỗi aggregation Suggested Organizers:", error);
       throw error;
     }
-=======
-
-  async findSuggestedUsers(excludedIds, limit = 5) {
-    return await User.find({ _id: { $nin: excludedIds } })
-      .select("_id fullName username avatar role")
-      .limit(limit)
-      .sort({ createdAt: -1 })
-      .lean()
-      .exec();
->>>>>>> dev
   }
 
   async findOrganizers({ search = "" } = {}) {
