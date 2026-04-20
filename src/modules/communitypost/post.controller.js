@@ -12,6 +12,7 @@ class PostController {
       const cursor = req.query.cursor || null;
       const currentUserId = req.user?.userId || null;
       const type = req.query.type || "for-you";
+      const profileUserId = req.query.profileUserId || null;
 
       console.log("🚀 [Controller] Frontend yêu cầu bảng tin loại:", type);
 
@@ -20,6 +21,7 @@ class PostController {
         limit,
         userId: currentUserId,
         type,
+        profileUserId,
       });
 
       return ApiResponse.success(res, result.data, result.paging);
@@ -32,7 +34,10 @@ class PostController {
     try {
       const post = await this.postService.getPostById(req.params.id);
       if (!post) {
-        return ApiResponse.notFound(res, "Post not found");
+        return res.status(404).json({
+          status: "fail",
+          message: "Post not found",
+        });
       }
       return ApiResponse.success(res, post);
     } catch (error) {
@@ -161,10 +166,10 @@ class PostController {
       });
 
       if (!updatedPost) {
-        return ApiResponse.notFound(
-          res,
-          "Post not found or you don't have permission",
-        );
+        return res.status(404).json({
+          status: "fail",
+          message: "Post not found or you don't have permission",
+        });
       }
 
       return ApiResponse.success(res, updatedPost, "Post updated successfully");
