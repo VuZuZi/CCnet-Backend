@@ -100,31 +100,6 @@ class AdminProjectService {
     });
   }
 
-  _emitProjectDeleted({ project, actorId, reason }) {
-    if (!project?.organizerId) return;
-    if (!this.eventBus || typeof this.eventBus.emit !== "function") return;
-
-    const organizerId = extractObjectId(project.organizerId);
-    if (!organizerId) return;
-
-    const { title, message } = buildProjectStatusNotificationMessage(
-      project.title,
-      "DELETED",
-      reason
-    );
-
-    this.eventBus.emit(DOMAIN_EVENTS.PROJECT_STATUS_UPDATED, {
-      recipientIds: [String(organizerId)],
-      actorId,
-      projectId: project._id,
-      projectName: project.title,
-      status: "DELETED",
-      title,
-      message,
-      actionUrl: "/workspace",
-    });
-  }
-
   async _syncProjectConversationOnActive(project, adminId = null) {
     if (!project || String(project.status) !== PROJECT_STATUS.ACTIVE) return null;
     if (!this.conversationService || !this.volunteerRepository) return null;
@@ -176,6 +151,16 @@ class AdminProjectService {
       },
       session
     );
+  }
+
+  async getProjectDetail(projectId) {
+    const project = await this.adminProjectRepository.findProjectById(projectId);
+
+    if (!project) {
+      throw new AppError("Project not found.", 404);
+    }
+
+    return project;
   }
 
   async updateProjectStatus(projectId, targetStatus, feedback, adminId) {
@@ -315,55 +300,6 @@ class AdminProjectService {
 
       return updatedProject;
     });
-  }
-
-  async deleteProject(projectId, reason, adminId = null) {
-    const normalizedReason = this._ensureReason(reason);
-
-    const project =
-      (await this.adminProjectRepository.findProjectById(projectId)) ||
-      (await this.projectRepository.findById(projectId));
-
-    if (!project) {
-      throw new AppError("Project not found.", 404);
-    }
-
-    const deletedProject = await this.adminProjectRepository.deleteProject(projectId);
-    if (!deletedProject) {
-      throw new AppError("Failed to delete project.", 500);
-    }
-
-    await this._logAdminAction({
-      actorId: adminId,
-      actorRole: "admin",
-      targetType: "project",
-      targetId: project._id,
-      action: "DELETE_PROJECT",
-      reason: normalizedReason,
-      previousState: {
-        status: project.status,
-        projectType: project.projectType,
-        title: project.title,
-      },
-      nextState: {
-        status: "DELETED",
-        projectType: project.projectType,
-        title: project.title,
-      },
-      metadata: {
-        projectTitle: project.title,
-        projectType: project.projectType,
-        organizerId: extractObjectId(project.organizerId),
-      },
-    });
-
-    this._emitProjectDeleted({
-      project,
-      actorId: adminId,
-      reason: normalizedReason,
-    });
-
-    return deletedProject;
   }
 }
 

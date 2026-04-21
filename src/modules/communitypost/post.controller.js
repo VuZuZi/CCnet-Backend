@@ -12,6 +12,7 @@ class PostController {
       const cursor = req.query.cursor || null;
       const currentUserId = req.user?.userId || null;
       const type = req.query.type || "for-you";
+      const profileUserId = req.query.profileUserId || null;
 
       console.log("🚀 [Controller] Frontend yêu cầu bảng tin loại:", type);
 
@@ -20,6 +21,7 @@ class PostController {
         limit,
         userId: currentUserId,
         type,
+        profileUserId,
       });
 
       return ApiResponse.success(res, result.data, result.paging);
@@ -30,9 +32,13 @@ class PostController {
 
   getPostById = async (req, res, next) => {
     try {
-      const post = await this.postService.getPostById(req.params.id);
+      const currentUserId = req.user?.userId || null;
+      const post = await this.postService.getPostById(req.params.id, currentUserId);
       if (!post) {
-        return ApiResponse.notFound(res, "Post not found");
+        return res.status(404).json({
+          status: "fail",
+          message: "Post not found",
+        });
       }
       return ApiResponse.success(res, post);
     } catch (error) {
@@ -114,16 +120,17 @@ class PostController {
     }
   };
 
-  // 🚨 HÀM GET COMMENTS MỚI NÈ: Nằm ngay ngắn trong class
   getComments = async (req, res, next) => {
     try {
       const page = parseInt(req.query.page, 10) || 1;
-      const sort = req.query.sort || "relevant"; // Hứng biến sort
+      const sort = req.query.sort || "relevant";
+      const currentUserId = req.user?.userId || null;
 
       const comments = await this.postService.getComments({
         postId: req.params.id,
         page,
         sort,
+        viewerId: currentUserId,
       });
       return ApiResponse.success(res, comments);
     } catch (error) {
@@ -161,10 +168,10 @@ class PostController {
       });
 
       if (!updatedPost) {
-        return ApiResponse.notFound(
-          res,
-          "Post not found or you don't have permission",
-        );
+        return res.status(404).json({
+          status: "fail",
+          message: "Post not found or you don't have permission",
+        });
       }
 
       return ApiResponse.success(res, updatedPost, "Post updated successfully");
@@ -174,8 +181,6 @@ class PostController {
   };
   toggleSavePost = async (req, res, next) => {
     try {
-      // req.params.id là ID bài viết
-      // req.user.userId là ID của người dùng đang thực hiện hành động
       const result = await this.postService.toggleSavePost(
         req.params.id,
         req.user.userId,

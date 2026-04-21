@@ -21,6 +21,10 @@ class AdminService {
     return this.adminDashboardService.getUsers(...args);
   }
 
+  getUserDetail(...args) {
+    return this.adminUserService.getUserDetail(...args);
+  }
+
   getActionLogs(...args) {
     return this.adminDashboardService.getActionLogs(...args);
   }
@@ -31,6 +35,10 @@ class AdminService {
 
   getProjects(...args) {
     return this.adminDashboardService.getProjects(...args);
+  }
+
+  getProjectDetail(...args) {
+    return this.adminProjectService.getProjectDetail(...args);
   }
 
   getReports(...args) {
@@ -47,10 +55,6 @@ class AdminService {
 
   updateProjectStatus(...args) {
     return this.adminProjectService.updateProjectStatus(...args);
-  }
-
-  deleteProject(...args) {
-    return this.adminProjectService.deleteProject(...args);
   }
 
   resolveReportWithActions(...args) {

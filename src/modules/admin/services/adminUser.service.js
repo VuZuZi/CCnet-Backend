@@ -44,6 +44,16 @@ class AdminUserService {
     });
   }
 
+  async getUserDetail(userId) {
+    const user = await this.adminUserRepository.findUserById(userId);
+
+    if (!user) {
+      throw new AppError("User not found.", 404);
+    }
+
+    return user;
+  }
+
   async toggleUserBan(userId, reason, actorId = null, actorRole = "admin") {
     const normalizedReason = this._ensureReason(reason);
 

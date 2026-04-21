@@ -3,6 +3,32 @@ import { toUserResponse } from "./user.dto.js";
 import bcrypt from "bcryptjs";
 import sharp from "sharp";
 
+const normalizeLocation = (location) => {
+  if (!location || typeof location !== "object") return null;
+
+  const address =
+    typeof location.address === "string" ? location.address.trim() : "";
+  const coordinates = Array.isArray(location.coordinates)
+    ? location.coordinates.map((value) => Number(value))
+    : [];
+
+  if (
+    location.type !== "Point" ||
+    !address ||
+    coordinates.length !== 2 ||
+    !Number.isFinite(coordinates[0]) ||
+    !Number.isFinite(coordinates[1])
+  ) {
+    return null;
+  }
+
+  return {
+    type: "Point",
+    address,
+    coordinates,
+  };
+};
+
 class UserService {
   constructor({
     userRepository,
@@ -45,10 +71,13 @@ class UserService {
   }
 
   async updateProfile(userId, updateData) {
-    const updatedUser = await this.userRepository.updateById(
-      userId,
-      updateData,
-    );
+    const payload = { ...updateData };
+
+    if ("location" in payload) {
+      payload.location = normalizeLocation(payload.location);
+    }
+
+    const updatedUser = await this.userRepository.updateById(userId, payload);
     if (!updatedUser) throw new AppError("User not found", 404);
 
     return toUserResponse(updatedUser);
@@ -57,11 +86,12 @@ class UserService {
   async changePassword(id, currentPassword, newPassword) {
     const user = await this.userRepository.findByIdWithSecurityData(id);
     if (!user) throw new AppError("User not found", 404);
-    if (!user.password)
+    if (!user.password) {
       throw new AppError(
         "This account is linked to Google. Password change not allowed.",
-        400,
+        400
       );
+    }
 
     const isMatch = await bcrypt.compare(currentPassword, user.password);
     if (!isMatch) throw new AppError("Current password is incorrect", 400);
@@ -75,7 +105,6 @@ class UserService {
     return toUserResponse(updatedUser);
   }
 
-  // Dùng cho forgot password flow — không cần current password
   async resetPasswordDirect(userId, newPassword) {
     const user = await this.userRepository.findById(userId);
     if (!user) throw new AppError("User not found", 404);
@@ -110,7 +139,7 @@ class UserService {
     try {
       uploadResult = await this.cloudinaryProvider.uploadImage(
         sourceData,
-        `users/${userId}/avatar`,
+        `users/${userId}/avatar`
       );
 
       newMedia = await this.mediaRepository.create({
@@ -133,8 +162,8 @@ class UserService {
       if (oldUser.avatarPublicId) {
         this._cleanupOldAvatar(oldUser.avatarPublicId).catch((err) =>
           console.error(
-            `[Background Task] Failed to cleanup old avatar: ${err.message}`,
-          ),
+            `[Background Task] Failed to cleanup old avatar: ${err.message}`
+          )
         );
       }
 
@@ -160,7 +189,7 @@ class UserService {
 
       throw new AppError(
         "Failed to update avatar due to system error. Rolled back.",
-        500,
+        500
       );
     }
   }
@@ -174,17 +203,15 @@ class UserService {
     await this.cloudinaryProvider.deleteImage(publicId);
     await this.mediaRepository.deleteByPublicId(publicId);
   }
-  async getSuggestedUsers(currentUserId, limit = 5) {
-    const followingIds =
-      await this.followRepository.findFollowingIds(currentUserId);
-    const excludedIds = [...followingIds, currentUserId];
 
-    return await this.userRepository.findSuggestedUsers(excludedIds, limit);
+  async getSuggestedUsers(currentUserId, limit) {
+    return await this.userRepository.getSuggestedUsers(currentUserId, limit);
   }
 
   async changeCoverPhoto(userId, file) {
-    if (!file)
+    if (!file) {
       throw new AppError("Please upload an image for cover photo", 400);
+    }
 
     const sourceData = file.path || file.buffer;
 
@@ -206,7 +233,7 @@ class UserService {
     try {
       uploadResult = await this.cloudinaryProvider.uploadImage(
         sourceData,
-        `users/${userId}/cover`,
+        `users/${userId}/cover`
       );
 
       newMedia = await this.mediaRepository.create({
@@ -229,8 +256,8 @@ class UserService {
       if (oldUser.coverPhotoPublicId) {
         this._cleanupOldMedia(oldUser.coverPhotoPublicId).catch((err) =>
           console.error(
-            `[Background Task] Failed to cleanup old cover photo: ${err.message}`,
-          ),
+            `[Background Task] Failed to cleanup old cover photo: ${err.message}`
+          )
         );
       }
 
@@ -254,7 +281,7 @@ class UserService {
 
       throw new AppError(
         "Failed to update cover photo. System error, rolled back.",
-        500,
+        500
       );
     }
   }

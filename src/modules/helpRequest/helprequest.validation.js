@@ -156,3 +156,16 @@ export const getNearbyRequestsSchema = z.object({
     limit: z.string().regex(/^\d+$/).optional().default('10'),
   }),
 });
+
+export const getMapRequestsSchema = z.object({
+  query: z.object({
+    north: z.string().regex(/^-?\d+(\.\d+)?$/, 'Invalid north').optional(),
+    south: z.string().regex(/^-?\d+(\.\d+)?$/, 'Invalid south').optional(),
+    east: z.string().regex(/^-?\d+(\.\d+)?$/, 'Invalid east').optional(),
+    west: z.string().regex(/^-?\d+(\.\d+)?$/, 'Invalid west').optional(),
+    zoom: z.string().regex(/^\d+(\.\d+)?$/, 'Invalid zoom').optional().default('6'),
+    category: z.enum(CATEGORIES).optional(),
+    urgencyLevel: z.enum(URGENCY_LEVELS).optional(),
+    search: z.string().max(100).optional(),
+  }),
+});

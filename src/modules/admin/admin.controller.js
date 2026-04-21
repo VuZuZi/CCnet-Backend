@@ -30,6 +30,15 @@ class AdminController {
     }
   };
 
+  getUserDetail = async (req, res, next) => {
+    try {
+      const user = await this.adminService.getUserDetail(req.params.id);
+      res.json({ status: "success", data: user });
+    } catch (e) {
+      next(e);
+    }
+  };
+
   banUser = async (req, res, next) => {
     try {
       const { reason } = req.body || {};
@@ -139,6 +148,15 @@ class AdminController {
     }
   };
 
+  getProjectDetail = async (req, res, next) => {
+    try {
+      const project = await this.adminService.getProjectDetail(req.params.id);
+      res.json({ status: "success", data: project });
+    } catch (e) {
+      next(e);
+    }
+  };
+
   updateProjectStatus = async (req, res, next) => {
     try {
       const { status, feedback, reason } = req.body || {};
@@ -151,22 +169,6 @@ class AdminController {
       );
 
       res.json({ status: "success", data: updated });
-    } catch (e) {
-      next(e);
-    }
-  };
-
-  deleteProject = async (req, res, next) => {
-    try {
-      const { reason } = req.body || {};
-
-      await this.adminService.deleteProject(
-        req.params.id,
-        reason,
-        req.user?.userId || req.user?._id || null
-      );
-
-      res.status(204).send();
     } catch (e) {
       next(e);
     }

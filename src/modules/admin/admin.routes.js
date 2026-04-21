@@ -20,6 +20,10 @@ router.get("/users", (req, res, next) =>
   getController().getUsers(req, res, next)
 );
 
+router.get("/users/:id", (req, res, next) =>
+  getController().getUserDetail(req, res, next)
+);
+
 router.patch("/users/:id/ban", (req, res, next) =>
   getController().banUser(req, res, next)
 );
@@ -40,12 +44,12 @@ router.get("/projects", (req, res, next) =>
   getController().getProjects(req, res, next)
 );
 
-router.patch("/projects/:id/status", (req, res, next) =>
-  getController().updateProjectStatus(req, res, next)
+router.get("/projects/:id", (req, res, next) =>
+  getController().getProjectDetail(req, res, next)
 );
 
-router.delete("/projects/:id", (req, res, next) =>
-  getController().deleteProject(req, res, next)
+router.patch("/projects/:id/status", (req, res, next) =>
+  getController().updateProjectStatus(req, res, next)
 );
 
 router.get("/reports", (req, res, next) =>

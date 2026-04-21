@@ -11,13 +11,11 @@ class PostService {
     redis,
     eventBus,
   }) {
-    Object.assign(this, {
-      postRepository,
-      mediaService,
-      userRepository,
-      redis,
-      eventBus,
-    });
+    this.postRepository = postRepository;
+    this.mediaService = mediaService;
+    this.userRepository = userRepository;
+    this.redis = redis;
+    this.eventBus = eventBus;
     this.TTL = { FEED: 60, POST: 300 };
   }
 
@@ -59,6 +57,25 @@ class PostService {
     }
 
     return String(post.author);
+  }
+
+  async _canViewerSeePost(post, viewerId) {
+    if (!post) return false;
+
+    if (post.privacy !== "private") return true;
+
+    const ownerId = this._resolvePostOwnerId(post);
+    if (!ownerId) return false;
+    if (!viewerId) return false;
+
+    if (String(ownerId) === String(viewerId)) return true;
+
+    const followsOwner = await Follow.exists({
+      followerId: viewerId,
+      followingId: ownerId,
+    });
+
+    return Boolean(followsOwner);
   }
 
   async _invalidateCache(postId) {
@@ -144,6 +161,7 @@ class PostService {
       content: content?.trim() ?? post.content,
       hashtags:
         content !== undefined ? this._extractHashtags(content) : post.hashtags,
+      isEdited: true,
     };
 
     const updated = await this.postRepository.updatePost(
@@ -319,30 +337,71 @@ class PostService {
     return result;
   }
 
-  async getNewsFeed({ cursor, limit = 10, userId, type }) {
+  async _getFollowingIds(userId) {
+    if (!userId) return [];
+    const followingDocs = await Follow.aggregate([
+      { $match: { followerId: userId } },
+      { $project: { followingId: 1 } },
+    ]);
+    return followingDocs.map((d) => d.followingId);
+  }
+
+  async getNewsFeed({ cursor, limit = 10, userId, type, profileUserId = null }) {
     let filter = { status: "active" };
-    let isPublicFeed = type !== "following";
+    const isProfileFeed = type === "profile";
+    let useCache = false;
 
     if (type === "following") {
       if (!userId) throw new AppError("Vui lòng đăng nhập", 401);
 
-      const followingDocs = await Follow.find({ followerId: userId })
-        .select("followingId")
-        .lean();
-
-      const followingIds = followingDocs.map((d) => d.followingId);
+      const followingIds = await this._getFollowingIds(userId);
 
       if (!followingIds.length) {
         return { data: [], paging: { nextCursor: null, hasMore: false } };
       }
 
       filter["author._id"] = { $in: followingIds };
+    } else if (isProfileFeed) {
+      const profileOwnerId = profileUserId || userId;
+      if (!profileOwnerId) {
+        return { data: [], paging: { nextCursor: null, hasMore: false } };
+      }
+
+      filter["author._id"] = profileOwnerId;
+
+      const isOwnerView = userId && String(userId) === String(profileOwnerId);
+
+      if (!isOwnerView) {
+        if (userId) {
+          const isFollowing = await Follow.exists({
+            followerId: userId,
+            followingId: profileOwnerId,
+          });
+
+          if (!isFollowing) {
+            filter.privacy = "public";
+          }
+        } else {
+          filter.privacy = "public";
+        }
+      }
     } else {
-      filter.privacy = "public";
+      if (userId) {
+        const followingIds = await this._getFollowingIds(userId);
+        const allowedPrivateAuthors = [userId, ...followingIds];
+
+        filter.$or = [
+          { privacy: "public" },
+          { privacy: "private", "author._id": { $in: allowedPrivateAuthors } },
+        ];
+      } else {
+        filter.privacy = "public";
+        useCache = true;
+      }
     }
 
-    const cacheKey = isPublicFeed ? this._getFeedKey(cursor, limit) : null;
-    let posts = isPublicFeed ? await this._getCachedData(cacheKey) : null;
+    const cacheKey = useCache ? this._getFeedKey(cursor, limit) : null;
+    let posts = useCache ? await this._getCachedData(cacheKey) : null;
 
     if (!posts) {
       posts = await this.postRepository.getPosts({
@@ -351,7 +410,7 @@ class PostService {
         lastId: cursor,
       });
 
-      if (isPublicFeed && posts.length) {
+      if (useCache && posts.length) {
         this.redis
           .set(cacheKey, JSON.stringify(posts), "EX", this.TTL.FEED)
           .catch(() => null);
@@ -418,7 +477,7 @@ class PostService {
     } while (cursor !== "0");
   }
 
-  async getPostById(id) {
+  async getPostById(id, viewerId = null) {
     const cacheKey = `post:${id}`;
     let post = await this._getCachedData(cacheKey);
 
@@ -431,10 +490,25 @@ class PostService {
       }
     }
 
+    if (!post) return null;
+
+    const canView = await this._canViewerSeePost(post, viewerId);
+    if (!canView) return null;
+
     return post;
   }
 
-  async getComments({ postId, page = 1, sort = "relevant" }) {
+  async getComments({ postId, page = 1, sort = "relevant", viewerId = null }) {
+    const post = await this.postRepository.findById(postId);
+    if (!post) {
+      throw new AppError("Post not found", 404);
+    }
+
+    const canView = await this._canViewerSeePost(post, viewerId);
+    if (!canView) {
+      throw new AppError("Bạn không có quyền xem bài viết này", 403);
+    }
+
     const limit = 10;
     const skip = (page - 1) * limit;
 
@@ -460,11 +534,11 @@ class PostService {
     this._invalidateCache(postId);
     return { message: "Deleted" };
   }
+
   async toggleSavePost(postId, userId) {
     const targetPost = await this.postRepository.findById(postId);
     if (!targetPost) throw new AppError("Post not found", 404);
 
-    // Gọi xuống hàm Repository ta vừa tạo ở Bước 2
     const result = await this.userRepository.toggleSavePost(userId, postId);
     return result;
   }
@@ -472,7 +546,6 @@ class PostService {
   async getSavedPosts({ cursor, limit = 10, userId }) {
     if (!userId) throw new AppError("Vui lòng đăng nhập", 401);
 
-    // 1. Lấy mảng ID bài viết user đã lưu
     const user = await this.userRepository.findById(userId);
     const savedPostIds = user?.savedPosts || [];
 
@@ -480,23 +553,29 @@ class PostService {
       return { data: [], paging: { nextCursor: null, hasMore: false } };
     }
 
-    // 2. Kéo dữ liệu thực tế của các bài viết đó từ Database
     const filter = {
       _id: { $in: savedPostIds },
       status: "active",
       isDeleted: false,
     };
-    const posts = await this.postRepository.getPosts({
+
+    let posts = await this.postRepository.getPosts({
       filter,
       limit,
       lastId: cursor,
     });
 
+    if (posts?.length) {
+      const visibilityChecks = await Promise.all(
+        posts.map((post) => this._canViewerSeePost(post, userId)),
+      );
+      posts = posts.filter((_, index) => visibilityChecks[index]);
+    }
+
     if (!posts?.length) {
       return { data: [], paging: { nextCursor: null, hasMore: false } };
     }
 
-    // 3. Gắn thêm thông tin Like/Dislike và cờ isSaved = true
     let data = await this._attachUserReactions(posts, userId);
     data = data.map((p) => ({ ...p, isSaved: true }));
     data = await this._attachUserSavedState(data, userId);
@@ -509,15 +588,14 @@ class PostService {
       },
     };
   }
+
   async _attachUserSavedState(posts, userId) {
     if (!userId) return posts.map((p) => ({ ...p, isSaved: false }));
     const user = await this.userRepository.findById(userId);
 
-    // Chuyển toàn bộ túi ID sang dạng chuỗi an toàn
     const savedIdsArray = (user?.savedPosts || []).map((id) => id.toString());
 
     return posts.map((p) => {
-      // Đề phòng trường hợp object có id thay vì _id
       const postIdStr = p._id
         ? p._id.toString()
         : p.id

@@ -7,7 +7,8 @@ const ADMIN_VISIBLE_PROJECT_STATUS_FILTER = {
   $ne: PROJECT_STATUS.DRAFT,
 };
 
-const ADMIN_PROJECT_POPULATE = "fullName email avatar isVerified role status";
+const ADMIN_PROJECT_POPULATE =
+  "fullName email avatar phone isVerified role status";
 
 class AdminProjectRepository {
   async findProjects({
@@ -83,10 +84,7 @@ class AdminProjectRepository {
     return await Project.find({
       status: { $in: ["PENDING_APPROVAL", "REVISION_REQUESTED"] },
     })
-      .populate(
-        "organizerId",
-        "fullName email avatar isVerified kyc coolingPeriodEnd"
-      )
+      .populate("organizerId", ADMIN_PROJECT_POPULATE)
       .sort({ updatedAt: 1 })
       .skip(skip)
       .limit(limit)
@@ -96,16 +94,14 @@ class AdminProjectRepository {
 
   async findProjectById(id) {
     return await Project.findById(id)
-      .populate(
-        "organizerId",
-        "fullName email avatar isVerified kyc coolingPeriodEnd"
-      )
+      .populate("organizerId", ADMIN_PROJECT_POPULATE)
+      .populate({
+        path: "documents",
+        select:
+          "url publicId originalName mimetype size width height createdAt updatedAt",
+      })
       .lean()
       .exec();
-  }
-
-  async deleteProject(id) {
-    return await Project.findByIdAndDelete(id);
   }
 }
 
