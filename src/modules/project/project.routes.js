@@ -57,7 +57,7 @@ const execute = (action) => async (req, res, next) => {
   }
 };
 
-const organizerOnly = [authenticate, authorize("Organizer")];
+const organizerOnly = [authenticate, authorize("organizer")];
 
 const organizerKycTier1 = [
   ...organizerOnly,
