@@ -5,7 +5,7 @@
   "description": "",
   "main": "src/server.js",
   "scripts": {
-    "dev": "concurrently -n API,SOCKET,NGROK -c blue,magenta,green \"nodemon src/server.js\" \"nodemon src/socket/socketServer.js\" \"ngrok http 5000\"",
+    "dev": "concurrently -n API,SOCKET,SMEE -c blue,magenta,yellow \"nodemon src/server.js\" \"nodemon src/socket/socketServer.js\" \"node scripts/webhook-proxy.js\"",
     "start": "node src/server.js"
   },
   "repository": {
@@ -50,6 +50,8 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
-    "nodemon": "^3.0.2"
+    "ngrok": "^5.0.0-beta.2",
+    "nodemon": "^3.0.2",
+    "smee-client": "^5.0.0"
   }
 }

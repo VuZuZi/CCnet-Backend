@@ -120,9 +120,9 @@ class ProjectService {
       Number(
         Array.isArray(project?.volunteerRoles)
           ? project.volunteerRoles.reduce(
-              (sum, role) => sum + Number(role?.quantity || 0),
-              0,
-            )
+            (sum, role) => sum + Number(role?.quantity || 0),
+            0,
+          )
           : 0,
       );
 
@@ -159,7 +159,7 @@ class ProjectService {
       String(project?.projectType || "").toUpperCase() === "FUNDED";
     const needsVolunteers = Boolean(
       project?.needsVolunteers ||
-        String(project?.projectType || "").toUpperCase() === "VOLUNTEER_ONLY",
+      String(project?.projectType || "").toUpperCase() === "VOLUNTEER_ONLY",
     );
 
     let score = 0;
@@ -632,6 +632,7 @@ class ProjectService {
     }
   }
 
+
   async _processMediaPayload(mediaArray, organizerId, context) {
     const validMediaIds = new Set();
     const newMediaToInsert = [];
@@ -639,26 +640,15 @@ class ProjectService {
     const idsToCheck = [];
     const newItemsToCheck = [];
 
-    for (const item of newItemsToCheck) {
-      const existing = existingPublicIdMap.get(item.publicId);
+    if (Array.isArray(mediaArray)) {
+      for (const item of mediaArray) {
+        if (!item) continue;
 
-      if (existing) {
-        if (existing.uploadedBy.toString() === organizerId.toString()) {
-          validMediaIds.add(existing._id.toString());
+        if (item._id) {
+          idsToCheck.push(item._id);
+        } else if (item.url && item.publicId) {
+          newItemsToCheck.push(item);
         }
-      } else {
-        newMediaToInsert.push({
-          originalName: item.originalName || "unknown_file",
-          url: item.url,
-          publicId: item.publicId,
-          mimetype: item.mimetype || (item.mediaType === "video" ? "video/mp4" : "image/jpeg"),
-          size: item.size || 0,
-          width: item.width || 0,
-          height: item.height || 0,
-          uploadedBy: organizerId,
-          context,
-          captureMetadata: { source: 'NONE' }
-        });
       }
     }
 
@@ -672,8 +662,7 @@ class ProjectService {
 
     if (newItemsToCheck.length > 0) {
       const publicIds = newItemsToCheck.map((m) => m.publicId);
-      const existingMedias =
-        await this.mediaRepository.findManyByPublicIds(publicIds);
+      const existingMedias = await this.mediaRepository.findManyByPublicIds(publicIds);
       const existingPublicIdMap = new Map(
         existingMedias.map((m) => [m.publicId, m]),
       );
@@ -690,12 +679,16 @@ class ProjectService {
             originalName: item.originalName || "unknown_file",
             url: item.url,
             publicId: item.publicId,
-            mimetype:
-              item.mimetype ||
-              (item.mediaType === "video" ? "video/mp4" : "image/jpeg"),
+            mimetype: item.mimetype || (item.mediaType === "video" ? "video/mp4" : "image/webp"),
             size: item.size || 0,
             width: item.width || 0,
             height: item.height || 0,
+            captureMetadata: {
+              source: 'NONE',
+              lat: null,
+              lng: null,
+              location: null
+            },
             uploadedBy: organizerId,
             context,
           });
@@ -1576,7 +1569,7 @@ class ProjectService {
             const isChanged =
               finalUpdateData.coverMedia &&
               finalUpdateData.coverMedia.publicId !==
-                existingProject.coverMedia.publicId;
+              existingProject.coverMedia.publicId;
             const isDeleted =
               finalUpdateData.coverMedia &&
               finalUpdateData.coverMedia.url === null;
