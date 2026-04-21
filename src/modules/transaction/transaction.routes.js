@@ -6,6 +6,7 @@ import {
     approveClaimSchema,
     donateSchema,
     getDonationsQuerySchema,
+    getProjectDisbursementsQuerySchema,
     getSuspenseQuerySchema,
     projectIdParamSchema,
     requestRefundSchema,
@@ -120,6 +121,13 @@ router.patch(
     authenticate,
     validateParams(transactionIdParamSchema),
     execute("confirmPaymentIntent")
+);
+
+router.get(
+    "/project/:projectId/disbursements",
+    validateParams(projectIdParamSchema),
+    validateQuery(getProjectDisbursementsQuerySchema),
+    execute("getProjectDisbursements")
 );
 
 export default router;

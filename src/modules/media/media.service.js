@@ -12,28 +12,31 @@ class MediaService {
   }
 
   async _extractMetadata(buffer, clientLocation = null) {
-    let metadata = { lat: null, lng: null, capturedAt: null, source: 'NONE' };
+    let metadata = { lat: null, lng: null, location: undefined, capturedAt: null, source: 'NONE' };
 
     try {
       const exifData = await exifr.parse(buffer, { gps: true, exif: true });
       if (exifData && exifData.latitude && exifData.longitude) {
         metadata.lat = exifData.latitude;
         metadata.lng = exifData.longitude;
+        metadata.location = { 
+            type: 'Point', 
+            coordinates: [exifData.longitude, exifData.latitude] 
+        };
         metadata.capturedAt = exifData.DateTimeOriginal || exifData.CreateDate || new Date();
         metadata.source = 'EXIF';
+        return metadata;
       }
     } catch (error) {
       console.warn('[CTO Media Warning]: Không thể parse EXIF, file không có metadata hoặc bị lỗi.', error.message);
     }
 
-    if (metadata.source === 'NONE' && clientLocation && clientLocation.lat && clientLocation.lng) {
+    if (clientLocation && clientLocation.lat && clientLocation.lng) {
       metadata.lat = Number(clientLocation.lat);
       metadata.lng = Number(clientLocation.lng);
+      metadata.location = { type: 'Point', coordinates: [metadata.lng, metadata.lat] };
       metadata.capturedAt = new Date();
       metadata.source = 'CLIENT';
-    }
-    else if (metadata.source === 'EXIF' && clientLocation && clientLocation.lat) {
-      metadata.source = 'MIXED';
     }
 
     return metadata;

@@ -18,7 +18,7 @@ class MediaRepository {
   async deleteById(id, session = null) {
     return await Media.findByIdAndDelete(id, { session }).lean().exec();
   }
-  
+
   async deleteByPublicId(publicId, session = null) {
     return await Media.findOneAndDelete({ publicId }, { session }).lean().exec();
   }
@@ -37,17 +37,34 @@ class MediaRepository {
 
   async findManyByIdsAndOwner(ids, userId, session = null) {
     if (!ids || ids.length === 0) return [];
-    return await Media.find({ 
-      _id: { $in: ids }, 
-      uploadedBy: userId 
+    return await Media.find({
+      _id: { $in: ids },
+      uploadedBy: userId
     }).session(session).lean().exec();
   }
 
   async findManyByPublicIds(publicIds, session = null) {
     if (!publicIds || publicIds.length === 0) return [];
-    return await Media.find({ 
-      publicId: { $in: publicIds } 
+    return await Media.find({
+      publicId: { $in: publicIds }
     }).session(session).lean().exec();
+  }
+
+  async countGeoVerifiedMedias(mediaIds, organizerId, lng, lat, radiusInMeters = 500, session = null) {
+    if (!mediaIds || mediaIds.length === 0) return 0;
+    const radiusRadian = radiusInMeters / 6378137;
+
+    const query = {
+      _id: { $in: mediaIds },
+      uploadedBy: organizerId,
+      'captureMetadata.location': {
+        $geoWithin: {
+          $centerSphere: [[lng, lat], radiusRadian]
+        }
+      }
+    };
+
+    return await Media.countDocuments(query).session(session).exec();
   }
 }
 

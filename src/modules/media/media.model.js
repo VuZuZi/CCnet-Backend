@@ -4,6 +4,15 @@ const captureMetadataSchema = new mongoose.Schema(
   {
     lat: { type: Number, default: null },
     lng: { type: Number, default: null },
+    location: {
+      type: {
+        type: String,
+        enum: ['Point']
+      },
+      coordinates: {
+        type: [Number]
+      }
+    },
     capturedAt: { type: Date, default: null },
     source: {
       type: String,
@@ -26,12 +35,13 @@ const mediaSchema = new mongoose.Schema(
     blurHash: { type: String, default: null },
     captureMetadata: {
       type: captureMetadataSchema,
-      default: () => ({})
+      default: () => ({ source: 'NONE' })
     },
     uploadedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true
+      required: true,
+      index: true
     },
     context: {
       type: String,
@@ -41,6 +51,8 @@ const mediaSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+mediaSchema.index({ 'captureMetadata.location': '2dsphere' });
 
 const Media = mongoose.model('Media', mediaSchema);
 export default Media;

@@ -99,7 +99,7 @@ class TransactionController {
 
     approveSuspenseClaim = async (req, res, next) => {
         try {
-            const payload = { ...req.body, suspenseId: req.params.id }; 
+            const payload = { ...req.body, suspenseId: req.params.id };
             const result = await this.suspenseService.approveClaimRequest(req.user.userId, payload);
             return ApiResponse.success(res, result, "Phê duyệt tra soát thành công");
         } catch (error) { next(error); }
@@ -109,10 +109,20 @@ class TransactionController {
         try {
             const userId = req.user.userId;
             const transactionId = req.params.id;
-            
+
             const currentTx = await this.transactionService.getTransactionStatus(userId, transactionId);
 
             await this.transactionSseService.streamPaymentStatus(transactionId, currentTx, res, req);
+        } catch (error) {
+            next(error);
+        }
+    };
+
+    getProjectDisbursements = async (req, res, next) => {
+        try {
+            const { projectId } = req.params;
+            const result = await this.transactionService.getPublicProjectDisbursements(projectId, req.query);
+            return ApiResponse.success(res, result, "Lấy lịch sử giải ngân công khai thành công");
         } catch (error) {
             next(error);
         }

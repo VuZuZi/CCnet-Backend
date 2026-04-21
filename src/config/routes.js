@@ -12,10 +12,13 @@ import helpRequestRoutes from "../modules/helpRequest/helpRequest.routes.js";
 import transactionRoutes from "../modules/transaction/transaction.routes.js";
 import bankAccountRoutes from "../modules/bankAccount/bankAccount.routes.js";
 import walletRoutes from "../modules/wallet/wallet.routes.js";
+import adminFinanceRoutes from '../modules/admin/admin-finance.routes.js';
 import {
   organizerRequestUserRouter,
   organizerRequestAdminRouter,
 } from "../modules/organizerRequest/organizerRequest.routes.js";
+
+import disbursementRoutes from "../modules/disbursement/disbursement.routes.js";
 
 const API_PREFIX = "/api/v1";
 
@@ -38,19 +41,12 @@ export const configureRoutes = (app, { notificationModule }) => {
     { path: "/transactions", handler: transactionRoutes },
     { path: "/bank-accounts", handler: bankAccountRoutes },
     { path: "/wallets", handler: walletRoutes },
+    { path: "/admin-finance", handler: adminFinanceRoutes },
+    { path: "/disbursement", handler: disbursementRoutes },
   ];
 
   routes.forEach(({ path, handler }) => {
     app.use(`${API_PREFIX}${path}`, handler);
     console.log(`Route registered: ${API_PREFIX}${path}`);
   });
-
-  app.use((req, res) => {
-    res.status(404).json({
-      success: false,
-      message: `Route ${req.method} ${req.path} not found`,
-    });
-  });
 };
-
-export default configureRoutes;

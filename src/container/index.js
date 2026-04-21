@@ -2,16 +2,18 @@ import { createContainer, asClass, asValue, Lifetime } from "awilix";
 import { config } from "../config/index.js";
 import { eventBus } from "../config/notification.js";
 
-// Đã gộp tất cả import từ cả 2 nhánh và chuẩn hóa dùng nháy kép
 import RedisClient from "../core/RedisClient.js";
 import MailProvider from "../core/MailProvider.js";
 import CloudinaryProvider from "../core/CloudinaryProvider.js";
 import JobQueue from "../core/JobQueue.js";
 import TransactionManager from "../core/TransactionManager.js";
 import SepayProvider from "../core/payment/sepay-provider.js";
-import PayosProvider from "../core/payment/PayosProvider.js";
+
 import TransactionSSEService from "../modules/transaction/services/transaction-sse.service.js";
+import DisbursementSSEService from "../modules/disbursement/services/disbursement-sse.service.js";
+
 import { registerTransactionListeners } from "../modules/transaction/transaction.listener.js";
+import { registerDisbursementListeners } from "../modules/disbursement/disbursement.listener.js";
 
 let container;
 
@@ -28,11 +30,13 @@ export const initializeContainer = () => {
     transactionManager: asClass(TransactionManager).singleton(),
     paymentProvider: asClass(SepayProvider).singleton(),
     transactionSseService: asClass(TransactionSSEService).singleton(),
+    disbursementSseService: asClass(DisbursementSSEService).singleton(),
   });
 
   container.loadModules(
     [
       "!../modules/transaction/services/transaction-sse.service.js",
+      "!../modules/disbursement/services/disbursement-sse.service.js",
       "!../modules/notification/services/notification.service.js",
       "!../modules/notification/services/notificationSSE.service.js",
       "!../modules/notification/services/notificationBroadcast.service.js",
@@ -40,6 +44,7 @@ export const initializeContainer = () => {
       "!../modules/notification/repositories/notification.repository.js",
       "!../modules/notification/repositories/notificationSetting.repository.js",
       "!../modules/notification/notification.controller.js",
+      
       "../modules/**/*.service.js",
       "../modules/**/*.repository.js",
       "../modules/**/*.controller.js",
@@ -52,7 +57,7 @@ export const initializeContainer = () => {
         lifetime: Lifetime.SCOPED,
         register: asClass,
       },
-    },
+    }
   );
 
   console.log("DI Container initialized with Auto-loading");
@@ -63,10 +68,7 @@ export const registerModule = async (moduleName) => {
 };
 
 export const getContainer = () => {
-  if (!container) {
-    throw new Error("DI Container not initialized. Call initializeContainer() first.");
-  }
-
+  if (!container) throw new Error("DI Container not initialized.");
   return container;
 };
 
@@ -79,8 +81,10 @@ export const startWorkers = () => {
 
   const eventBus = container.resolve("eventBus");
   const transactionService = container.resolve("transactionService");
+  const disbursementService = container.resolve("disbursementService");
 
   registerTransactionListeners({ eventBus, transactionService });
+  registerDisbursementListeners({ eventBus, disbursementService });
 
   console.log("[Worker] All queue workers and event listeners have been started.");
 };

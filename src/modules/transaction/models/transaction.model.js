@@ -22,7 +22,16 @@ const transactionSchema = new mongoose.Schema({
         },
         index: true
     },
+    milestoneId: {
+        type: String,
+        index: true
+    },
     donorRef: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        index: true
+    },
+    organizerRef: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         index: true
@@ -59,9 +68,49 @@ const transactionSchema = new mongoose.Schema({
 });
 
 transactionSchema.pre(['findOneAndDelete', 'deleteOne', 'deleteMany'], function (next) {
-    next(new Error("CRITICAL: Transactions are strictly immutable and cannot be deleted."));
+    next(new Error("CRITICAL_IMMUTABILITY_ERROR: Transactions are strictly immutable and cannot be deleted."));
 });
 
-const IMMUTABLE_FIELDS = ['amount', 'grossAmount', 'platformFee', 'netAmount', 'currency', 'projectId', 'donorRef', 'type'];
+const IMMUTABLE_FIELDS = [
+    'amount', 'grossAmount', 'platformFee', 'netAmount',
+    'currency', 'projectId', 'milestoneId', 'donorRef', 'organizerRef', 'type', 'gatewayTransactionId'
+];
+
+const ONCE_UPDATABLE_FIELDS = ['amount', 'grossAmount', 'platformFee', 'netAmount', 'gatewayTransactionId', 'bankTransactionRef'];
+
+transactionSchema.pre('save', function (next) {
+    if (!this.isNew) {
+        const isTransitioningToCompleted = this.isModified('status') && this.status === 'COMPLETED';
+        for (const field of IMMUTABLE_FIELDS) {
+            if (this.isModified(field)) {
+                if (isTransitioningToCompleted && ONCE_UPDATABLE_FIELDS.includes(field)) {
+                    continue;
+                }
+                return next(new Error(`CRITICAL_IMMUTABILITY_ERROR: Ledger field '${field}' cannot be modified after creation.`));
+            }
+        }
+    }
+    next();
+});
+
+transactionSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], function (next) {
+    const update = this.getUpdate();
+    if (!update) return next();
+
+    const restrictedOperators = ['$set', '$inc', '$unset', '$mul', '$rename'];
+    const isTransitioningToCompleted = update.$set && update.$set.status === 'COMPLETED';
+
+    for (const op of restrictedOperators) {
+        if (update[op]) {
+            for (const field of IMMUTABLE_FIELDS) {
+                if (update[op][field] !== undefined) {
+                    if (isTransitioningToCompleted && op === '$set' && ONCE_UPDATABLE_FIELDS.includes(field)) continue;
+                    return next(new Error(`CRITICAL_IMMUTABILITY_ERROR: Ledger field '${field}' cannot be modified via ${op} operator.`));
+                }
+            }
+        }
+    }
+    next();
+});
 
 export default mongoose.model('Transaction', transactionSchema);

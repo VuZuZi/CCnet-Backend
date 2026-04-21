@@ -67,6 +67,26 @@ class MilestoneEvidenceController {
             next(error);
         }
     };
+
+    patchEvidence = async (req, res, next) => {
+        try {
+            const { id } = req.params;
+            const organizerId = req.user.userId;
+            const result = await this.milestoneEvidenceService.patchEvidence(id, organizerId, req.body);
+            return ApiResponse.success(res, result, 'Nộp bổ sung báo cáo thành công. Hệ thống đang chờ xét duyệt lại.');
+        } catch (error) {
+            next(error);
+        }
+    };
+
+    getAdminEvidenceList = async (req, res, next) => {
+        try {
+            const result = await this.milestoneEvidenceService.getAdminEvidenceList(req.query);
+            return ApiResponse.success(res, result, 'Lấy danh sách nghiệm thu cho Admin thành công');
+        } catch (error) {
+            next(error);
+        }
+    };
 }
 
 export default MilestoneEvidenceController;

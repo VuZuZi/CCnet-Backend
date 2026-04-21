@@ -553,6 +553,14 @@ class ProjectRepository {
       .lean()
       .exec();
   }
+
+  async incrementMilestoneDisbursed(projectId, milestoneId, amount, session = null) {
+        return await Project.findOneAndUpdate(
+            { _id: projectId, "milestones.milestoneId": milestoneId },
+            { $inc: { "milestones.$.actualDisbursedAmount": amount } },
+            { new: true, session }
+        ).lean().exec();
+    }
 }
 
 export default ProjectRepository;

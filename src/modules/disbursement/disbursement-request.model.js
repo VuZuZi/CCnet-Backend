@@ -37,14 +37,8 @@ const disbursementRequestSchema = new mongoose.Schema(
             ref: 'User',
             required: true
         },
-        type: {
-            type: String,
-            enum: ['FULL', 'SUPPLEMENTAL'],
-            default: 'FULL'
-        },
-        requestedAmount: { type: Number, required: true, min: 1000 },
-        approvedAmount: { type: Number, default: 0, min: 0 },
-        disputedAmount: { type: Number, default: 0, min: 0 },
+        requestedAmount: { type: Number, required: true, min: 0 },
+        approvedAmount: { type: Number, default: null, min: 0 },
 
         bankAccountSnapshot: {
             type: bankAccountSnapshotSchema,
@@ -58,7 +52,6 @@ const disbursementRequestSchema = new mongoose.Schema(
             type: String,
             enum: [
                 'PENDING',
-                'PARTIALLY_APPROVED',
                 'APPROVED_PENDING_TRANSFER',
                 'COMPLETED',
                 'REJECTED',
@@ -91,7 +84,7 @@ disbursementRequestSchema.index(
     {
         unique: true,
         partialFilterExpression: {
-            status: { $in: ['PENDING', 'PARTIALLY_APPROVED', 'APPROVED_PENDING_TRANSFER', 'HOLD'] }
+            status: { $in: ['PENDING', 'APPROVED_PENDING_TRANSFER', 'HOLD'] }
         },
         name: 'unique_active_disbursement_per_milestone'
     }

@@ -1,4 +1,5 @@
 import AppError from '../../../core/AppError.js';
+import MoneyMath from '../../../core/MoneyMath.js';
 import { MILESTONE_STATUS, PROJECT_STATUS, PROJECT_TYPE } from '../project.constant.js';
 import { DOMAIN_EVENTS } from '../../../config/notification.js';
 
@@ -8,40 +9,85 @@ class MilestoneEvidenceService {
         projectRepository,
         disbursementRequestRepository,
         mediaRepository,
-        transactionManager,
-        eventBus
+        transactionManager
     }) {
         this.milestoneEvidenceRepository = milestoneEvidenceRepository;
         this.projectRepository = projectRepository;
         this.disbursementRequestRepository = disbursementRequestRepository;
         this.mediaRepository = mediaRepository;
         this.transactionManager = transactionManager;
-        this.eventBus = eventBus;
     }
 
-    _calculateDistanceInMeters(lat1, lon1, lat2, lon2) {
-        if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
-        const R = 6371e3;
-        const phi1 = lat1 * Math.PI / 180;
-        const phi2 = lat2 * Math.PI / 180;
-        const deltaPhi = (lat2 - lat1) * Math.PI / 180;
-        const deltaLambda = (lon2 - lon1) * Math.PI / 180;
+    async _getPreviousUnspentAmount(projectId, milestones, currentIdx) {
+        if (currentIdx <= 0) return 0;
 
-        const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
-            Math.cos(phi1) * Math.cos(phi2) *
-            Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
+        const prevMilestone = milestones[currentIdx - 1];
+        const prevEvidence = await this.milestoneEvidenceRepository.findApprovedByMilestone(projectId, prevMilestone.milestoneId);
+
+        return prevEvidence?.financialReport?.unspentAmount || 0;
+    }
+
+    async _evaluateEvidencePayload(project, milestone, currentIdx, organizerId, financialReport, mediaIds) {
+        if (project.projectType === PROJECT_TYPE.FUNDED) {
+            const totalDisbursed = milestone.actualDisbursedAmount || 0;
+            const previousUnspent = await this._getPreviousUnspentAmount(project._id, project.milestones, currentIdx);
+            const totalAvailable = MoneyMath.add(totalDisbursed, previousUnspent);
+
+            if (totalAvailable > 0) {
+                if (!financialReport) throw new AppError('Bắt buộc phải có báo cáo tài chính để giải trình.', 400);
+
+                const spentAmount = financialReport.spentAmount || 0;
+                const unspentAmount = financialReport.unspentAmount || 0;
+                const totalReported = MoneyMath.add(spentAmount, unspentAmount);
+
+                if (!MoneyMath.isEqual(totalReported, totalAvailable)) {
+                    throw new AppError(`Sai lệch kế toán. Tổng giải trình (${totalReported.toLocaleString()} đ) phải khớp với Số tiền khả dụng (${totalAvailable.toLocaleString()} đ).`, 400);
+                }
+            }
+        }
+
+        let geoVerifiedCount = 0;
+        if (mediaIds && mediaIds.length > 0) {
+            const targetLocation = milestone.location?.coordinates?.length === 2 ? milestone.location : project.location;
+            if (targetLocation && targetLocation.coordinates) {
+                const [mLong, mLat] = targetLocation.coordinates;
+                geoVerifiedCount = await this.mediaRepository.countGeoVerifiedMedias(mediaIds, organizerId, mLong, mLat, 500);
+            }
+        }
+
+        const policy = milestone.evidencePolicy || {
+            requireFinancial: milestone.targetAmount > 0,
+            requireGeoPhotos: milestone.targetAmount === 0 ? 1 : 0
+        };
+
+        let finalStatus = 'PENDING';
+        let finalMilestoneStatus = MILESTONE_STATUS.PROCESSING;
+        let reviewNotes = null;
+
+        if (!policy.requireFinancial && policy.requireGeoPhotos > 0) {
+            if (geoVerifiedCount >= policy.requireGeoPhotos) {
+                finalStatus = 'APPROVED';
+                finalMilestoneStatus = MILESTONE_STATUS.COMPLETED;
+                reviewNotes = `[HỆ THỐNG AUTO-PASS] Xác thực thành công (${geoVerifiedCount}/${policy.requireGeoPhotos} ảnh hợp lệ) tại hiện trường.`;
+            } else {
+                reviewNotes = `[HỆ THỐNG GHI NHẬN] Organizer nộp ảnh nhưng không chứa EXIF GPS gốc hoặc nằm ngoài bán kính 500m. Cần kiểm tra thủ công.`;
+            }
+        }
+
+        return { finalStatus, finalMilestoneStatus, reviewNotes, policy };
     }
 
     async submitEvidence(payload) {
-        const { projectId, milestoneId, organizerId, reportContent, financialReport, mediaIds } = payload;
+        const { projectId, milestoneId, organizerId, mediaIds } = payload;
+        const receiptMediaIds = payload.receiptMediaIds || []; // Fallback empty array chống crash
 
         const project = await this.projectRepository.findById(projectId);
         if (!project) throw new AppError('Không tìm thấy dự án', 404);
+
         if (String(project.organizerId) !== String(organizerId)) {
             throw new AppError('Bạn không có quyền thao tác trên dự án này', 403);
         }
+
         if (project.status !== PROJECT_STATUS.EXECUTING) {
             throw new AppError('Chỉ có thể nộp bằng chứng khi dự án đang trong giai đoạn Thực thi (EXECUTING)', 400);
         }
@@ -51,6 +97,7 @@ class MilestoneEvidenceService {
         const milestone = milestones[currentIdx];
 
         if (!milestone) throw new AppError('Mốc thời gian không tồn tại', 404);
+
         if (milestone.status === MILESTONE_STATUS.COMPLETED) {
             throw new AppError('Mốc này đã được nghiệm thu hoàn tất', 400);
         }
@@ -62,109 +109,119 @@ class MilestoneEvidenceService {
             }
         }
 
-        if (project.projectType === PROJECT_TYPE.FUNDED) {
-            const totalDisbursed = await this.disbursementRequestRepository.getTotalDisbursedForMilestone(projectId, milestoneId);
-            let previousUnspent = 0;
-            if (currentIdx > 0) {
-                const prevMilestone = milestones[currentIdx - 1];
-                const prevEvidence = await this.milestoneEvidenceRepository.findApprovedByMilestone(projectId, prevMilestone.milestoneId);
-                if (prevEvidence && prevEvidence.financialReport) {
-                    previousUnspent = prevEvidence.financialReport.unspentAmount || 0;
-                }
-            }
-            const totalAvailable = totalDisbursed + previousUnspent;
-
-            if (totalAvailable > 0) {
-                if (!financialReport) throw new AppError('Bắt buộc phải có báo cáo tài chính để giải trình.', 400);
-                const { spentAmount = 0, unspentAmount = 0 } = financialReport;
-                if ((spentAmount + unspentAmount) !== totalAvailable) {
-                    throw new AppError(`Sai lệch kế toán. Tổng giải trình phải khớp với ${totalAvailable} VNĐ.`, 400);
-                }
-            }
-        }
-
-        let geoVerifiedCount = 0;
+        let hasGeoPhotos = 0;
         if (mediaIds && mediaIds.length > 0) {
-            const validMedias = await this.mediaRepository.findManyByIdsAndOwner(mediaIds, organizerId);
-            if (validMedias.length !== mediaIds.length) {
-                throw new AppError('Một số bằng chứng không hợp lệ hoặc không thuộc quyền sở hữu của bạn', 403);
-            }
-
-            const targetLocation = milestone.location?.coordinates?.length === 2
-                ? milestone.location
-                : project.location;
-
-            if (targetLocation && targetLocation.coordinates) {
-                const [mLong, mLat] = targetLocation.coordinates;
-                for (const media of validMedias) {
-                    if (media.captureMetadata && media.captureMetadata.lat && media.captureMetadata.lng) {
-                        const distance = this._calculateDistanceInMeters(
-                            media.captureMetadata.lat, media.captureMetadata.lng,
-                            mLat, mLong
-                        );
-                        if (distance <= 500) {
-                            geoVerifiedCount++;
-                        }
-                    }
-                }
-            }
+            hasGeoPhotos = await this.mediaRepository.countGeoVerifiedMedias(
+                mediaIds, organizerId, milestone.location?.coordinates?.[0], milestone.location?.coordinates?.[1], 500
+            );
         }
 
-        const policy = milestone.evidencePolicy || {
-            requireFinancial: milestone.targetAmount > 0,
-            requireGeoPhotos: milestone.targetAmount === 0 ? 1 : 0
+        const requireGeoPhotos = project.evidencePolicy?.requireGeoPhotos || milestone.evidencePolicy?.requireGeoPhotos || 0;
+        if (requireGeoPhotos > 0 && hasGeoPhotos < 1) {
+            throw new AppError('Bằng chứng bị từ chối: Bắt buộc phải có ít nhất 1 ảnh chứa tọa độ GPS tại hiện trường.', 400);
+        }
+
+        const financialReport = {
+            spentAmount: milestone.targetAmount || 0,
+            unspentAmount: 0,
+            expenseItems: receiptMediaIds.map(receiptId => ({
+                itemName: "Chứng từ/Hóa đơn tổng hợp theo Mốc",
+                amount: 0,
+                receiptMediaId: receiptId
+            })),
+            note: "Dữ liệu được tự động đồng bộ theo cấu hình Budget của dự án."
         };
 
-        let finalStatus = 'PENDING';
-        let reviewNotes = null;
-        let finalMilestoneStatus = MILESTONE_STATUS.PROCESSING;
+        const newEvidencePayload = {
+            projectId,
+            milestoneId,
+            organizerId,
+            reportContent: payload.reportContent,
+            mediaIds: payload.mediaIds,
+            financialReport: financialReport,
+            status: 'PENDING'
+        };
 
-        if (!policy.requireFinancial && policy.requireGeoPhotos > 0) {
-            if (geoVerifiedCount >= policy.requireGeoPhotos) {
-                finalStatus = 'APPROVED';
-                finalMilestoneStatus = MILESTONE_STATUS.COMPLETED;
-                reviewNotes = `[HỆ THỐNG AUTO-PASS] Xác thực thành công (${geoVerifiedCount}/${policy.requireGeoPhotos} ảnh hợp lệ) tại hiện trường (sai số <500m).`;
-            } else {
-                reviewNotes = `[HỆ THỐNG GHI NHẬN] Organizer nộp ảnh nhưng không chứa tọa độ GPS hợp lệ hoặc nằm ngoài bán kính 500m. Cần kiểm tra thủ công.`;
-            }
-        }
+        return await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
+            const newEvidence = await this.milestoneEvidenceRepository.upsertEvidenceAtomic(
+                projectId, milestoneId, newEvidencePayload, session
+            );
 
-        const existingEvidence = await this.milestoneEvidenceRepository.findByMilestone(projectId, milestoneId);
-
-        const result = await this.transactionManager.runInTransaction(async (session) => {
-            let evidence;
-            const savePayload = {
-                projectId, milestoneId, organizerId, reportContent, mediaIds,
-                financialReport: policy.requireFinancial ? financialReport : null,
-                status: finalStatus,
-                reviewNotes,
-                reviewedBy: finalStatus === 'APPROVED' ? null : undefined,
-                reviewedAt: finalStatus === 'APPROVED' ? new Date() : undefined
-            };
-
-            if (existingEvidence) {
-                if (['PENDING', 'APPROVED'].includes(existingEvidence.status)) {
-                    throw new AppError('Mốc này đang chờ duyệt hoặc đã được duyệt. Không thể nộp đúp.', 409);
-                }
-                evidence = await this.milestoneEvidenceRepository.updateStatus(existingEvidence._id, savePayload, session);
-            } else {
-                evidence = await this.milestoneEvidenceRepository.create(savePayload, session);
+            if (!newEvidence) {
+                throw new AppError('Mốc này đang chờ duyệt hoặc đã được duyệt. Không thể nộp đúp.', 409);
             }
 
-            await this.projectRepository.updateMilestoneStatus(projectId, milestoneId, finalMilestoneStatus, session);
+            await this.projectRepository.updateMilestoneStatus(projectId, milestoneId, MILESTONE_STATUS.PROCESSING, session);
 
-            return evidence;
+            dispatchEvent(DOMAIN_EVENTS.EVIDENCE_SUBMITTED_MANUAL, { evidenceId: newEvidence._id, projectId });
+
+            return newEvidence;
         });
+    }
 
-        if (this.eventBus) {
-            if (finalStatus === 'APPROVED') {
-                this.eventBus.emit(DOMAIN_EVENTS.PROJECT_MILESTONE_COMPLETED, { projectId, milestoneId });
-            } else {
-                this.eventBus.emit(DOMAIN_EVENTS.EVIDENCE_SUBMITTED_MANUAL, { evidenceId: result._id, projectId });
-            }
+    async patchEvidence(evidenceId, organizerId, payload) {
+        const evidence = await this.milestoneEvidenceRepository.findById(evidenceId);
+        if (!evidence) throw new AppError('Không tìm thấy bản ghi', 404);
+        if (String(evidence.organizerId) !== String(organizerId)) throw new AppError('Không có quyền thao tác', 403);
+
+        if (evidence.status !== 'REVISION_REQUESTED') {
+            throw new AppError('Chỉ có thể nộp bổ sung khi Admin có yêu cầu sửa đổi (REVISION_REQUESTED)', 400);
         }
 
-        return result;
+        const project = await this.projectRepository.findById(evidence.projectId);
+        const currentIdx = project.milestones.findIndex(m => m.milestoneId === evidence.milestoneId);
+        const milestone = project.milestones[currentIdx];
+
+        const updatedMediaIds = payload.mediaIds !== undefined ? payload.mediaIds : evidence.mediaIds;
+        const updatedReportContent = payload.reportContent !== undefined ? payload.reportContent : evidence.reportContent;
+
+        const immutableFinancialReport = evidence.financialReport;
+
+        const evaluation = await this._evaluateEvidencePayload(
+            project,
+            milestone,
+            currentIdx,
+            organizerId,
+            immutableFinancialReport,
+            updatedMediaIds
+        );
+
+        return await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
+            const updatedEvidence = await this.milestoneEvidenceRepository.updateStatus(
+                evidenceId,
+                {
+                    reportContent: updatedReportContent,
+                    mediaIds: updatedMediaIds,
+                    financialReport: immutableFinancialReport,
+                    status: evaluation.finalStatus,
+                    reviewNotes: evaluation.reviewNotes || '[Đã bổ sung] Đang chờ duyệt lại',
+                    reviewedBy: evaluation.finalStatus === 'APPROVED' ? null : evidence.reviewedBy,
+                    reviewedAt: evaluation.finalStatus === 'APPROVED' ? new Date() : evidence.reviewedAt
+                },
+                session
+            );
+
+            await this.projectRepository.updateMilestoneStatus(
+                evidence.projectId,
+                evidence.milestoneId,
+                evaluation.finalMilestoneStatus,
+                session
+            );
+
+            if (evaluation.finalStatus === 'APPROVED') {
+                dispatchEvent(DOMAIN_EVENTS.PROJECT_MILESTONE_COMPLETED, {
+                    projectId: evidence.projectId,
+                    milestoneId: evidence.milestoneId
+                });
+            } else {
+                dispatchEvent(DOMAIN_EVENTS.EVIDENCE_SUBMITTED_MANUAL, {
+                    evidenceId,
+                    projectId: evidence.projectId
+                });
+            }
+
+            return updatedEvidence;
+        });
     }
 
     async reviewEvidence(evidenceId, reviewerId, payload) {
@@ -174,7 +231,7 @@ class MilestoneEvidenceService {
         if (!evidence) throw new AppError('Không tìm thấy bản ghi bằng chứng', 404);
         if (evidence.status !== 'PENDING') throw new AppError('Bằng chứng này đã được xử lý', 400);
 
-        return await this.transactionManager.runInTransaction(async (session) => {
+        return await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
             const updatedEvidence = await this.milestoneEvidenceRepository.updateStatus(
                 evidenceId,
                 { status, reviewNotes, reviewedBy: reviewerId, reviewedAt: new Date() },
@@ -198,13 +255,11 @@ class MilestoneEvidenceService {
                 session
             );
 
-            if (this.eventBus) {
-                this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, {
-                    recipientIds: [String(evidence.organizerId)],
-                    title: `Kết quả nghiệm thu Mốc dự án`,
-                    message: `Báo cáo nghiệm thu của bạn đã được chuyển sang trạng thái: ${status}. ${reviewNotes ? `Ghi chú: ${reviewNotes}` : ''}`
-                });
-            }
+            dispatchEvent(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, {
+                recipientIds: [String(evidence.organizerId)],
+                title: `Kết quả nghiệm thu Mốc dự án`,
+                message: `Báo cáo nghiệm thu của bạn đã được chuyển sang trạng thái: ${status}. ${reviewNotes ? `Ghi chú: ${reviewNotes}` : ''}`
+            });
 
             return updatedEvidence;
         });
@@ -272,26 +327,38 @@ class MilestoneEvidenceService {
         };
 
         if (project.projectType === PROJECT_TYPE.FUNDED) {
-            const platformDisbursed = await this.disbursementRequestRepository.getTotalDisbursedForMilestone(projectId, milestoneId);
-            let rolloverFromPrevious = 0;
+            const platformDisbursed = milestone.actualDisbursedAmount || 0;
 
             const currentIdx = project.milestones.findIndex(m => m.milestoneId === milestoneId);
-            if (currentIdx > 0) {
-                const prevMilestone = project.milestones[currentIdx - 1];
-                const prevEvidence = await this.milestoneEvidenceRepository.findPublicApprovedByMilestone(projectId, prevMilestone.milestoneId);
-                if (prevEvidence && prevEvidence.financialReport) {
-                    rolloverFromPrevious = prevEvidence.financialReport.unspentAmount || 0;
-                }
-            }
+            const rolloverFromPrevious = await this._getPreviousUnspentAmount(projectId, project.milestones, currentIdx);
 
             publicData.financialContext = {
                 platformDisbursed,
                 rolloverFromPrevious,
-                totalAvailable: platformDisbursed + rolloverFromPrevious
+                totalAvailable: MoneyMath.add(platformDisbursed, rolloverFromPrevious)
             };
         }
 
         return publicData;
+    }
+
+    async getAdminEvidenceList(query) {
+        const { page = 1, limit = 10, status, projectId } = query;
+        const skip = (page - 1) * limit;
+
+        const { data, total } = await this.milestoneEvidenceRepository.findAndCountForAdmin({
+            skip, limit, status, projectId
+        });
+
+        return {
+            items: data,
+            pagination: {
+                totalItems: total,
+                totalPages: Math.ceil(total / limit),
+                currentPage: page,
+                limit
+            }
+        };
     }
 }
 
