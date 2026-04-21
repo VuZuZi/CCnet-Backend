@@ -159,6 +159,7 @@ function registerDomainListeners({
   registerTransactionNotificationListener({
     eventBus,
     notificationService,
+    notificationBroadcastService,
     mailProvider,
     userRepository,
     logger,

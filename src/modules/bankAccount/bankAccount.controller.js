@@ -9,7 +9,7 @@ class BankAccountController {
         try {
             const userId = req.user.userId;
             const result = await this.bankAccountService.addBankAccount(userId, req.body);
-            return ApiResponse.created(res, result, "Đã thêm thẻ. Chờ xác thực Micro-deposit.");
+            return ApiResponse.created(res, result, "Đã thêm và xác thực thẻ ngân hàng thành công.");
         } catch (error) {
             next(error);
         }
