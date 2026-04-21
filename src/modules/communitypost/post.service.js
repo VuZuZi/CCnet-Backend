@@ -97,7 +97,7 @@ class PostService {
 
     const cleanContent = content?.trim();
     if (!cleanContent && !images.length && !sharedEntity) {
-      throw new AppError("Nội dung bài viết không được để trống", 400);
+      throw new AppError("Bạn ơi, nội dung bài viết không được để trống đâu nè.", 400);
     }
 
     const newPost = await this.postRepository.create({
@@ -130,7 +130,7 @@ class PostService {
 
     if (!post) {
       throw new AppError(
-        "Không tìm thấy bài viết hoặc bạn không có quyền",
+        "Rất tiếc, hệ thống không tìm thấy bài viết hoặc bạn không có quyền chỉnh sửa.",
         404,
       );
     }
@@ -153,7 +153,7 @@ class PostService {
       images.push(...uploaded.map(this._formatImage));
     }
 
-    if (images.length > 10) throw new AppError("Tối đa 10 ảnh", 400);
+    if (images.length > 10) throw new AppError("Bạn chỉ có thể đăng tối đa 10 ảnh trong mỗi bài viết thôi nhé.", 400);
 
     const updateData = {
       images,
@@ -177,12 +177,12 @@ class PostService {
   async addComment({ postId, user, content }) {
     const targetPost = await this.postRepository.findById(postId);
     if (!targetPost) {
-      throw new AppError("Post not found", 404);
+      throw new AppError("Rất tiếc, bài viết này không còn tồn tại hoặc đã bị xóa.", 404);
     }
 
     const trimmedContent = content?.trim();
     if (!trimmedContent) {
-      throw new AppError("Content is required", 400);
+      throw new AppError("Nội dung bình luận không được để trống bạn nhé.", 400);
     }
 
     const newComment = await mongoose.connection.transaction(
@@ -233,7 +233,7 @@ class PostService {
         postId: String(postId),
         commentId: String(newComment._id),
         previewContent: newComment.content,
-        message: `${user.fullName || user.username || "Someone"} commented on your post.`,
+        message: `${user.fullName || user.username || "Ai đó"} đã bình luận về bài viết của bạn.`,
       });
     }
 
@@ -243,7 +243,7 @@ class PostService {
   async toggleReaction({ postId, userId, type }) {
     const targetPost = await this.postRepository.findById(postId);
     if (!targetPost) {
-      throw new AppError("Post not found", 404);
+      throw new AppError("Không tìm thấy bài viết để thực hiện tương tác.", 404);
     }
 
     const result = await mongoose.connection.transaction(async (session) => {
@@ -352,7 +352,7 @@ class PostService {
     let useCache = false;
 
     if (type === "following") {
-      if (!userId) throw new AppError("Vui lòng đăng nhập", 401);
+      if (!userId) throw new AppError("Bạn vui lòng đăng nhập để xem nội dung từ những người đang theo dõi nhé.", 401);
 
       const followingIds = await this._getFollowingIds(userId);
 
@@ -506,7 +506,7 @@ class PostService {
 
     const canView = await this._canViewerSeePost(post, viewerId);
     if (!canView) {
-      throw new AppError("Bạn không có quyền xem bài viết này", 403);
+      throw new AppError("Rất tiếc, bài viết này ở chế độ riêng tư nên bạn không thể xem được.", 403);
     }
 
     const limit = 10;
@@ -526,13 +526,13 @@ class PostService {
     const deleted = await this.postRepository.softDeletePost(postId, userId);
     if (!deleted) {
       throw new AppError(
-        "Không tìm thấy bài viết hoặc bạn không có quyền xóa",
+        "Không tìm thấy bài viết hoặc bạn không có quyền thực hiện xóa bài này.",
         404,
       );
     }
 
     this._invalidateCache(postId);
-    return { message: "Deleted" };
+    return { message: "Xóa bài viết thành công." };
   }
 
   async toggleSavePost(postId, userId) {
@@ -544,7 +544,7 @@ class PostService {
   }
 
   async getSavedPosts({ cursor, limit = 10, userId }) {
-    if (!userId) throw new AppError("Vui lòng đăng nhập", 401);
+    if (!userId) throw new AppError("Bạn vui lòng đăng nhập để xem danh sách bài viết đã lưu nhé.", 401);
 
     const user = await this.userRepository.findById(userId);
     const savedPostIds = user?.savedPosts || [];

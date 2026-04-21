@@ -5,7 +5,7 @@ const objectIdSchema = z.string().regex(/^[0-9a-fA-F]{24}$/, "ID không đúng �
 
 export const donateSchema = z.object({
     projectId: objectIdSchema,
-    amount: z.coerce.number().min(5000, "Số tiền nạp tối thiểu là 5.000 VNĐ"),
+    amount: z.coerce.number().min(2000, "Số tiền ủng hộ tối thiểu là 2.000 VNĐ"),
     paymentMethod: z.enum([PAYMENT_METHODS.BANK_TRANSFER, PAYMENT_METHODS.WALLET]).default(PAYMENT_METHODS.BANK_TRANSFER),
     isAnonymous: z.boolean().optional().default(false),
     message: z.string().max(500, "Lời nhắn tối đa 500 ký tự").optional()
@@ -34,7 +34,7 @@ export const transactionIdParamSchema = z.object({
 }).strict();
 
 export const submitClaimSchema = z.object({
-    amount: z.coerce.number().min(5000, "Số tiền không hợp lệ (Tối thiểu 5.000 VNĐ)"),
+    amount: z.coerce.number().min(2000, "Số tiền không hợp lệ (Tối thiểu 2.000 VNĐ)"),
     bankTransactionRef: z.string().trim().max(100).optional(),
     proofImageUrl: z.string().url("URL hình ảnh không hợp lệ")
 }).strict();

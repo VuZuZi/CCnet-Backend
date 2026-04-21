@@ -44,8 +44,8 @@ class TransactionService {
 
     async getPublicProjectDisbursements(projectId, query) {
         const project = await this.projectRepository.findById(projectId);
-        if (!project) throw new AppError("Không tìm thấy dự án", 404);
-        if (project.projectType !== PROJECT_TYPE.FUNDED) throw new AppError("Dự án tình nguyện không có giao dịch giải ngân tài chính", 400);
+        if (!project) throw new AppError("Rất tiếc, hệ thống không tìm thấy thông tin về dự án này.", 404);
+        if (project.projectType !== PROJECT_TYPE.FUNDED) throw new AppError("Đây là dự án tình nguyện phi lợi nhuận, không bao gồm các giao dịch giải ngân tài chính.", 400);
 
         const { page, limit } = query;
         const skip = (page - 1) * limit;
@@ -59,15 +59,15 @@ class TransactionService {
     }
 
     _checkFundingConstraints(project, currentFundedAmount = null) {
-        if (project.status !== PROJECT_STATUS.FUNDING) throw new AppError("Dự án hiện không trong giai đoạn nhận tài trợ", 400);
-        if (project.endDate && new Date() > new Date(project.endDate)) throw new AppError("Dự án đã kết thúc thời gian nhận tài trợ", 400);
+        if (project.status !== PROJECT_STATUS.FUNDING) throw new AppError("Dự án này hiện đã tạm ngưng nhận quyên góp. Cảm ơn tấm lòng của bạn!", 400);
+        if (project.endDate && new Date() > new Date(project.endDate)) throw new AppError("Thời gian quyên góp cho dự án này đã kết thúc. Bạn hãy tham khảo các dự án khác nhé.", 400);
 
         const fundedAmount = currentFundedAmount !== null
             ? Number(currentFundedAmount || 0)
             : Number(project.currentAmount || 0);
 
         if (project.targetAmount > 0 && fundedAmount >= project.targetAmount) {
-            throw new AppError("Dự án đã đạt mục tiêu gọi vốn. Không thể nhận thêm.", 400);
+            throw new AppError("Thật tuyệt vời! Dự án đã đạt đủ mục tiêu gọi vốn và xin phép ngừng nhận thêm quyên góp.", 400);
         }
     }
 
@@ -79,11 +79,11 @@ class TransactionService {
         const remainingAmount = Math.max(targetAmount - safeFundedAmount, 0);
 
         if (remainingAmount <= 0) {
-            throw new AppError("Dự án đã đạt mục tiêu gọi vốn. Không thể nhận thêm.", 400);
+            throw new AppError("Thật tuyệt vời! Dự án đã đạt đủ mục tiêu gọi vốn và xin phép ngừng nhận thêm quyên góp.", 400);
         }
 
         if (Number(amount || 0) > remainingAmount) {
-            throw new AppError(`Số tiền quyên góp vượt quá phần còn thiếu (${remainingAmount.toLocaleString('vi-VN')}đ).`, 400);
+            throw new AppError(`Số tiền bạn gửi vượt quá mức cần thiết để hoàn thành mục tiêu (còn thiếu ${remainingAmount.toLocaleString('vi-VN')}đ).`, 400);
         }
     }
 
@@ -102,7 +102,7 @@ class TransactionService {
 
         if (paymentMethod === 'WALLET') {
             const wallet = await this.walletRepository.findByUserId(donorId);
-            if (wallet.balance < safeAmount) throw new AppError(`Số dư ví không đủ. Hiện tại: ${wallet.balance.toLocaleString()} VNĐ`, 400);
+            if (wallet.balance < safeAmount) throw new AppError(`Số dư Ví của bạn hiện không đủ để thực hiện giao dịch. Bạn vui lòng nạp thêm để tiếp tục nhé!`, 400);
 
             const result = await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
                 await this.walletRepository.incrementBalance(donorId, -safeAmount, session);
@@ -140,7 +140,7 @@ class TransactionService {
                 return { tx: transaction, isHardCapped };
             });
 
-            return { transactionId: result.tx._id, paymentMethod: 'WALLET', status: 'COMPLETED', message: 'Thanh toán qua ví thành công' };
+            return { transactionId: result.tx._id, paymentMethod: 'WALLET', status: 'COMPLETED', message: 'Tuyệt vời! Bạn đã quyên góp thành công qua Ví CCNet.' };
         }
 
         const redisClient = this.redis.getClient();
@@ -199,7 +199,7 @@ class TransactionService {
 
             if (!acquired) {
                 await this.webhookAuditLogRepository.updateStatus(auditLog._id, 'FAILED', { errorMessage: 'Concurrent processing lock' });
-                throw new AppError("Giao dịch đang được xử lý bởi luồng khác", 429);
+                throw new AppError("Hệ thống đang xử lý giao dịch này, vui lòng không thao tác lặp lại.", 429);
             }
 
             try {
@@ -293,7 +293,7 @@ class TransactionService {
                 session
             );
 
-            if (!currentTx) throw new AppError(`Xung đột hệ thống: Giao dịch đã được xử lý bởi luồng khác.`, 409);
+            if (!currentTx) throw new AppError(`Giao dịch này đã được ghi nhận trước đó. Cảm ơn bạn!`, 409);
 
             const updatedEscrow = await this.escrowRepository.incrementBalance(currentTx.projectId, netAmount, session);
             const updatedProject = await this.projectRepository.incrementFunding(currentTx.projectId, netAmount, session);
@@ -390,15 +390,15 @@ class TransactionService {
     async processUserRefundRequest(userId, transactionId, payload = {}) {
         const { reason } = payload;
         const tx = await this.transactionRepository.findById(transactionId);
-        if (!tx) throw new AppError("Không tìm thấy giao dịch", 404);
-        if (String(tx.donorRef) !== String(userId)) throw new AppError("Bạn không có quyền hoàn tiền giao dịch này", 403);
-        if (tx.status !== 'COMPLETED' || !['DONATION', 'DONATION_FROM_WALLET'].includes(tx.type)) throw new AppError("Chỉ có thể hoàn tiền các giao dịch donate thành công", 400);
+        if (!tx) throw new AppError("Chúng tôi không tìm thấy thông tin giao dịch mà bạn yêu cầu.", 404);
+        if (String(tx.donorRef) !== String(userId)) throw new AppError("Rất tiếc, bạn không có quyền yêu cầu hoàn tiền cho giao dịch không thuộc sở hữu của mình.", 403);
+        if (tx.status !== 'COMPLETED' || !['DONATION', 'DONATION_FROM_WALLET'].includes(tx.type)) throw new AppError("Chỉ những giao dịch quyên góp đã thành công mới có thể yêu cầu hoàn tiền.", 400);
 
         const existingRefundRequest = await this.transactionRepository.findRefundRequestBySourceTransaction(tx._id);
-        if (existingRefundRequest) throw new AppError("Giao dịch này đã có yêu cầu hoàn tiền trước đó.", 400);
+        if (existingRefundRequest) throw new AppError("Giao dịch này đã được gửi yêu cầu hoàn tiền trước đó và đang xử lý.", 400);
 
         const hoursSinceDonation = (Date.now() - new Date(tx.createdAt).getTime()) / (1000 * 60 * 60);
-        if (hoursSinceDonation > (USER_REFUND_POLICY.ALLOWED_HOURS || 72)) throw new AppError("Đã quá thời hạn 72h được phép hoàn tiền tự động", 400);
+        if (hoursSinceDonation > (USER_REFUND_POLICY.ALLOWED_HOURS || 72)) throw new AppError("Đã quá thời hạn 72 giờ quy định để yêu cầu hoàn tiền. Cảm ơn bạn đã đồng hành cùng dự án.", 400);
 
         const penaltyRate = USER_REFUND_POLICY.PERCENTAGE_FEE || 0.02;
         const refundAmount = Math.floor(tx.netAmount * (1 - penaltyRate));
@@ -425,6 +425,13 @@ class TransactionService {
                 message: `Người dùng vừa gửi yêu cầu hoàn tiền cho giao dịch ${String(tx._id).slice(-8).toUpperCase()}.`
             });
 
+            dispatchEvent(DOMAIN_EVENTS.TRANSACTION_REFUND_REQUESTED, {
+                userId: String(userId),
+                transactionId: String(refundRequestTx._id),
+                amount: refundAmount,
+                reason: reason || null
+            });
+
             return refundRequestTx;
         });
 
@@ -433,7 +440,7 @@ class TransactionService {
             status: result.status,
             refundAmount,
             retainedFee,
-            message: 'Đã gửi yêu cầu hoàn tiền. Vui lòng chờ admin duyệt.'
+            message: 'Yêu cầu hoàn tiền đã được gửi đi thành công. Quản trị viên sẽ phản hồi bạn trong thời gian sớm nhất.'
         };
     }
 
@@ -578,6 +585,18 @@ class TransactionService {
         await this.transactionRepository.updateStatus(requestTx._id, 'REJECTED', {
             gatewayResponse: nextGatewayResponse
         });
+
+        if (this.eventBus) {
+            this.eventBus.emit(DOMAIN_EVENTS.TRANSACTION_REFUND_REJECTED, {
+                userId: String(requestTx.donorRef),
+                transactionId: String(requestTx._id),
+                amount:
+                    requestTx?.gatewayResponse?.refundAmount ??
+                    requestTx.amount ??
+                    0,
+                note,
+            });
+        }
 
         return {
             requestId: requestTx._id,
