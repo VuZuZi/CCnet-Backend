@@ -8,7 +8,8 @@ import {
     evidenceParamsSchema,
     getPublicEvidenceSchema,
     listEvidenceQuerySchema,
-    patchEvidenceSchema
+    patchEvidenceSchema,
+    adminListEvidenceQuerySchema
 } from './milestone-evidence.validation.js';
 
 const router = Router();
@@ -29,7 +30,7 @@ router.get(
 router.get(
     '/my-evidence',
     authenticate,
-    authorize('organizer'),
+    authorize('Organizer'),
     validateQuery(listEvidenceQuerySchema),
     execute('getMyEvidence')
 );
@@ -38,7 +39,7 @@ router.get(
 router.get(
     '/:id',
     authenticate,
-    authorize('organizer', 'admin', 'manager'),
+    authorize('Organizer', 'admin', 'manager'),
     validateParams(evidenceParamsSchema),
     execute('getEvidenceDetail')
 );
@@ -46,7 +47,7 @@ router.get(
 router.post(
     '/',
     authenticate,
-    authorize('organizer'),
+    authorize('Organizer'),
     validateBody(createEvidenceSchema),
     execute('submitEvidence')
 );
@@ -64,10 +65,18 @@ router.patch(
 router.patch(
     '/:id',
     authenticate,
-    authorize('organizer'),
+    authorize('Organizer'),
     validateParams(evidenceParamsSchema),
     validateBody(patchEvidenceSchema),
     execute('patchEvidence')
+);
+
+router.get(
+    '/admin/list',
+    authenticate,
+    authorize('admin', 'manager'),
+    validateQuery(adminListEvidenceQuerySchema),
+    execute('getAdminEvidenceList')
 );
 
 export default router;

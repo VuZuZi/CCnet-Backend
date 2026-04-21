@@ -22,12 +22,15 @@ const transactionSchema = new mongoose.Schema({
         },
         index: true
     },
+    milestoneId: {
+        type: String,
+        index: true
+    },
     donorRef: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
         index: true
     },
-
     organizerRef: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
@@ -70,13 +73,19 @@ transactionSchema.pre(['findOneAndDelete', 'deleteOne', 'deleteMany'], function 
 
 const IMMUTABLE_FIELDS = [
     'amount', 'grossAmount', 'platformFee', 'netAmount',
-    'currency', 'projectId', 'donorRef', 'organizerRef', 'type', 'gatewayTransactionId'
+    'currency', 'projectId', 'milestoneId', 'donorRef', 'organizerRef', 'type', 'gatewayTransactionId'
 ];
+
+const ONCE_UPDATABLE_FIELDS = ['amount', 'grossAmount', 'platformFee', 'netAmount', 'gatewayTransactionId', 'bankTransactionRef'];
 
 transactionSchema.pre('save', function (next) {
     if (!this.isNew) {
+        const isTransitioningToCompleted = this.isModified('status') && this.status === 'COMPLETED';
         for (const field of IMMUTABLE_FIELDS) {
             if (this.isModified(field)) {
+                if (isTransitioningToCompleted && ONCE_UPDATABLE_FIELDS.includes(field)) {
+                    continue;
+                }
                 return next(new Error(`CRITICAL_IMMUTABILITY_ERROR: Ledger field '${field}' cannot be modified after creation.`));
             }
         }
@@ -89,11 +98,13 @@ transactionSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], function 
     if (!update) return next();
 
     const restrictedOperators = ['$set', '$inc', '$unset', '$mul', '$rename'];
+    const isTransitioningToCompleted = update.$set && update.$set.status === 'COMPLETED';
 
     for (const op of restrictedOperators) {
         if (update[op]) {
             for (const field of IMMUTABLE_FIELDS) {
                 if (update[op][field] !== undefined) {
+                    if (isTransitioningToCompleted && op === '$set' && ONCE_UPDATABLE_FIELDS.includes(field)) continue;
                     return next(new Error(`CRITICAL_IMMUTABILITY_ERROR: Ledger field '${field}' cannot be modified via ${op} operator.`));
                 }
             }

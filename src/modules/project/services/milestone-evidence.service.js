@@ -20,10 +20,10 @@ class MilestoneEvidenceService {
 
     async _getPreviousUnspentAmount(projectId, milestones, currentIdx) {
         if (currentIdx <= 0) return 0;
-        
+
         const prevMilestone = milestones[currentIdx - 1];
         const prevEvidence = await this.milestoneEvidenceRepository.findApprovedByMilestone(projectId, prevMilestone.milestoneId);
-        
+
         return prevEvidence?.financialReport?.unspentAmount || 0;
     }
 
@@ -78,15 +78,16 @@ class MilestoneEvidenceService {
     }
 
     async submitEvidence(payload) {
-        const { projectId, milestoneId, organizerId, reportContent, financialReport, mediaIds } = payload;
+        const { projectId, milestoneId, organizerId, mediaIds } = payload;
+        const receiptMediaIds = payload.receiptMediaIds || []; // Fallback empty array chống crash
 
         const project = await this.projectRepository.findById(projectId);
         if (!project) throw new AppError('Không tìm thấy dự án', 404);
-        
+
         if (String(project.organizerId) !== String(organizerId)) {
             throw new AppError('Bạn không có quyền thao tác trên dự án này', 403);
         }
-        
+
         if (project.status !== PROJECT_STATUS.EXECUTING) {
             throw new AppError('Chỉ có thể nộp bằng chứng khi dự án đang trong giai đoạn Thực thi (EXECUTING)', 400);
         }
@@ -96,7 +97,7 @@ class MilestoneEvidenceService {
         const milestone = milestones[currentIdx];
 
         if (!milestone) throw new AppError('Mốc thời gian không tồn tại', 404);
-        
+
         if (milestone.status === MILESTONE_STATUS.COMPLETED) {
             throw new AppError('Mốc này đã được nghiệm thu hoàn tất', 400);
         }
@@ -108,35 +109,53 @@ class MilestoneEvidenceService {
             }
         }
 
-        const evaluation = await this._evaluateEvidencePayload(project, milestone, currentIdx, organizerId, financialReport, mediaIds);
+        let hasGeoPhotos = 0;
+        if (mediaIds && mediaIds.length > 0) {
+            hasGeoPhotos = await this.mediaRepository.countGeoVerifiedMedias(
+                mediaIds, organizerId, milestone.location?.coordinates?.[0], milestone.location?.coordinates?.[1], 500
+            );
+        }
+
+        const requireGeoPhotos = project.evidencePolicy?.requireGeoPhotos || milestone.evidencePolicy?.requireGeoPhotos || 0;
+        if (requireGeoPhotos > 0 && hasGeoPhotos < 1) {
+            throw new AppError('Bằng chứng bị từ chối: Bắt buộc phải có ít nhất 1 ảnh chứa tọa độ GPS tại hiện trường.', 400);
+        }
+
+        const financialReport = {
+            spentAmount: milestone.targetAmount || 0,
+            unspentAmount: 0,
+            expenseItems: receiptMediaIds.map(receiptId => ({
+                itemName: "Chứng từ/Hóa đơn tổng hợp theo Mốc",
+                amount: 0,
+                receiptMediaId: receiptId
+            })),
+            note: "Dữ liệu được tự động đồng bộ theo cấu hình Budget của dự án."
+        };
+
+        const newEvidencePayload = {
+            projectId,
+            milestoneId,
+            organizerId,
+            reportContent: payload.reportContent,
+            mediaIds: payload.mediaIds,
+            financialReport: financialReport,
+            status: 'PENDING'
+        };
 
         return await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
-            const savePayload = {
-                projectId, milestoneId, organizerId, reportContent, mediaIds,
-                financialReport: evaluation.policy.requireFinancial ? financialReport : null,
-                status: evaluation.finalStatus,
-                reviewNotes: evaluation.reviewNotes,
-                reviewedBy: evaluation.finalStatus === 'APPROVED' ? null : undefined,
-                reviewedAt: evaluation.finalStatus === 'APPROVED' ? new Date() : undefined
-            };
-
-            const evidence = await this.milestoneEvidenceRepository.upsertEvidenceAtomic(
-                projectId, milestoneId, savePayload, session
+            const newEvidence = await this.milestoneEvidenceRepository.upsertEvidenceAtomic(
+                projectId, milestoneId, newEvidencePayload, session
             );
 
-            if (!evidence) {
+            if (!newEvidence) {
                 throw new AppError('Mốc này đang chờ duyệt hoặc đã được duyệt. Không thể nộp đúp.', 409);
             }
 
-            await this.projectRepository.updateMilestoneStatus(projectId, milestoneId, evaluation.finalMilestoneStatus, session);
-            
-            if (evaluation.finalStatus === 'APPROVED') {
-                dispatchEvent(DOMAIN_EVENTS.PROJECT_MILESTONE_COMPLETED, { projectId, milestoneId });
-            } else {
-                dispatchEvent(DOMAIN_EVENTS.EVIDENCE_SUBMITTED_MANUAL, { evidenceId: evidence._id, projectId });
-            }
+            await this.projectRepository.updateMilestoneStatus(projectId, milestoneId, MILESTONE_STATUS.PROCESSING, session);
 
-            return evidence;
+            dispatchEvent(DOMAIN_EVENTS.EVIDENCE_SUBMITTED_MANUAL, { evidenceId: newEvidence._id, projectId });
+
+            return newEvidence;
         });
     }
 
@@ -144,7 +163,7 @@ class MilestoneEvidenceService {
         const evidence = await this.milestoneEvidenceRepository.findById(evidenceId);
         if (!evidence) throw new AppError('Không tìm thấy bản ghi', 404);
         if (String(evidence.organizerId) !== String(organizerId)) throw new AppError('Không có quyền thao tác', 403);
-        
+
         if (evidence.status !== 'REVISION_REQUESTED') {
             throw new AppError('Chỉ có thể nộp bổ sung khi Admin có yêu cầu sửa đổi (REVISION_REQUESTED)', 400);
         }
@@ -154,11 +173,17 @@ class MilestoneEvidenceService {
         const milestone = project.milestones[currentIdx];
 
         const updatedMediaIds = payload.mediaIds !== undefined ? payload.mediaIds : evidence.mediaIds;
-        const updatedFinancialReport = payload.financialReport !== undefined ? payload.financialReport : evidence.financialReport;
         const updatedReportContent = payload.reportContent !== undefined ? payload.reportContent : evidence.reportContent;
 
+        const immutableFinancialReport = evidence.financialReport;
+
         const evaluation = await this._evaluateEvidencePayload(
-            project, milestone, currentIdx, organizerId, updatedFinancialReport, updatedMediaIds
+            project,
+            milestone,
+            currentIdx,
+            organizerId,
+            immutableFinancialReport,
+            updatedMediaIds
         );
 
         return await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
@@ -167,7 +192,7 @@ class MilestoneEvidenceService {
                 {
                     reportContent: updatedReportContent,
                     mediaIds: updatedMediaIds,
-                    financialReport: evaluation.policy.requireFinancial ? updatedFinancialReport : null,
+                    financialReport: immutableFinancialReport,
                     status: evaluation.finalStatus,
                     reviewNotes: evaluation.reviewNotes || '[Đã bổ sung] Đang chờ duyệt lại',
                     reviewedBy: evaluation.finalStatus === 'APPROVED' ? null : evidence.reviewedBy,
@@ -177,13 +202,22 @@ class MilestoneEvidenceService {
             );
 
             await this.projectRepository.updateMilestoneStatus(
-                evidence.projectId, evidence.milestoneId, evaluation.finalMilestoneStatus, session
+                evidence.projectId,
+                evidence.milestoneId,
+                evaluation.finalMilestoneStatus,
+                session
             );
 
             if (evaluation.finalStatus === 'APPROVED') {
-                dispatchEvent(DOMAIN_EVENTS.PROJECT_MILESTONE_COMPLETED, { projectId: evidence.projectId, milestoneId: evidence.milestoneId });
+                dispatchEvent(DOMAIN_EVENTS.PROJECT_MILESTONE_COMPLETED, {
+                    projectId: evidence.projectId,
+                    milestoneId: evidence.milestoneId
+                });
             } else {
-                dispatchEvent(DOMAIN_EVENTS.EVIDENCE_SUBMITTED_MANUAL, { evidenceId, projectId: evidence.projectId });
+                dispatchEvent(DOMAIN_EVENTS.EVIDENCE_SUBMITTED_MANUAL, {
+                    evidenceId,
+                    projectId: evidence.projectId
+                });
             }
 
             return updatedEvidence;
@@ -294,7 +328,7 @@ class MilestoneEvidenceService {
 
         if (project.projectType === PROJECT_TYPE.FUNDED) {
             const platformDisbursed = milestone.actualDisbursedAmount || 0;
-            
+
             const currentIdx = project.milestones.findIndex(m => m.milestoneId === milestoneId);
             const rolloverFromPrevious = await this._getPreviousUnspentAmount(projectId, project.milestones, currentIdx);
 
@@ -306,6 +340,25 @@ class MilestoneEvidenceService {
         }
 
         return publicData;
+    }
+
+    async getAdminEvidenceList(query) {
+        const { page = 1, limit = 10, status, projectId } = query;
+        const skip = (page - 1) * limit;
+
+        const { data, total } = await this.milestoneEvidenceRepository.findAndCountForAdmin({
+            skip, limit, status, projectId
+        });
+
+        return {
+            items: data,
+            pagination: {
+                totalItems: total,
+                totalPages: Math.ceil(total / limit),
+                currentPage: page,
+                limit
+            }
+        };
     }
 }
 

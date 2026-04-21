@@ -1,8 +1,9 @@
 import ApiResponse from '../../core/Response.js';
 
 class DisbursementController {
-    constructor({ disbursementService }) {
+    constructor({ disbursementService, disbursementSseService }) {
         this.disbursementService = disbursementService;
+        this.disbursementSseService = disbursementSseService;
     }
 
     getMyRequests = async (req, res, next) => {
@@ -15,14 +16,26 @@ class DisbursementController {
         }
     };
 
-
     getRequestDetail = async (req, res, next) => {
         try {
             const { id } = req.params;
             const { userId, role } = req.user;
 
-            const request = await this.disbursementService.getRequestDetail(id, userId, role);
-            return ApiResponse.success(res, { request }, 'Lấy chi tiết yêu cầu thành công');
+            const result = await this.disbursementService.getRequestDetail(id, userId, role);
+            return ApiResponse.success(res, result, 'Lấy chi tiết yêu cầu thành công');
+        } catch (error) {
+            next(error);
+        }
+    };
+
+    streamDisbursement = async (req, res, next) => {
+        try {
+            const { id } = req.params;
+            const { userId, role } = req.user;
+
+            const { request } = await this.disbursementService.getRequestDetail(id, userId, role);
+
+            await this.disbursementSseService.streamDisbursementStatus(id, request, res, req);
         } catch (error) {
             next(error);
         }
@@ -31,9 +44,10 @@ class DisbursementController {
     createRequest = async (req, res, next) => {
         try {
             const organizerId = req.user.userId;
-            const data = { ...req.body, organizerId };
+            const payload = req.body;
 
-            const request = await this.disbursementService.createRequest(data);
+            const request = await this.disbursementService.createRequest(organizerId, payload);
+            
             return ApiResponse.created(res, { request }, 'Tạo yêu cầu giải ngân thành công');
         } catch (error) {
             next(error);
@@ -85,6 +99,15 @@ class DisbursementController {
             const organizerId = req.user.userId;
             const result = await this.disbursementService.updateHoldRequestBankAccount(id, organizerId, req.body);
             return ApiResponse.success(res, result, 'Cập nhật tài khoản ngân hàng thành công. Yêu cầu đã được đẩy lại cho Kế toán.');
+        } catch (error) {
+            next(error);
+        }
+    };
+
+    getAdminDisbursementList = async (req, res, next) => {
+        try {
+            const result = await this.disbursementService.getAdminDisbursementList(req.query);
+            return ApiResponse.success(res, result, 'Lấy danh sách yêu cầu giải ngân cho Admin thành công');
         } catch (error) {
             next(error);
         }

@@ -104,6 +104,35 @@ class DisbursementRequestRepository {
 
         return result.length > 0 ? result[0].total : 0;
     }
+
+    async findAndCountForAdmin({ skip = 0, limit = 10, status, projectId }, session = null) {
+        const filter = {};
+        if (status) filter.status = status;
+        if (projectId) filter.projectId = projectId;
+
+        const [data, total] = await Promise.all([
+            DisbursementRequest.find(filter)
+                .populate('projectId', 'title coverMedia targetAmount')
+                .populate('organizerId', 'fullName avatar email')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .session(session)
+                .lean()
+                .exec(),
+            DisbursementRequest.countDocuments(filter).session(session).exec()
+        ]);
+
+        return { data, total };
+    }
+
+    async findAllByProject(projectId, session = null) {
+        return await DisbursementRequest.find({ projectId })
+            .sort({ createdAt: -1 })
+            .session(session)
+            .lean()
+            .exec();
+    }
 }
 
 export default DisbursementRequestRepository;

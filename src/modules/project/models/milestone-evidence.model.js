@@ -17,6 +17,17 @@ const financialReportSchema = new mongoose.Schema(
     { _id: false }
 );
 
+const revisionHistorySchema = new mongoose.Schema({
+    reportContent: String,
+    mediaIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Media' }],
+    financialReport: financialReportSchema,
+    status: String,
+    reviewNotes: String,
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    reviewedAt: Date,
+    submittedAt: Date
+}, { _id: false });
+
 const milestoneEvidenceSchema = new mongoose.Schema(
     {
         projectId: {
@@ -48,6 +59,9 @@ const milestoneEvidenceSchema = new mongoose.Schema(
             type: financialReportSchema,
             default: null
         },
+
+        revisionHistory: { type: [revisionHistorySchema], default: [] },
+        
         status: {
             type: String,
             enum: ['PENDING', 'APPROVED', 'REJECTED', 'REVISION_REQUESTED'],

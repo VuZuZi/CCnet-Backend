@@ -9,7 +9,8 @@ import {
     disbursementParamsSchema,
     listRequestsQuerySchema,
     failTransferSchema,
-    updateHoldRequestSchema
+    updateHoldRequestSchema,
+    adminListDisbursementQuerySchema
 } from './disbursement.validation.js';
 
 const router = Router();
@@ -23,15 +24,31 @@ const execute = (action) => (req, res, next) => {
 router.get(
     '/my-requests',
     authenticate,
-    authorize('organizer'),
+    authorize('Organizer'),
     validateQuery(listRequestsQuerySchema),
     execute('getMyRequests')
 );
 
 router.get(
+    '/admin/list',
+    authenticate,
+    authorize('admin', 'manager'),
+    validateQuery(adminListDisbursementQuerySchema),
+    execute('getAdminDisbursementList')
+);
+
+router.get(
+    '/:id/stream',
+    authenticate,
+    authorize('Organizer', 'admin', 'manager'),
+    validateParams(disbursementParamsSchema),
+    execute('streamDisbursement')
+);
+
+router.get(
     '/:id',
     authenticate,
-    authorize('organizer', 'admin', 'manager'),
+    authorize('Organizer', 'admin', 'manager'),
     validateParams(disbursementParamsSchema),
     execute('getRequestDetail')
 );
@@ -39,7 +56,7 @@ router.get(
 router.post(
     '/',
     authenticate,
-    authorize('organizer'),
+    authorize('Organizer'), // Fix role chuẩn lowercase
     validateBody(createDisbursementSchema),
     execute('createRequest')
 );
@@ -74,7 +91,7 @@ router.patch(
 router.patch(
     '/:id/bank-account',
     authenticate,
-    authorize('organizer'),
+    authorize('Organizer'),
     validateParams(disbursementParamsSchema),
     validateBody(updateHoldRequestSchema),
     execute('updateBankAccount')

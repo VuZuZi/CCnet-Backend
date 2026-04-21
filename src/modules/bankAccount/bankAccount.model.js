@@ -6,6 +6,7 @@ const bankAccountSchema = new mongoose.Schema(
         userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
 
         bankName: { type: String, required: true, trim: true, maxlength: 100 },
+        bin: { type: String, required: true, trim: true, maxlength: 10 },
         accountNumber: { type: String, required: true, trim: true, maxlength: 50 },
         accountName: { type: String, required: true, trim: true, maxlength: 150 },
 

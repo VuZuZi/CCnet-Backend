@@ -211,7 +211,7 @@ class TransactionRepository {
 
         const [transactions, total] = await Promise.all([
             Transaction.find(filter)
-                .select('amount currency gatewayTransactionId createdAt status organizerRef')
+                .select('amount currency gatewayTransactionId createdAt status organizerRef milestoneId')
                 .populate('organizerRef', 'fullName avatar')
                 .sort({ createdAt: -1 })
                 .skip(skip)

@@ -42,11 +42,11 @@ class MilestoneEvidenceRepository {
         })
             .populate({
                 path: 'mediaIds',
-                select: 'url originalName mimetype size blurHash width height captureMetadata'
+                select: 'url mimetype originalName captureMetadata'
             })
             .populate({
                 path: 'financialReport.expenseItems.receiptMediaId',
-                select: 'url originalName mimetype size blurHash width height captureMetadata'
+                select: 'url mimetype originalName'
             })
             .lean()
             .exec();
@@ -79,25 +79,70 @@ class MilestoneEvidenceRepository {
     }
 
     async upsertEvidenceAtomic(projectId, milestoneId, payload, session = null) {
-        const updatedEvidence = await MilestoneEvidence.findOneAndUpdate(
-            {
-                projectId,
-                milestoneId,
-                status: { $in: ['REJECTED', 'REVISION_REQUESTED'] }
-            },
-            { $set: payload },
-            { new: true, runValidators: true, session }
-        ).lean().exec();
+        const existingEvidence = await MilestoneEvidence.findOne({
+            projectId,
+            milestoneId,
+            status: { $in: ['REJECTED', 'REVISION_REQUESTED'] }
+        }).session(session).lean().exec();
 
-        if (updatedEvidence) return updatedEvidence;
+        if (existingEvidence) {
+            const historyEntry = {
+                reportContent: existingEvidence.reportContent,
+                mediaIds: existingEvidence.mediaIds,
+                financialReport: existingEvidence.financialReport,
+                status: existingEvidence.status,
+                reviewNotes: existingEvidence.reviewNotes,
+                reviewedBy: existingEvidence.reviewedBy,
+                reviewedAt: existingEvidence.reviewedAt,
+                submittedAt: existingEvidence.createdAt
+            };
+
+            return await MilestoneEvidence.findByIdAndUpdate(
+                existingEvidence._id,
+                {
+                    $set: payload,
+                    $push: { revisionHistory: historyEntry }
+                },
+                { new: true, runValidators: true, session }
+            ).lean().exec();
+        }
 
         try {
             const docs = await MilestoneEvidence.create([payload], { session });
             return docs[0].toObject();
         } catch (error) {
-            if (error.code === 11000) return null; 
+            if (error.code === 11000) return null; // Bắt lỗi Race condition (MongoRetry sẽ lo)
             throw error;
         }
+    }
+
+    async findAndCountForAdmin({ skip = 0, limit = 10, status, projectId }, session = null) {
+        const filter = {};
+        if (status) filter.status = status;
+        if (projectId) filter.projectId = projectId;
+
+        const [data, total] = await Promise.all([
+            MilestoneEvidence.find(filter)
+                .populate('projectId', 'title coverMedia projectType')
+                .populate('organizerId', 'fullName avatar email')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .session(session)
+                .lean()
+                .exec(),
+            MilestoneEvidence.countDocuments(filter).session(session).exec()
+        ]);
+
+        return { data, total };
+    }
+
+    async findAllByProject(projectId, session = null) {
+        return await MilestoneEvidence.find({ projectId })
+            .sort({ createdAt: -1 })
+            .session(session)
+            .lean()
+            .exec();
     }
 }
 

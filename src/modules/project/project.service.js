@@ -49,6 +49,8 @@ class ProjectService {
     userRepository,
     eventBus,
     volunteerRepository,
+    disbursementRequestRepository,
+    milestoneEvidenceRepository
   }) {
     this.projectRepository = projectRepository;
     this.escrowRepository = escrowRepository;
@@ -63,6 +65,8 @@ class ProjectService {
     this.userRepository = userRepository;
     this.eventBus = eventBus;
     this.volunteerRepository = volunteerRepository;
+    this.disbursementRequestRepository = disbursementRequestRepository;
+    this.milestoneEvidenceRepository = milestoneEvidenceRepository;
   }
 
   _normalizeText(value) {
@@ -725,32 +729,86 @@ class ProjectService {
     let project = await this.projectRepository.findByIdWithDetails(projectId);
     if (!project) throw new AppError("Không tìm thấy dự án hoặc dự án đã bị xóa", 404);
 
-    project = await this.syncVolunteerOnlyProjectStatus(project);
-
-    let escrow = null;
-    if (project.projectType === PROJECT_TYPE.FUNDED && this.escrowRepository?.findByProjectId) {
-      escrow = await this.escrowRepository.findByProjectId(projectId);
+    if (typeof this.syncVolunteerOnlyProjectStatus === 'function') {
+      project = await this.syncVolunteerOnlyProjectStatus(project);
     }
 
-    this.redis.incr(`project:${projectId}:views`).catch(() => { });
+    let escrow = null;
+    let evidences = [];
+    let requests = [];
+
+    const parallelTasks = [];
+
+    if (this.milestoneEvidenceRepository?.findAllByProject) {
+      parallelTasks.push(
+        this.milestoneEvidenceRepository.findAllByProject(projectId)
+          .then(res => evidences = res)
+      );
+    }
+
+    if (project.projectType === PROJECT_TYPE.FUNDED) {
+      if (this.escrowRepository?.findByProjectId) {
+        parallelTasks.push(
+          this.escrowRepository.findByProjectId(projectId)
+            .then(res => escrow = res)
+        );
+      }
+
+      if (this.disbursementRequestRepository?.findAllByProject) {
+        parallelTasks.push(
+          this.disbursementRequestRepository.findAllByProject(projectId)
+            .then(res => requests = res)
+        );
+      }
+    }
+
+    if (parallelTasks.length > 0) {
+      await Promise.all(parallelTasks);
+    }
+
+    if (this.redis && typeof this.redis.incr === 'function') {
+      this.redis.incr(`project:${projectId}:views`).catch(() => { });
+    }
 
     const orgId = project.organizerId?._id || project.organizerId;
     let isFollowing = false;
     let isFollowingOrganizer = false;
 
     if (userId && this.followRepository) {
-      [isFollowing, isFollowingOrganizer] = await Promise.all([
-        this.followRepository.existsProjectFollow(userId, projectId),
-        orgId ? this.followRepository.exists(userId, orgId) : Promise.resolve(false),
-      ]);
+      const followTasks = [
+        this.followRepository.existsProjectFollow(userId, projectId)
+      ];
+      if (orgId) {
+        followTasks.push(this.followRepository.exists(userId, orgId));
+      }
+
+      const followResults = await Promise.all(followTasks);
+      isFollowing = followResults[0];
+      if (followResults.length > 1) isFollowingOrganizer = followResults[1];
     }
 
     const isOrganizer = userId && String(orgId) === String(userId);
-    const safeProjectData = ProjectDTO && typeof ProjectDTO.toOrganizerDetail === "function"
-      ? isOrganizer ? ProjectDTO.toOrganizerDetail(project, escrow) : ProjectDTO.toPublicDetail(project, escrow)
-      : toObject(project);
 
-    const decorated = this._decorateProjectUrgency(safeProjectData);
+    const safeProjectData = ProjectDTO && typeof ProjectDTO.toOrganizerDetail === "function"
+      ? isOrganizer
+        ? ProjectDTO.toOrganizerDetail(project, escrow, evidences, requests)
+        : ProjectDTO.toPublicDetail(project, escrow, evidences, requests)
+      : (typeof project.toObject === 'function' ? project.toObject() : project);
+
+    const decorated = typeof this._decorateProjectUrgency === 'function'
+      ? this._decorateProjectUrgency(safeProjectData)
+      : safeProjectData;
+
+    if (project.projectType === PROJECT_TYPE.FUNDED) {
+      const failedStatuses = ['FAILED_FUNDING', 'CANCELLED_FRAUD', 'CANCELLED_BY_PLATFORM', 'CANCELLED_BY_ORGANIZER'];
+      if (failedStatuses.includes(project.status)) {
+        decorated.refundBoard = project.refundSummary || {
+          isRefunded: false,
+          message: "Dự án đã bị hủy/thất bại. Hệ thống đang tiến hành đối soát và hoàn trả tiền 100% về ví cho các Nhà hảo tâm."
+        };
+      }
+    }
+
     return { ...decorated, isFollowing, isFollowingOrganizer };
   }
 

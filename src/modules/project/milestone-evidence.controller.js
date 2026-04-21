@@ -78,6 +78,15 @@ class MilestoneEvidenceController {
             next(error);
         }
     };
+
+    getAdminEvidenceList = async (req, res, next) => {
+        try {
+            const result = await this.milestoneEvidenceService.getAdminEvidenceList(req.query);
+            return ApiResponse.success(res, result, 'Lấy danh sách nghiệm thu cho Admin thành công');
+        } catch (error) {
+            next(error);
+        }
+    };
 }
 
 export default MilestoneEvidenceController;

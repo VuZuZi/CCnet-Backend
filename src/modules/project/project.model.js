@@ -17,6 +17,14 @@ const evidencePolicySchema = new mongoose.Schema(
   { _id: false }
 );
 
+const refundSummarySchema = new mongoose.Schema({
+    isRefunded: { type: Boolean, default: false },
+    totalRefunded: { type: Number, default: 0 },
+    donorCount: { type: Number, default: 0 },
+    refundedAt: { type: Date, default: null },
+    message: { type: String, default: 'Hệ thống đang tiến hành đối soát và hoàn trả tiền tự động.' }
+}, { _id: false });
+
 const milestoneSchema = new mongoose.Schema(
   {
     milestoneId: { type: String, default: uuidv4 },
@@ -33,6 +41,11 @@ const milestoneSchema = new mongoose.Schema(
     evidencePolicy: {
       type: evidencePolicySchema,
       default: () => ({ requireFinancial: false, requireGeoPhotos: 0 })
+    },
+
+    refundSummary: {
+        type: refundSummarySchema,
+        default: () => ({})
     },
 
     status: {

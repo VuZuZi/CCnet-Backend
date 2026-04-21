@@ -10,6 +10,7 @@ import {
   getContainer,
   initializeContainer,
   registerModule,
+  startWorkers,
 } from "./container/index.js";
 import { createConfiguredNotificationModule } from "./config/notification.js";
 
@@ -106,6 +107,8 @@ export const createApp = async () => {
   setTimeout(() => {
     getContainer().resolve("jobQueue").addJob("financial-reconciliation", "daily-reconciliation", {});
   }, 5000);
+
+  startWorkers();
 
   if (typeof configureSystemRoutes === "function") {
     configureSystemRoutes(app);

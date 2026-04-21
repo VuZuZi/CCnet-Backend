@@ -1,5 +1,5 @@
 import AppError from "../../core/AppError.js";
-import { BANK_ACCOUNT_STATUS } from "./bankAccount.constant.js";
+import { BANK_ACCOUNT_STATUS, getBankByShortName } from "./bankAccount.constant.js";
 
 class BankAccountService {
     constructor({ bankAccountRepository, userRepository, transactionManager }) {
@@ -8,8 +8,26 @@ class BankAccountService {
         this.transactionManager = transactionManager;
     }
 
+    _normalizeAccountName(str) {
+        if (!str) return '';
+        return str
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/đ/g, 'd').replace(/Đ/g, 'D')
+            .toUpperCase()
+            .trim();
+    }
+
     async addBankAccount(userId, payload) {
         const { bankName, accountNumber, accountName } = payload;
+
+        const bankInfo = getBankByShortName(bankName);
+        if (!bankInfo) {
+            throw new AppError("Ngân hàng không được hệ thống hỗ trợ.", 400);
+        }
+        const bin = bankInfo.bin;
+
+        const normalizedAccountName = this._normalizeAccountName(accountName);
 
         const existingAccounts = await this.bankAccountRepository.findByAccountNumber(accountNumber, bankName);
 
@@ -33,8 +51,9 @@ class BankAccountService {
             const account = await this.bankAccountRepository.create({
                 userId,
                 bankName,
+                bin,
                 accountNumber,
-                accountName,
+                accountName: normalizedAccountName,
                 microDepositAmount,
                 isCrossLinked,
                 crossLinkedToUserIds,
