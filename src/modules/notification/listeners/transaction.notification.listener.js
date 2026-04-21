@@ -5,6 +5,7 @@ import { buildNotificationPayload } from '../builders/notificationPayload.builde
 export function registerTransactionNotificationListener({
     eventBus,
     notificationService,
+    notificationBroadcastService,
     mailProvider = null,
     userRepository = null,
     logger,
@@ -94,6 +95,65 @@ export function registerTransactionNotificationListener({
             });
         } catch (error) {
             logger?.error?.('Lỗi Notif Hoàn tiền:', error.message);
+        }
+    });
+
+    eventBus.on(DOMAIN_EVENTS.TRANSACTION_REFUND_REQUESTED, async (payload) => {
+        try {
+            const { userId, transactionId, amount, reason } = payload;
+            if (!userId) return;
+
+            const notifPayload = buildNotificationPayload({
+                type: NOTIFICATION_TYPES.REFUND_REQUEST_SUBMITTED,
+                entityId: transactionId,
+                amount,
+                reason
+            });
+
+            await notificationService.createNotification({
+                recipientId: userId,
+                type: NOTIFICATION_TYPES.REFUND_REQUEST_SUBMITTED,
+                ...notifPayload
+            });
+
+            // Gửi thông báo cho Admin
+            const adminPayload = buildNotificationPayload({
+                type: NOTIFICATION_TYPES.REFUND_REQUEST_SUBMITTED,
+                title: 'Yêu cầu hoàn tiền mới',
+                message: `Có yêu cầu hoàn tiền mới cho giao dịch ${String(transactionId).slice(-8).toUpperCase()} đang chờ xử lý.`,
+                entityId: transactionId,
+                actionUrl: '/admin/refund-requests'
+            });
+
+            await notificationBroadcastService.sendToRole({
+                role: 'admin',
+                type: NOTIFICATION_TYPES.REFUND_REQUEST_SUBMITTED,
+                payload: adminPayload
+            }).catch(err => logger?.error?.('Lỗi gửi thông báo cho Admin:', err.message));
+        } catch (error) {
+            logger?.error?.('Lỗi Notif Yêu cầu hoàn tiền:', error.message);
+        }
+    });
+
+    eventBus.on(DOMAIN_EVENTS.TRANSACTION_REFUND_REJECTED, async (payload) => {
+        try {
+            const { userId, transactionId, amount, note } = payload;
+            if (!userId) return;
+
+            const notifPayload = buildNotificationPayload({
+                type: NOTIFICATION_TYPES.REFUND_REQUEST_REJECTED,
+                entityId: transactionId,
+                amount,
+                reviewNote: note
+            });
+
+            await notificationService.createNotification({
+                recipientId: userId,
+                type: NOTIFICATION_TYPES.REFUND_REQUEST_REJECTED,
+                ...notifPayload
+            });
+        } catch (error) {
+            logger?.error?.('Lỗi Notif Từ chối hoàn tiền:', error.message);
         }
     });
 

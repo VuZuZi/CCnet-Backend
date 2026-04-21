@@ -521,6 +521,29 @@ class ProjectRepository {
       .exec();
   }
 
+  async updateUpdatingProjectAtomic(
+    projectId,
+    organizerId,
+    updateData,
+    session = null,
+  ) {
+    if (!isValidObjectId(projectId) || !isValidObjectId(organizerId)) {
+      return null;
+    }
+
+    return await Project.findOneAndUpdate(
+      {
+        _id: toObjectId(projectId),
+        organizerId: toObjectId(organizerId),
+        status: PROJECT_STATUS.UPDATING,
+      },
+      { $set: updateData },
+      { new: true, runValidators: true, session },
+    )
+      .lean()
+      .exec();
+  }
+
   async findExpiredFundingProjects(currentDate, limit = 50) {
     return await Project.find({
       status: PROJECT_STATUS.FUNDING,

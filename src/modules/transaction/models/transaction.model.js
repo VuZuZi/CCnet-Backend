@@ -18,7 +18,7 @@ const transactionSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Project',
         required: function () {
-            return this.type !== TRANSACTION_TYPES.WALLET_WITHDRAWAL;
+            return ![TRANSACTION_TYPES.WALLET_WITHDRAWAL, TRANSACTION_TYPES.PLATFORM_FEE].includes(this.type);
         },
         index: true
     },
@@ -53,7 +53,7 @@ const transactionSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['PENDING', 'COMPLETED', 'FAILED', 'EXPIRED', 'TRANSFERRED'],
+        enum: ['PENDING', 'COMPLETED', 'FAILED', 'EXPIRED', 'TRANSFERRED', 'REFUNDED', 'REJECTED'],
         default: 'PENDING',
         index: true
     },

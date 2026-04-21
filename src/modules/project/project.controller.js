@@ -151,6 +151,58 @@ class ProjectController {
     }
   };
 
+  getUpdatingDetail = async (req, res, next) => {
+    try {
+      const result = await this.projectService.getUpdatingProjectDetail(
+        req.params.id,
+        getUserId(req),
+      );
+
+      return ApiResponse.success(
+        res,
+        result,
+        "Lấy chi tiết dự án đang cập nhật thành công",
+      );
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  updateUpdatingProject = async (req, res, next) => {
+    try {
+      const result = await this.projectService.updateUpdatingProject(
+        req.params.id,
+        getUserId(req),
+        req.body,
+      );
+
+      return ApiResponse.success(
+        res,
+        result,
+        "Đã cập nhật milestone của dự án",
+      );
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  confirmUpdatingProject = async (req, res, next) => {
+    try {
+      const result = await this.projectService.confirmUpdatingProject(
+        req.params.id,
+        getUserId(req),
+      );
+
+      return ApiResponse.success(
+        res,
+        result,
+        "Đã gửi xác nhận cập nhật dự án cho quản trị viên",
+      );
+    } catch (error) {
+      next(error);
+    }
+  };
+
   getWorkspaceStats = async (req, res, next) => {
     try {
       const result = await this.projectService.getWorkspaceStats(getUserId(req));

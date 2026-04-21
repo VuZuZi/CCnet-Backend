@@ -8,7 +8,8 @@ export class ProjectDTO {
         const sensitiveFields = [
             'aiRiskScore', 'riskFlags', 'approvedBy', 'approvedAt',
             'revisionCount', 'rejectionReason', 'pauseReason',
-            'submittedAt', 'revisionRequestedAt'
+            'submittedAt', 'revisionRequestedAt', 'updateRequestReason',
+            'updateRequestedAt', 'updateSubmittedAt', 'updateSubmittedBy'
         ];
         sensitiveFields.forEach(f => delete data[f]);
 
@@ -82,6 +83,9 @@ export class ProjectDTO {
         data.aiRiskScore = internalData.aiRiskScore;
         data.revisionCount = internalData.revisionCount;
         data.submittedAt = internalData.submittedAt;
+        data.updateRequestReason = internalData.updateRequestReason;
+        data.updateRequestedAt = internalData.updateRequestedAt;
+        data.updateSubmittedAt = internalData.updateSubmittedAt;
 
         return data;
     }

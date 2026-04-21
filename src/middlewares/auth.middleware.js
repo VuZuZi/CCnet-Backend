@@ -97,7 +97,16 @@ export const optionalAuthenticate = async (req, res, next) => {
 
 export const authorize = (...roles) => {
   return (req, res, next) => {
-    if (!req.user || !roles.includes(req.user.role)) {
+    if (!req.user) {
+      return next(new AppError("Forbidden: Insufficient permissions", 403));
+    }
+
+    const userRole = (req.user.role || "").toLowerCase();
+    const isAuthorized = roles.some(
+      (role) => role.toLowerCase() === userRole
+    );
+
+    if (!isAuthorized) {
       return next(new AppError("Forbidden: Insufficient permissions", 403));
     }
     next();

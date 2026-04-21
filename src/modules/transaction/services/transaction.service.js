@@ -44,8 +44,8 @@ class TransactionService {
 
     async getPublicProjectDisbursements(projectId, query) {
         const project = await this.projectRepository.findById(projectId);
-        if (!project) throw new AppError("Không tìm thấy dự án", 404);
-        if (project.projectType !== PROJECT_TYPE.FUNDED) throw new AppError("Dự án tình nguyện không có giao dịch giải ngân tài chính", 400);
+        if (!project) throw new AppError("Rất tiếc, hệ thống không tìm thấy thông tin về dự án này.", 404);
+        if (project.projectType !== PROJECT_TYPE.FUNDED) throw new AppError("Đây là dự án tình nguyện phi lợi nhuận, không bao gồm các giao dịch giải ngân tài chính.", 400);
 
         const { page, limit } = query;
         const skip = (page - 1) * limit;
@@ -58,10 +58,33 @@ class TransactionService {
         };
     }
 
-    _checkFundingConstraints(project) {
-        if (project.status !== PROJECT_STATUS.FUNDING) throw new AppError("Dự án hiện không trong giai đoạn nhận tài trợ", 400);
-        if (project.endDate && new Date() > new Date(project.endDate)) throw new AppError("Dự án đã kết thúc thời gian nhận tài trợ", 400);
-        if (project.targetAmount > 0 && project.currentAmount >= (project.targetAmount * 1.1)) throw new AppError("Dự án đã đạt giới hạn gọi vốn tối đa (110% mục tiêu). Không thể nhận thêm.", 400);
+    _checkFundingConstraints(project, currentFundedAmount = null) {
+        if (project.status !== PROJECT_STATUS.FUNDING) throw new AppError("Dự án này hiện đã tạm ngưng nhận quyên góp. Cảm ơn tấm lòng của bạn!", 400);
+        if (project.endDate && new Date() > new Date(project.endDate)) throw new AppError("Thời gian quyên góp cho dự án này đã kết thúc. Bạn hãy tham khảo các dự án khác nhé.", 400);
+
+        const fundedAmount = currentFundedAmount !== null
+            ? Number(currentFundedAmount || 0)
+            : Number(project.currentAmount || 0);
+
+        if (project.targetAmount > 0 && fundedAmount >= project.targetAmount) {
+            throw new AppError("Thật tuyệt vời! Dự án đã đạt đủ mục tiêu gọi vốn và xin phép ngừng nhận thêm quyên góp.", 400);
+        }
+    }
+
+    _validateDonationAmountAgainstTarget(project, fundedAmount, amount) {
+        const targetAmount = Number(project?.targetAmount || 0);
+        if (targetAmount <= 0) return;
+
+        const safeFundedAmount = Number(fundedAmount || 0);
+        const remainingAmount = Math.max(targetAmount - safeFundedAmount, 0);
+
+        if (remainingAmount <= 0) {
+            throw new AppError("Thật tuyệt vời! Dự án đã đạt đủ mục tiêu gọi vốn và xin phép ngừng nhận thêm quyên góp.", 400);
+        }
+
+        if (Number(amount || 0) > remainingAmount) {
+            throw new AppError(`Số tiền bạn gửi vượt quá mức cần thiết để hoàn thành mục tiêu (còn thiếu ${remainingAmount.toLocaleString('vi-VN')}đ).`, 400);
+        }
     }
 
     async initiateDonation(donorId, payload) {
@@ -70,11 +93,16 @@ class TransactionService {
 
         const project = await this.projectRepository.findById(projectId);
         if (!project) throw new AppError("Không tìm thấy dự án", 404);
-        this._checkFundingConstraints(project);
+
+        const escrow = await this.escrowRepository.findByProjectId(projectId);
+        const fundedAmount = Number(escrow?.availableBalance ?? project.currentAmount ?? 0);
+
+        this._checkFundingConstraints(project, fundedAmount);
+        this._validateDonationAmountAgainstTarget(project, fundedAmount, safeAmount);
 
         if (paymentMethod === 'WALLET') {
             const wallet = await this.walletRepository.findByUserId(donorId);
-            if (wallet.balance < safeAmount) throw new AppError(`Số dư ví không đủ. Hiện tại: ${wallet.balance.toLocaleString()} VNĐ`, 400);
+            if (wallet.balance < safeAmount) throw new AppError(`Số dư Ví của bạn hiện không đủ để thực hiện giao dịch. Bạn vui lòng nạp thêm để tiếp tục nhé!`, 400);
 
             const result = await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
                 await this.walletRepository.incrementBalance(donorId, -safeAmount, session);
@@ -112,7 +140,7 @@ class TransactionService {
                 return { tx: transaction, isHardCapped };
             });
 
-            return { transactionId: result.tx._id, paymentMethod: 'WALLET', status: 'COMPLETED', message: 'Thanh toán qua ví thành công' };
+            return { transactionId: result.tx._id, paymentMethod: 'WALLET', status: 'COMPLETED', message: 'Tuyệt vời! Bạn đã quyên góp thành công qua Ví CCNet.' };
         }
 
         const redisClient = this.redis.getClient();
@@ -171,7 +199,7 @@ class TransactionService {
 
             if (!acquired) {
                 await this.webhookAuditLogRepository.updateStatus(auditLog._id, 'FAILED', { errorMessage: 'Concurrent processing lock' });
-                throw new AppError("Giao dịch đang được xử lý bởi luồng khác", 429);
+                throw new AppError("Hệ thống đang xử lý giao dịch này, vui lòng không thao tác lặp lại.", 429);
             }
 
             try {
@@ -254,6 +282,63 @@ class TransactionService {
         return [...new Set([...matches10, ...matchesLegacy])];
     }
 
+    _computeProportionalRefunds(contributions = [], totalPool = 0) {
+        if (!Array.isArray(contributions) || contributions.length === 0) {
+            return [];
+        }
+
+        const normalizedPool = Math.max(0, Math.floor(Number(totalPool || 0)));
+        if (normalizedPool <= 0) return [];
+
+        const totalContribution = contributions.reduce(
+            (sum, item) => sum + Math.max(0, Math.floor(Number(item?.amount || 0))),
+            0
+        );
+
+        if (totalContribution <= 0) return [];
+
+        const allocated = contributions.map((item) => {
+            const amount = Math.max(0, Math.floor(Number(item?.amount || 0)));
+            const exact = (normalizedPool * amount) / totalContribution;
+            const baseAmount = Math.floor(exact);
+
+            return {
+                donorId: String(item?.donorId || '').trim(),
+                donatedAmount: amount,
+                refundAmount: baseAmount,
+                remainderWeight: exact - baseAmount,
+            };
+        }).filter((item) => item.donorId && item.donatedAmount > 0);
+
+        let distributed = allocated.reduce((sum, item) => sum + item.refundAmount, 0);
+        let remainder = Math.max(0, normalizedPool - distributed);
+
+        if (remainder > 0 && allocated.length > 0) {
+            const ranked = [...allocated].sort((a, b) => {
+                if (b.remainderWeight !== a.remainderWeight) {
+                    return b.remainderWeight - a.remainderWeight;
+                }
+
+                if (b.donatedAmount !== a.donatedAmount) {
+                    return b.donatedAmount - a.donatedAmount;
+                }
+
+                return a.donorId.localeCompare(b.donorId);
+            });
+
+            let pointer = 0;
+            while (remainder > 0) {
+                ranked[pointer].refundAmount += 1;
+                remainder -= 1;
+                pointer = (pointer + 1) % ranked.length;
+            }
+        }
+
+        return allocated
+            .filter((item) => item.refundAmount > 0)
+            .map(({ remainderWeight, ...item }) => item);
+    }
+
     async _processMatchedDonation(baseTx, transferAmount, bankRef, rawWebhook) {
         const feeRate = this.config?.platformFeePercent || 0.015;
         const { netAmount, platformFee } = MoneyMath.calculateProRata(transferAmount, feeRate);
@@ -265,7 +350,7 @@ class TransactionService {
                 session
             );
 
-            if (!currentTx) throw new AppError(`Xung đột hệ thống: Giao dịch đã được xử lý bởi luồng khác.`, 409);
+            if (!currentTx) throw new AppError(`Giao dịch này đã được ghi nhận trước đó. Cảm ơn bạn!`, 409);
 
             const updatedEscrow = await this.escrowRepository.incrementBalance(currentTx.projectId, netAmount, session);
             const updatedProject = await this.projectRepository.incrementFunding(currentTx.projectId, netAmount, session);
@@ -305,6 +390,125 @@ class TransactionService {
             }
         }
         return result;
+    }
+
+    async processProjectCancellationRefund(projectId, options = {}) {
+        const { session = null, actorId = null } = options;
+        const project = await this.projectRepository.findById(projectId, session);
+        if (!project) throw new AppError('Project not found.', 404);
+
+        const donations = await this.transactionRepository.findCompletedDonationsByProject(projectId, session);
+
+        if (!donations || donations.length === 0) {
+            return {
+                projectId: String(projectId),
+                projectTitle: project.title,
+                totalRefunded: 0,
+                donorCount: 0,
+                donationCount: 0,
+                refundedUserIds: [],
+                refundAllocations: [],
+            };
+        }
+
+        const lockedDonations = [];
+        for (const donation of donations) {
+            const locked = await this.transactionRepository.reconcileDonationAtomic(donation._id, session);
+            if (locked) {
+                lockedDonations.push(donation);
+            }
+        }
+
+        if (lockedDonations.length === 0) {
+            return {
+                projectId: String(projectId),
+                projectTitle: project.title,
+                totalRefunded: 0,
+                donorCount: 0,
+                donationCount: 0,
+                refundedUserIds: [],
+                refundAllocations: [],
+            };
+        }
+
+        const donorMap = new Map();
+        for (const donation of lockedDonations) {
+            const donorId = String(donation?.donorRef || '').trim();
+            if (!donorId) continue;
+
+            const donatedAmount = MoneyMath.toIntegerAmount(
+                Number(donation?.netAmount ?? donation?.amount ?? 0)
+            );
+
+            if (donatedAmount <= 0) continue;
+            donorMap.set(donorId, (donorMap.get(donorId) || 0) + donatedAmount);
+        }
+
+        const donorContributions = [...donorMap.entries()].map(([donorId, amount]) => ({ donorId, amount }));
+        const totalContributed = donorContributions.reduce((sum, item) => sum + item.amount, 0);
+        const refundAllocations = this._computeProportionalRefunds(donorContributions, totalContributed);
+
+        if (refundAllocations.length === 0) {
+            return {
+                projectId: String(projectId),
+                projectTitle: project.title,
+                totalRefunded: 0,
+                donorCount: 0,
+                donationCount: lockedDonations.length,
+                refundedUserIds: [],
+                refundAllocations: [],
+            };
+        }
+
+        const refundTransactions = refundAllocations.map((allocation) => ({
+            type: 'REFUND',
+            amount: allocation.refundAmount,
+            grossAmount: allocation.refundAmount,
+            netAmount: -allocation.refundAmount,
+            platformFee: 0,
+            projectId,
+            donorRef: allocation.donorId,
+            status: 'COMPLETED',
+            message: 'Hoàn tiền 100% tự động vào ví do dự án bị hủy bởi hệ thống',
+            gatewayResponse: {
+                source: 'PROJECT_CANCELLATION',
+                cancelledBy: actorId ? String(actorId) : null,
+                donationShareAmount: allocation.donatedAmount,
+            },
+        }));
+
+        await this.transactionRepository.bulkInsert(refundTransactions, session);
+
+        for (const allocation of refundAllocations) {
+            await this.walletRepository.incrementBalance(
+                allocation.donorId,
+                allocation.refundAmount,
+                session
+            );
+        }
+
+        const totalRefunded = refundAllocations.reduce(
+            (sum, item) => sum + item.refundAmount,
+            0
+        );
+
+        if (totalRefunded > 0) {
+            await this.escrowRepository.recordRefund(projectId, totalRefunded, session);
+        }
+
+        return {
+            projectId: String(projectId),
+            projectTitle: project.title,
+            totalRefunded,
+            donorCount: refundAllocations.length,
+            donationCount: lockedDonations.length,
+            refundedUserIds: refundAllocations.map((item) => String(item.donorId)),
+            refundAllocations: refundAllocations.map((item) => ({
+                donorId: String(item.donorId),
+                refundAmount: item.refundAmount,
+                donatedAmount: item.donatedAmount,
+            })),
+        };
     }
 
     async processAutoRefundToWallet(projectId) {
@@ -359,43 +563,222 @@ class TransactionService {
         return { success: true, processedCount };
     }
 
-    async processUserRefundRequest(userId, transactionId) {
+    async processUserRefundRequest(userId, transactionId, payload = {}) {
+        const { reason } = payload;
         const tx = await this.transactionRepository.findById(transactionId);
-        if (!tx) throw new AppError("Không tìm thấy giao dịch", 404);
-        if (String(tx.donorRef) !== String(userId)) throw new AppError("Bạn không có quyền hoàn tiền giao dịch này", 403);
-        if (tx.status !== 'COMPLETED' || !['DONATION', 'DONATION_FROM_WALLET'].includes(tx.type)) throw new AppError("Chỉ có thể hoàn tiền các giao dịch donate thành công", 400);
+        if (!tx) throw new AppError("Chúng tôi không tìm thấy thông tin giao dịch mà bạn yêu cầu.", 404);
+        if (String(tx.donorRef) !== String(userId)) throw new AppError("Rất tiếc, bạn không có quyền yêu cầu hoàn tiền cho giao dịch không thuộc sở hữu của mình.", 403);
+        if (tx.status !== 'COMPLETED' || !['DONATION', 'DONATION_FROM_WALLET'].includes(tx.type)) throw new AppError("Chỉ những giao dịch quyên góp đã thành công mới có thể yêu cầu hoàn tiền.", 400);
+
+        const existingRefundRequest = await this.transactionRepository.findRefundRequestBySourceTransaction(tx._id);
+        if (existingRefundRequest) throw new AppError("Giao dịch này đã được gửi yêu cầu hoàn tiền trước đó và đang xử lý.", 400);
 
         const hoursSinceDonation = (Date.now() - new Date(tx.createdAt).getTime()) / (1000 * 60 * 60);
-        if (hoursSinceDonation > (USER_REFUND_POLICY.ALLOWED_HOURS || 72)) throw new AppError("Đã quá thời hạn 72h được phép hoàn tiền tự động", 400);
+        if (hoursSinceDonation > (USER_REFUND_POLICY.ALLOWED_HOURS || 72)) throw new AppError("Đã quá thời hạn 72 giờ quy định để yêu cầu hoàn tiền. Cảm ơn bạn đã đồng hành cùng dự án.", 400);
 
         const penaltyRate = USER_REFUND_POLICY.PERCENTAGE_FEE || 0.02;
         const refundAmount = Math.floor(tx.netAmount * (1 - penaltyRate));
-        const projectKeeps = tx.netAmount - refundAmount;
+        const retainedFee = tx.netAmount - refundAmount;
 
-        const result = await this.transactionManager.runInTransaction(async (session) => {
-            await this.transactionRepository.updateStatus(tx._id, 'REFUNDED', {}, session);
-
-            const refundTx = await this.transactionRepository.create({
+        const result = await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
+            const refundRequestTx = await this.transactionRepository.create({
                 type: 'USER_REFUND_REQUEST', amount: refundAmount, grossAmount: refundAmount, netAmount: refundAmount,
-                platformFee: 0, projectId: tx.projectId, donorRef: userId, status: 'COMPLETED', message: `Hoàn tiền vào ví (Đã trừ phí)`
+                platformFee: 0, projectId: tx.projectId, donorRef: userId, status: 'PENDING',
+                message: reason || 'Yêu cầu hoàn tiền từ người dùng',
+                gatewayResponse: {
+                    sourceTransactionId: String(tx._id),
+                    originalAmount: tx.netAmount,
+                    refundAmount,
+                    retainedFee,
+                    reason: reason || null,
+                    requestedAt: new Date().toISOString()
+                }
             }, session);
 
-            if (projectKeeps > 0) {
+            dispatchEvent(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, {
+                recipientIds: ['ADMIN_GROUP'],
+                title: 'Có yêu cầu hoàn tiền mới',
+                message: `Người dùng vừa gửi yêu cầu hoàn tiền cho giao dịch ${String(tx._id).slice(-8).toUpperCase()}.`
+            });
+
+            dispatchEvent(DOMAIN_EVENTS.TRANSACTION_REFUND_REQUESTED, {
+                userId: String(userId),
+                transactionId: String(refundRequestTx._id),
+                amount: refundAmount,
+                reason: reason || null
+            });
+
+            return refundRequestTx;
+        });
+
+        return {
+            requestId: result._id,
+            status: result.status,
+            refundAmount,
+            retainedFee,
+            message: 'Yêu cầu hoàn tiền đã được gửi đi thành công. Quản trị viên sẽ phản hồi bạn trong thời gian sớm nhất.'
+        };
+    }
+
+    async getRefundRequestsForAdmin(query = {}) {
+        const page = parseInt(query?.page, 10) || 1;
+        const limit = parseInt(query?.limit, 10) || 10;
+        const status = query?.status || 'PENDING';
+        const skip = (page - 1) * limit;
+
+        const { requests, total } = await this.transactionRepository.findRefundRequestsForAdmin({
+            skip,
+            limit,
+            status
+        });
+
+        const items = requests.map((req) => {
+            const sourceTransactionId = req?.gatewayResponse?.sourceTransactionId || null;
+            return {
+                id: req._id,
+                status: req.status,
+                requestedAt: req.createdAt,
+                updatedAt: req.updatedAt,
+                reason: req?.gatewayResponse?.reason || req.message || '',
+                sourceTransactionId,
+                originalAmount: req?.gatewayResponse?.originalAmount ?? null,
+                refundAmount: req?.gatewayResponse?.refundAmount ?? req.amount,
+                retainedFee: req?.gatewayResponse?.retainedFee ?? 0,
+                donor: req.donorRef || null,
+                project: req.projectId || null,
+                adminDecision: req?.gatewayResponse?.adminDecision || null
+            };
+        });
+
+        return {
+            items,
+            pagination: {
+                totalItems: total,
+                currentPage: page,
+                totalPages: Math.ceil(total / limit) || 1,
+                hasNextPage: page * limit < total
+            }
+        };
+    }
+
+    async approveRefundRequest(adminId, requestId, payload = {}) {
+        const note = payload?.note || '';
+        const requestTx = await this.transactionRepository.findById(requestId);
+        if (!requestTx || requestTx.type !== 'USER_REFUND_REQUEST') throw new AppError('Không tìm thấy yêu cầu hoàn tiền', 404);
+        if (requestTx.status !== 'PENDING') throw new AppError('Yêu cầu hoàn tiền này đã được xử lý.', 400);
+
+        const sourceTransactionId = requestTx?.gatewayResponse?.sourceTransactionId;
+        const sourceTx = await this.transactionRepository.findById(sourceTransactionId);
+        if (!sourceTx) throw new AppError('Giao dịch gốc không tồn tại.', 404);
+        if (sourceTx.status !== 'COMPLETED') throw new AppError('Giao dịch gốc không còn hợp lệ để hoàn tiền.', 400);
+
+        const penaltyRate = USER_REFUND_POLICY.PERCENTAGE_FEE || 0.02;
+        const refundAmount = Math.floor(sourceTx.netAmount * (1 - penaltyRate));
+        const retainedFee = sourceTx.netAmount - refundAmount;
+
+        const result = await this.transactionManager.runInTransaction(async (session) => {
+            const nextGatewayResponse = {
+                ...(requestTx.gatewayResponse || {}),
+                adminDecision: {
+                    decision: 'APPROVED',
+                    note,
+                    actorId: String(adminId),
+                    decidedAt: new Date().toISOString()
+                }
+            };
+
+            await this.transactionRepository.updateStatus(requestTx._id, 'COMPLETED', {
+                amount: refundAmount,
+                grossAmount: refundAmount,
+                netAmount: refundAmount,
+                gatewayResponse: nextGatewayResponse
+            }, session);
+
+            await this.transactionRepository.updateStatus(sourceTx._id, 'REFUNDED', {}, session);
+
+            if (retainedFee > 0) {
                 await this.transactionRepository.create({
-                    type: 'RETAINED_DONATION', amount: projectKeeps, grossAmount: projectKeeps, netAmount: projectKeeps,
-                    platformFee: 0, projectId: tx.projectId, donorRef: userId, status: 'COMPLETED', message: "Phí hoàn tiền"
+                    type: 'PLATFORM_FEE',
+                    amount: retainedFee,
+                    grossAmount: retainedFee,
+                    netAmount: retainedFee,
+                    platformFee: 0,
+                    projectId: null,
+                    donorRef: null,
+                    status: 'COMPLETED',
+                    message: 'Phí duy trì nền tảng từ yêu cầu hoàn tiền đã duyệt',
+                    gatewayResponse: {
+                        refundRequestId: String(requestTx._id),
+                        sourceTransactionId: String(sourceTx._id)
+                    }
                 }, session);
             }
 
-            await this.projectRepository.decrementFunding(tx.projectId, refundAmount, session);
-            await this.escrowRepository.recordRefund(tx.projectId, refundAmount, session);
-            await this.walletRepository.incrementBalance(userId, refundAmount, session);
+            await this.projectRepository.decrementFunding(sourceTx.projectId, sourceTx.netAmount, session);
+            await this.escrowRepository.recordRefund(sourceTx.projectId, sourceTx.netAmount, session);
+            await this.walletRepository.incrementBalance(sourceTx.donorRef, refundAmount, session);
+            await this.systemFinancialRepository.incrementSystemFunds(0, retainedFee, session);
 
-            return refundTx;
+            return {
+                requestId: requestTx._id,
+                sourceTransactionId: sourceTx._id,
+                refundAmount,
+                retainedFee
+            };
         });
 
-        if (this.eventBus) this.eventBus.emit(DOMAIN_EVENTS.REFUND_COMPLETED, { userId, projectId: tx.projectId, refundAmount, retainedAmount: projectKeeps });
-        return result;
+        if (this.eventBus) {
+            this.eventBus.emit(DOMAIN_EVENTS.TRANSACTION_REFUNDED, {
+                userId: String(sourceTx.donorRef),
+                transactionId: String(sourceTx._id),
+                amount: result.refundAmount,
+                isAutoRefund: false
+            });
+        }
+
+        return {
+            ...result,
+            message: 'Đã duyệt hoàn tiền và cập nhật số dư ví người dùng.'
+        };
+    }
+
+    async rejectRefundRequest(adminId, requestId, payload = {}) {
+        const note = payload?.note || '';
+        const requestTx = await this.transactionRepository.findById(requestId);
+        if (!requestTx || requestTx.type !== 'USER_REFUND_REQUEST') throw new AppError('Không tìm thấy yêu cầu hoàn tiền', 404);
+        if (requestTx.status !== 'PENDING') throw new AppError('Yêu cầu hoàn tiền này đã được xử lý.', 400);
+
+        const nextGatewayResponse = {
+            ...(requestTx.gatewayResponse || {}),
+            adminDecision: {
+                decision: 'REJECTED',
+                note,
+                actorId: String(adminId),
+                decidedAt: new Date().toISOString()
+            }
+        };
+
+        await this.transactionRepository.updateStatus(requestTx._id, 'REJECTED', {
+            gatewayResponse: nextGatewayResponse
+        });
+
+        if (this.eventBus) {
+            this.eventBus.emit(DOMAIN_EVENTS.TRANSACTION_REFUND_REJECTED, {
+                userId: String(requestTx.donorRef),
+                transactionId: String(requestTx._id),
+                amount:
+                    requestTx?.gatewayResponse?.refundAmount ??
+                    requestTx.amount ??
+                    0,
+                note,
+            });
+        }
+
+        return {
+            requestId: requestTx._id,
+            status: 'REJECTED',
+            message: 'Đã từ chối yêu cầu hoàn tiền.'
+        };
     }
 
     async processWalletWithdrawal(userId, payload) {
@@ -428,7 +811,30 @@ class TransactionService {
         const skip = (page - 1) * limit;
 
         const { transactions, total } = await this.transactionRepository.findUserDonations(userId, skip, limit);
-        return { donations: transactions, pagination: { totalItems: total, currentPage: page, totalPages: Math.ceil(total / limit) || 1, hasNextPage: page * limit < total } };
+
+        const donationIds = transactions.map((tx) => String(tx._id));
+        const refundRequests = await this.transactionRepository.findRefundRequestsBySourceTransactionIds(donationIds);
+        const refundRequestMap = new Map(
+            refundRequests.map((request) => [String(request?.gatewayResponse?.sourceTransactionId), request])
+        );
+
+        const donations = transactions.map((tx) => {
+            const refundRequest = refundRequestMap.get(String(tx._id));
+            return {
+                ...tx,
+                refundRequest: refundRequest ? {
+                    id: refundRequest._id,
+                    status: refundRequest.status,
+                    requestedAt: refundRequest.createdAt,
+                    updatedAt: refundRequest.updatedAt,
+                    refundAmount: refundRequest?.gatewayResponse?.refundAmount ?? refundRequest.amount,
+                    retainedFee: refundRequest?.gatewayResponse?.retainedFee ?? 0,
+                    note: refundRequest?.gatewayResponse?.adminDecision?.note || ''
+                } : null
+            };
+        });
+
+        return { donations, pagination: { totalItems: total, currentPage: page, totalPages: Math.ceil(total / limit) || 1, hasNextPage: page * limit < total } };
     }
 
     async getProjectDonors(projectId, query) {
@@ -452,20 +858,8 @@ class TransactionService {
         return { id: tx._id, status: tx.status, netAmount: tx.netAmount, createdAt: tx.createdAt };
     }
 
-    async updateDonationMessage(userId, transactionId, payload) {
-        const { message, isAnonymous } = payload;
-        const tx = await this.transactionRepository.findById(transactionId);
-
-        if (!tx) throw new AppError("Không tìm thấy giao dịch", 404);
-        if (String(tx.donorRef) !== String(userId)) throw new AppError("Không có quyền chỉnh sửa", 403);
-        if (!['DONATION', 'DONATION_FROM_WALLET'].includes(tx.type)) throw new AppError("Chỉ có thể cập nhật giao dịch quyên góp", 400);
-
-        const updateData = {};
-        if (message !== undefined) updateData.message = message;
-        if (isAnonymous !== undefined) updateData.isAnonymous = isAnonymous;
-
-        const updatedTx = await this.transactionRepository.updateDonationMessage(transactionId, userId, updateData);
-        return { transactionId: updatedTx._id, message: updatedTx.message, isAnonymous: updatedTx.isAnonymous, status: updatedTx.status };
+    async updateDonationMessage() {
+        throw new AppError('Tính năng chỉnh sửa lời nhắn đã bị tắt.', 410);
     }
 
     async confirmPaymentIntent(userId, transactionId) {

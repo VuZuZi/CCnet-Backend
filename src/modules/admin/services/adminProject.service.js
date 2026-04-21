@@ -20,6 +20,7 @@ class AdminProjectService {
     userRepository,
     escrowRepository,
     transactionManager,
+    transactionService,
     jobQueue,
     eventBus,
     volunteerRepository,
@@ -31,6 +32,7 @@ class AdminProjectService {
     this.userRepository = userRepository;
     this.escrowRepository = escrowRepository;
     this.transactionManager = transactionManager;
+    this.transactionService = transactionService;
     this.jobQueue = jobQueue;
     this.eventBus = eventBus;
     this.volunteerRepository = volunteerRepository;
@@ -88,6 +90,11 @@ class AdminProjectService {
       feedback
     );
 
+    const actionUrl =
+      project.status === PROJECT_STATUS.UPDATING
+        ? `/projects/${project._id}/updating`
+        : `/projects/${project._id}`;
+
     this.eventBus.emit(DOMAIN_EVENTS.PROJECT_STATUS_UPDATED, {
       recipientIds: [String(organizerId)],
       actorId,
@@ -96,7 +103,42 @@ class AdminProjectService {
       status: project.status,
       title,
       message,
-      actionUrl: `/projects/${project._id}`,
+      actionUrl,
+    });
+  }
+
+  _extractUserId(value) {
+    if (!value) return "";
+    if (typeof value === "object") {
+      return String(value._id || "").trim();
+    }
+
+    return String(value).trim();
+  }
+
+  _emitProjectCancellationSystemNotification({
+    project,
+    actorId,
+    recipientIds,
+    feedback,
+  }) {
+    const uniqueRecipientIds = [
+      ...new Set((recipientIds || []).map((id) => String(id || "").trim()).filter(Boolean)),
+    ];
+
+    if (!uniqueRecipientIds.length) return;
+    if (!this.eventBus || typeof this.eventBus.emit !== "function") return;
+
+    const safeReason = String(feedback || "").trim() || "Không có lý do cụ thể";
+
+    this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_ANNOUNCEMENT_CREATED, {
+      actorId,
+      userIds: uniqueRecipientIds,
+      title: "Dự án đã bị hủy bởi hệ thống",
+      message: `Dự án \"${project?.title || "Dự án không tên"}\" đã bị hủy bởi hệ thống. Lý do: ${safeReason}. Nếu bạn đã tham gia quyên góp, 100% số tiền gốc sẽ được hoàn trả tự động vào ví CCNet của bạn mà không mất bất kỳ khoản phí nào.`,
+      actionUrl: `/projects/${project?._id}`,
+      entityId: project?._id,
+      severity: "high",
     });
   }
 
@@ -212,12 +254,58 @@ class AdminProjectService {
         adminId
       );
 
+      let cancellationSummary = null;
+      let cancellationRecipientIds = [];
+
       let userUpdate = null;
 
       if (finalStatus === PROJECT_STATUS.REJECTED) {
         const coolingPeriodEnd = new Date();
         coolingPeriodEnd.setDate(coolingPeriodEnd.getDate() + 7);
         userUpdate = { coolingPeriodEnd };
+      }
+
+      if (finalStatus === PROJECT_STATUS.CANCELLED_BY_PLATFORM) {
+        cancellationSummary = await this.transactionService.processProjectCancellationRefund(
+          projectId,
+          {
+            session,
+            actorId: adminId,
+          }
+        );
+
+        const totalRefunded = Number(cancellationSummary?.totalRefunded || 0);
+        const refundedAt = totalRefunded > 0 ? new Date() : null;
+
+        updateData.currentAmount = Math.max(
+          0,
+          Number(project?.currentAmount || 0) - totalRefunded
+        );
+        updateData.refundSummary = {
+          isRefunded: totalRefunded > 0,
+          totalRefunded,
+          donorCount: Number(cancellationSummary?.donorCount || 0),
+          refundedAt,
+          message:
+            totalRefunded > 0
+              ? `Hệ thống đã tự động hoàn 100% tiền cho ${Number(cancellationSummary?.donorCount || 0)} người dùng quyên góp do dự án bị hủy.`
+              : "Không có giao dịch quyên góp hợp lệ nào cần hoàn tiền cho dự án này.",
+        };
+
+        const approvedVolunteers =
+          await this.volunteerRepository.findByVolApproved(projectId, session);
+        const pendingVolunteers =
+          await this.volunteerRepository.findByVolPending(projectId, session);
+
+        cancellationRecipientIds = [
+          ...(cancellationSummary?.refundedUserIds || []),
+          ...(approvedVolunteers || []).map((item) =>
+            this._extractUserId(item?.volunteerId)
+          ),
+          ...(pendingVolunteers || []).map((item) =>
+            this._extractUserId(item?.volunteerId)
+          ),
+        ];
       }
 
       await this._ensureEscrowForFundedProject(
@@ -292,11 +380,36 @@ class AdminProjectService {
         },
       });
 
+      const notificationFeedback =
+        finalStatus === PROJECT_STATUS.UPDATING
+          ? updateData.updateRequestReason
+          : updateData.rejectionReason;
+
       this._emitProjectStatusUpdated({
         project: updatedProject,
         actorId: adminId,
-        feedback: updateData.rejectionReason,
+        feedback: notificationFeedback,
       });
+
+      if (finalStatus === PROJECT_STATUS.CANCELLED_BY_PLATFORM) {
+        this._emitProjectCancellationSystemNotification({
+          project: updatedProject,
+          actorId: adminId,
+          recipientIds: cancellationRecipientIds,
+          feedback: normalizedFeedback,
+        });
+
+        for (const allocation of cancellationSummary?.refundAllocations || []) {
+          if (!allocation?.donorId || !allocation?.refundAmount) continue;
+
+          this.eventBus.emit(DOMAIN_EVENTS.TRANSACTION_REFUNDED, {
+            userId: String(allocation.donorId),
+            transactionId: String(updatedProject._id),
+            amount: Number(allocation.refundAmount || 0),
+            isAutoRefund: true,
+          });
+        }
+      }
 
       return updatedProject;
     });

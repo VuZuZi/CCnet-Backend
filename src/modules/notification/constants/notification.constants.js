@@ -16,7 +16,9 @@ export const NOTIFICATION_TYPES = Object.freeze({
 
   DONATION_SUCCESSFUL: 'donation_successful',
 
+  REFUND_REQUEST_SUBMITTED: 'refund_request_submitted',
   TRANSACTION_REFUNDED: 'transaction_refunded',
+  REFUND_REQUEST_REJECTED: 'refund_request_rejected',
   TRANSACTION_WITHDRAWAL_REQUESTED: 'transaction_withdrawal_requested',
   TRANSACTION_FAILED: 'transaction_failed',
   POST_REACTED: 'post_reacted',
