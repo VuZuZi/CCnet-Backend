@@ -11,6 +11,8 @@ import SepayProvider from "../core/payment/sepay-provider.js";
 
 import TransactionSSEService from "../modules/transaction/services/transaction-sse.service.js";
 import DisbursementSSEService from "../modules/disbursement/services/disbursement-sse.service.js";
+import ReviewWorkflowReconciler from "../modules/volunteer-engagement/review-workflow.reconciler.js";
+import ProjectStatusChangeStreamService from "../modules/project/project-status.change-stream.service.js";
 
 import { registerTransactionListeners } from "../modules/transaction/transaction.listener.js";
 import { registerDisbursementListeners } from "../modules/disbursement/disbursement.listener.js";
@@ -31,6 +33,10 @@ export const initializeContainer = () => {
     paymentProvider: asClass(SepayProvider).singleton(),
     transactionSseService: asClass(TransactionSSEService).singleton(),
     disbursementSseService: asClass(DisbursementSSEService).singleton(),
+    reviewWorkflowReconciler: asClass(ReviewWorkflowReconciler).singleton(),
+    projectStatusChangeStreamService: asClass(
+      ProjectStatusChangeStreamService
+    ).singleton(),
   });
 
   container.loadModules(
@@ -48,7 +54,7 @@ export const initializeContainer = () => {
       "../modules/**/*.service.js",
       "../modules/**/*.repository.js",
       "../modules/**/*.controller.js",
-      "../modules/**/*.processor.js"
+      "../modules/**/*.processor.js",
     ],
     {
       cwd: import.meta.dirname,
@@ -72,12 +78,16 @@ export const getContainer = () => {
   return container;
 };
 
-export const startWorkers = () => {
+export const startWorkers = async () => {
   const container = getContainer();
   const jobQueue = container.resolve("jobQueue");
 
   const followProcessor = container.resolve("followProcessor");
   const volunteerReviewProcessor = container.resolve("volunteerReviewProcessor");
+  const reviewWorkflowReconciler = container.resolve("reviewWorkflowReconciler");
+  const projectStatusChangeStreamService = container.resolve(
+    "projectStatusChangeStreamService"
+  );
 
   jobQueue.registerWorker("follow-updates", followProcessor.getProcessor());
   jobQueue.registerWorker(
@@ -92,7 +102,12 @@ export const startWorkers = () => {
   registerTransactionListeners({ eventBus, transactionService });
   registerDisbursementListeners({ eventBus, disbursementService });
 
-  console.log("[Worker] All queue workers and event listeners have been started.");
+  reviewWorkflowReconciler.start();
+  await projectStatusChangeStreamService.start();
+
+  console.log(
+    "[Worker] All queue workers, event listeners, reconciler, and project change stream have been started."
+  );
 };
 
 export default {

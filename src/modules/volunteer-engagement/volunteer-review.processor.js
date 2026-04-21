@@ -6,22 +6,22 @@ class VolunteerReviewProcessor {
   getProcessor() {
     return async (job) => {
       switch (job.name) {
-        case "auto-max-review":
-          return this.handleAutoMaxReview(job);
+        case "auto-review":
+          return this.handleAutoReview(job);
         default:
           throw new Error(`Unsupported job: ${job.name}`);
       }
     };
   }
 
-  async handleAutoMaxReview(job) {
+  async handleAutoReview(job) {
     const { reviewId } = job.data || {};
 
     if (!reviewId) {
       throw new Error("Missing reviewId");
     }
 
-    return this.volunteerEngagementService.autoMaxReview(reviewId);
+    return this.volunteerEngagementService.autoFinalizeReview(reviewId);
   }
 }
 

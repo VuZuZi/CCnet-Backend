@@ -1,76 +1,94 @@
 import AppError from "../../core/AppError.js";
 
-const REVIEW_DEADLINE_MS = 60 * 60 * 1000;
+const REVIEW_DEADLINE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const NOTIFICATION_TYPE_REVIEW_REQUIRED = "volunteer_review_required";
 const NOTIFICATION_TYPE_REVIEW_SUBMITTED = "volunteer_review_submitted";
-const NOTIFICATION_TYPE_REVIEW_AUTO_MAXED = "volunteer_review_auto_maxed";
+
+const COMPLETED_PROJECT_STATUSES = new Set([
+  "COMPLETED",
+  "COMPLETED_SUCCESSFULLY",
+  "COMPLETED_PARTIAL",
+]);
 
 class VolunteerEngagementService {
   constructor({
-    volunteerAttendanceRepository,
     volunteerReviewRepository,
     volunteerRepository,
     projectRepository,
-    userRepository,
+    userRepository = null,
     jobQueue = null,
     notificationService = null,
-    transactionManager = null,
   }) {
-    this.volunteerAttendanceRepository = volunteerAttendanceRepository;
     this.volunteerReviewRepository = volunteerReviewRepository;
     this.volunteerRepository = volunteerRepository;
     this.projectRepository = projectRepository;
     this.userRepository = userRepository;
     this.jobQueue = jobQueue;
     this.notificationService = notificationService;
-    this.transactionManager = transactionManager;
   }
 
-  async _runInTransaction(work) {
-    if (
-      this.transactionManager &&
-      typeof this.transactionManager.runInTransaction === "function"
-    ) {
-      return this.transactionManager.runInTransaction(work);
+  async _ensureProject(projectId) {
+    const project = await this.projectRepository.findById(projectId);
+    if (!project) {
+      throw new AppError("Không tìm thấy dự án", 404);
     }
-    return work(null);
-  }
-
-  async _ensureProject(projectId, session = null) {
-    const project = await this.projectRepository.findById(projectId, session);
-    if (!project) throw new AppError("Không tìm thấy dự án", 404);
     return project;
   }
 
-  async _ensureMilestone(project, milestoneId) {
-    const milestone = Array.isArray(project?.milestones)
-      ? project.milestones.find(
-          (item) => String(item?.milestoneId) === String(milestoneId)
-        )
-      : null;
-
-    if (!milestone) {
-      throw new AppError("Không tìm thấy milestone", 404);
-    }
-
-    return milestone;
+  _extractOrganizerId(project) {
+    return (
+      project?.organizerId?._id ||
+      project?.organizerId?.id ||
+      project?.organizerId ||
+      project?.organizer?._id ||
+      project?.organizer?.id ||
+      project?.organizer ||
+      null
+    );
   }
 
-  async _ensureActorCanManage(project, actorId) {
-    const actor = await this.userRepository.findById(actorId);
-    if (!actor) throw new AppError("Không tìm thấy người dùng", 404);
+  _extractVolunteerId(application) {
+    return (
+      application?.volunteerId?._id ||
+      application?.volunteerId?.id ||
+      application?.volunteerId ||
+      application?.userId?._id ||
+      application?.userId?.id ||
+      application?.userId ||
+      null
+    );
+  }
 
-    const actorRole = String(actor.role || "").toLowerCase();
-    const isAdmin = actorRole === "admin" || actorRole === "manager";
-    const isOwner =
-      String(project?.organizerId || "") === String(actorId);
+  _extractReviewVolunteerId(review) {
+    return (
+      review?.volunteerId?._id ||
+      review?.volunteerId?.id ||
+      review?.volunteerId ||
+      null
+    );
+  }
 
-    if (!isAdmin && !isOwner) {
-      throw new AppError("Bạn không có quyền thực hiện hành động này", 403);
-    }
+  _isReviewLegacy(review) {
+    if (!review) return true;
 
-    return actor;
+    const hasLegacyFields =
+      "milestoneId" in review ||
+      "attendanceId" in review ||
+      "autoScoredAt" in review;
+
+    const invalidScore =
+      review.score === null ||
+      review.score === undefined ||
+      Number.isNaN(Number(review.score));
+
+    const invalidComment =
+      review.comment === null || review.comment === undefined;
+
+    const invalidDeadline =
+      !review.deadlineAt || Number.isNaN(new Date(review.deadlineAt).getTime());
+
+    return hasLegacyFields || invalidScore || invalidComment || invalidDeadline;
   }
 
   async _safeNotify(payload) {
@@ -79,18 +97,26 @@ class VolunteerEngagementService {
     try {
       return await this.notificationService.createNotification(payload);
     } catch (error) {
-      console.error(
-        "❌ [VolunteerEngagementService] createNotification error:",
-        error?.message || error
-      );
+      console.error("❌ [VolunteerEngagementService] Notification error:", {
+        type: payload?.type,
+        recipientId: payload?.recipientId,
+        message: error?.message || error,
+      });
       return null;
     }
   }
 
   async _scheduleAutoReview(review) {
-    if (!this.jobQueue || !review?._id || !review?.deadlineAt) return null;
+    if (
+      !this.jobQueue ||
+      !review?._id ||
+      !review?.deadlineAt ||
+      typeof this.jobQueue.addJob !== "function"
+    ) {
+      return null;
+    }
 
-    const delayMs = Math.max(
+    const delay = Math.max(
       new Date(review.deadlineAt).getTime() - Date.now(),
       0
     );
@@ -98,213 +124,262 @@ class VolunteerEngagementService {
     try {
       return await this.jobQueue.addJob(
         "volunteer-review",
-        "auto-max-review",
+        "auto-review",
         { reviewId: String(review._id) },
         {
-          delay: delayMs,
-          jobId: `auto-max-review:${String(review._id)}`,
+          delay,
+          jobId: `auto-review:${String(review._id)}`,
+          removeOnComplete: true,
+          removeOnFail: { count: 50 },
         }
       );
     } catch (error) {
       console.error(
-        "❌ [VolunteerEngagementService] schedule auto review error:",
+        "❌ [VolunteerEngagementService] Schedule auto review error:",
         error?.message || error
       );
       return null;
     }
   }
 
-  async bootstrapAttendance(projectId, milestoneId, actorId) {
-    const project = await this._ensureProject(projectId);
-    await this._ensureActorCanManage(project, actorId);
-    this._ensureMilestone(project, milestoneId);
+  async _getApprovedApplications(projectId) {
+    if (!this.volunteerRepository) return [];
 
-    const approvedApplications =
-      await this.volunteerRepository.findByProject(projectId, "APPROVED", 500);
+    const candidates = [
+      async () => {
+        if (
+          typeof this.volunteerRepository.findByProjectAndStatus === "function"
+        ) {
+          return this.volunteerRepository.findByProjectAndStatus(
+            projectId,
+            "APPROVED"
+          );
+        }
+        return null;
+      },
+      async () => {
+        if (typeof this.volunteerRepository.findByProject === "function") {
+          return this.volunteerRepository.findByProject(
+            projectId,
+            "APPROVED",
+            500
+          );
+        }
+        return null;
+      },
+      async () => {
+        if (typeof this.volunteerRepository.findAllByProject === "function") {
+          const all = await this.volunteerRepository.findAllByProject(projectId);
+          return Array.isArray(all)
+            ? all.filter(
+                (item) => String(item?.status || "").toUpperCase() === "APPROVED"
+              )
+            : [];
+        }
+        return null;
+      },
+    ];
 
-    const records = approvedApplications.map((application) => ({
-      projectId,
-      milestoneId,
-      applicationId: application._id,
-      volunteerId: application.volunteerId?._id || application.volunteerId,
-      organizerId: project.organizerId,
-      status: "PENDING",
-      note: "",
-      confirmedAt: null,
-      confirmedBy: null,
-    }));
+    for (const getter of candidates) {
+      try {
+        const result = await getter();
+        if (!result) continue;
 
-    const items = await this.volunteerAttendanceRepository.bulkUpsert(records);
+        if (Array.isArray(result)) return result;
+        if (Array.isArray(result?.data)) return result.data;
+        if (Array.isArray(result?.items)) return result.items;
+      } catch (error) {
+        console.error(
+          "⚠️ [VolunteerEngagementService] approved applications fallback error:",
+          error?.message || error
+        );
+      }
+    }
+
+    return [];
+  }
+
+  async _shouldRebuildReviewWorkflow(projectId) {
+    const existingReviews =
+      await this.volunteerReviewRepository.findByProject(projectId);
+
+    if (!existingReviews.length) {
+      return {
+        shouldRebuild: false,
+        existingReviews: [],
+      };
+    }
+
+    const hasLegacy = existingReviews.some((review) =>
+      this._isReviewLegacy(review)
+    );
+    const hasExpiredPending = existingReviews.some(
+      (review) =>
+        review.status === "PENDING" &&
+        review.deadlineAt &&
+        new Date(review.deadlineAt).getTime() < Date.now()
+    );
+
+    if (hasLegacy || hasExpiredPending) {
+      return {
+        shouldRebuild: true,
+        existingReviews,
+      };
+    }
 
     return {
-      items,
-      summary: {
-        total: items.length,
-        attended: items.filter((item) => item.status === "ATTENDED").length,
-        absent: items.filter((item) => item.status === "ABSENT").length,
-        pending: items.filter((item) => item.status === "PENDING").length,
-      },
+      shouldRebuild: false,
+      existingReviews,
     };
   }
 
-  async getAttendanceList(projectId, milestoneId, actorId) {
+  async onProjectCompleted(projectId) {
     const project = await this._ensureProject(projectId);
-    await this._ensureActorCanManage(project, actorId);
-    this._ensureMilestone(project, milestoneId);
 
-    const items = await this.volunteerAttendanceRepository.findByProjectAndMilestone(
-      projectId,
-      milestoneId
-    );
+    const normalizedStatus = String(project?.status || "").toUpperCase();
+    if (!COMPLETED_PROJECT_STATUSES.has(normalizedStatus)) {
+      return [];
+    }
 
-    return {
-      items,
-      summary: {
-        total: items.length,
-        attended: items.filter((item) => item.status === "ATTENDED").length,
-        absent: items.filter((item) => item.status === "ABSENT").length,
-        pending: items.filter((item) => item.status === "PENDING").length,
-      },
-    };
-  }
+    const organizerId = this._extractOrganizerId(project);
 
-  async updateAttendance(attendanceId, actorId, payload) {
-    const attendance = await this.volunteerAttendanceRepository.findById(attendanceId);
-    if (!attendance) throw new AppError("Không tìm thấy bản ghi chấm công", 404);
+    const { shouldRebuild, existingReviews } =
+      await this._shouldRebuildReviewWorkflow(projectId);
 
-    const project = await this._ensureProject(attendance.projectId);
-    await this._ensureActorCanManage(project, actorId);
+    if (existingReviews.length > 0 && !shouldRebuild) {
+      return existingReviews;
+    }
 
-    const updated = await this.volunteerAttendanceRepository.updateById(attendanceId, {
-      status: payload.status,
-      note: String(payload.note || "").trim(),
-      confirmedAt: new Date(),
-      confirmedBy: actorId,
-    });
+    if (shouldRebuild) {
+      await this.volunteerReviewRepository.deleteByProject(projectId);
+    }
 
-    return updated;
-  }
+    const approvedApplications = await this._getApprovedApplications(projectId);
 
-  async bootstrapReviews(projectId, milestoneId, actorId) {
-    const project = await this._ensureProject(projectId);
-    const actor = await this._ensureActorCanManage(project, actorId);
-    this._ensureMilestone(project, milestoneId);
-
-    const attendances =
-      await this.volunteerAttendanceRepository.findByProjectAndMilestoneRaw(
-        projectId,
-        milestoneId
-      );
-
-    const attendedItems = attendances.filter(
-      (item) => item.status === "ATTENDED"
-    );
+    if (!approvedApplications.length) {
+      return [];
+    }
 
     const deadlineAt = new Date(Date.now() + REVIEW_DEADLINE_MS);
 
-    const records = attendedItems.map((attendance) => ({
-      projectId,
-      milestoneId,
-      applicationId: attendance.applicationId,
-      attendanceId: attendance._id,
-      volunteerId: attendance.volunteerId,
-      organizerId: attendance.organizerId,
-      score: null,
-      comment: "",
-      status: "PENDING",
-      reviewSource: null,
-      deadlineAt,
-      reviewedAt: null,
-      autoScoredAt: null,
-    }));
+    const records = approvedApplications
+      .map((application) => {
+        const volunteerId = this._extractVolunteerId(application);
+        if (!volunteerId) return null;
+
+        return {
+          projectId,
+          applicationId: application._id,
+          volunteerId,
+          organizerId,
+          score: 5,
+          comment: "Bạn đã hoàn thành tốt vai trò tình nguyện viên trong dự án.",
+          status: "PENDING",
+          reviewSource: null,
+          deadlineAt,
+          reviewedAt: null,
+        };
+      })
+      .filter(Boolean);
+
+    if (!records.length) {
+      return [];
+    }
 
     const items = await this.volunteerReviewRepository.bulkUpsert(records);
 
     for (const review of items) {
       await this._scheduleAutoReview(review);
-
-      await this._safeNotify({
-        recipientId: actorId,
-        actorId: actor?._id || actor?.id || null,
-        type: NOTIFICATION_TYPE_REVIEW_REQUIRED,
-        title: "Cần đánh giá tình nguyện viên",
-        message: `Milestone "${milestoneId}" đã sẵn sàng để đánh giá tình nguyện viên.`,
-        actionUrl: `/projects/${projectId}?tab=volunteer&subTab=approved`,
-        entityType: "project",
-        entityId: String(projectId),
-        metadata: {
-          projectId: String(projectId),
-          milestoneId: String(milestoneId),
-          reviewId: String(review._id),
-        },
-      });
     }
 
-    return {
-      items,
-      summary: {
-        total: items.length,
-        pending: items.filter((item) => item.status === "PENDING").length,
-        reviewed: items.filter((item) => item.status === "REVIEWED").length,
-        autoMaxed: items.filter((item) => item.status === "AUTO_MAXED").length,
-        deadlineAt,
+    await this._safeNotify({
+      recipientId: organizerId,
+      actorId: null,
+      type: NOTIFICATION_TYPE_REVIEW_REQUIRED,
+      title: "Dự án đã hoàn thành",
+      message:
+        "Vui lòng đánh giá tình nguyện viên trong vòng 1 tuần kể từ khi dự án hoàn thành.",
+      actionUrl: `/projects/${projectId}?tab=volunteer&subTab=review`,
+      entityType: "project",
+      entityId: String(projectId),
+      metadata: {
+        projectId: String(projectId),
+        deadlineAt: deadlineAt.toISOString(),
       },
-    };
+    });
+
+    return items;
   }
 
-  async getReviewList(projectId, milestoneId, actorId) {
+  async getProjectReviews(projectId, actorId) {
     const project = await this._ensureProject(projectId);
-    await this._ensureActorCanManage(project, actorId);
-    this._ensureMilestone(project, milestoneId);
 
-    const items = await this.volunteerReviewRepository.findByProjectAndMilestone(
-      projectId,
-      milestoneId
-    );
+    const organizerId = this._extractOrganizerId(project);
+    if (String(actorId || "") !== String(organizerId || "")) {
+      throw new AppError("Bạn không có quyền xem đánh giá của dự án này", 403);
+    }
 
-    return {
-      items,
-      summary: {
-        total: items.length,
-        pending: items.filter((item) => item.status === "PENDING").length,
-        reviewed: items.filter((item) => item.status === "REVIEWED").length,
-        autoMaxed: items.filter((item) => item.status === "AUTO_MAXED").length,
-      },
-    };
+    return this.volunteerReviewRepository.findByProject(projectId);
+  }
+
+  async getMyProjectReview(projectId, actorId) {
+    await this._ensureProject(projectId);
+
+    const reviews = await this.volunteerReviewRepository.findByProject(projectId);
+
+    const myReview =
+      reviews.find((review) => {
+        const volunteerId = this._extractReviewVolunteerId(review);
+        return String(volunteerId || "") === String(actorId || "");
+      }) || null;
+
+    return myReview;
   }
 
   async submitReview(reviewId, actorId, payload) {
     const review = await this.volunteerReviewRepository.findById(reviewId);
-    if (!review) throw new AppError("Không tìm thấy đánh giá", 404);
+    if (!review) {
+      throw new AppError("Không tìm thấy đánh giá", 404);
+    }
 
     const project = await this._ensureProject(review.projectId);
-    const actor = await this._ensureActorCanManage(project, actorId);
+    const organizerId = this._extractOrganizerId(project);
+
+    if (String(actorId || "") !== String(organizerId || "")) {
+      throw new AppError("Bạn không có quyền thực hiện hành động này", 403);
+    }
 
     if (review.status !== "PENDING") {
       throw new AppError("Đánh giá này đã được xử lý", 400);
     }
 
+    if (new Date(review.deadlineAt).getTime() < Date.now()) {
+      throw new AppError("Đã quá thời hạn cập nhật đánh giá", 400);
+    }
+
     const updated = await this.volunteerReviewRepository.updateById(reviewId, {
-      score: payload.score,
-      comment: String(payload.comment || "").trim(),
+      score: Number(payload.score || 5),
+      comment:
+        String(payload.comment || "").trim() ||
+        "Bạn đã hoàn thành tốt vai trò tình nguyện viên trong dự án.",
       status: "REVIEWED",
       reviewSource: "MANUAL",
       reviewedAt: new Date(),
-      autoScoredAt: null,
     });
 
+    const volunteerId = this._extractReviewVolunteerId(updated);
+
     await this._safeNotify({
-      recipientId: updated.volunteerId?._id || updated.volunteerId,
-      actorId: actor?._id || actor?.id || null,
+      recipientId: volunteerId,
+      actorId,
       type: NOTIFICATION_TYPE_REVIEW_SUBMITTED,
-      title: "Bạn đã được đánh giá",
-      message: `Organizer đã gửi đánh giá cho sự tham gia của bạn ở milestone "${updated.milestoneId}".`,
+      title: "Bạn đã nhận được đánh giá",
+      message: "Organizer đã hoàn tất đánh giá cho phần tham gia của bạn.",
       actionUrl: `/projects/${updated.projectId}`,
       entityType: "project",
       entityId: String(updated.projectId),
       metadata: {
         projectId: String(updated.projectId),
-        milestoneId: String(updated.milestoneId),
         reviewId: String(updated._id),
         score: updated.score,
       },
@@ -313,7 +388,7 @@ class VolunteerEngagementService {
     return updated;
   }
 
-  async autoMaxReview(reviewId) {
+  async autoFinalizeReview(reviewId) {
     const review = await this.volunteerReviewRepository.findById(reviewId);
     if (!review) return null;
     if (review.status !== "PENDING") return review;
@@ -321,49 +396,114 @@ class VolunteerEngagementService {
 
     const updated = await this.volunteerReviewRepository.updateById(reviewId, {
       score: 5,
-      comment: "Hệ thống tự động chấm tối đa do organizer không đánh giá đúng hạn.",
-      status: "AUTO_MAXED",
+      comment: "Bạn đã hoàn thành tốt vai trò tình nguyện viên trong dự án.",
+      status: "REVIEWED",
       reviewSource: "AUTO",
       reviewedAt: new Date(),
-      autoScoredAt: new Date(),
     });
 
-    await this._safeNotify({
-      recipientId: updated.organizerId,
-      actorId: null,
-      type: NOTIFICATION_TYPE_REVIEW_AUTO_MAXED,
-      title: "Đã tự động chấm điểm tối đa",
-      message: `Một đánh giá volunteer đã được hệ thống tự động chấm tối đa do quá hạn 1 giờ.`,
-      actionUrl: `/projects/${updated.projectId}?tab=volunteer&subTab=approved`,
-      entityType: "project",
-      entityId: String(updated.projectId),
-      metadata: {
-        projectId: String(updated.projectId),
-        milestoneId: String(updated.milestoneId),
-        reviewId: String(updated._id),
-        score: 5,
-      },
-    });
+    const volunteerId = this._extractReviewVolunteerId(updated);
 
     await this._safeNotify({
-      recipientId: updated.volunteerId?._id || updated.volunteerId,
+      recipientId: volunteerId,
       actorId: null,
-      type: NOTIFICATION_TYPE_REVIEW_AUTO_MAXED,
-      title: "Bạn đã được hệ thống đánh giá tự động",
-      message:
-        "Organizer chưa đánh giá đúng hạn, hệ thống đã tự động chấm tối đa cho bạn.",
+      type: NOTIFICATION_TYPE_REVIEW_SUBMITTED,
+      title: "Bạn đã nhận được đánh giá",
+      message: "Bạn đã nhận được đánh giá cho phần tham gia dự án.",
       actionUrl: `/projects/${updated.projectId}`,
       entityType: "project",
       entityId: String(updated.projectId),
       metadata: {
         projectId: String(updated.projectId),
-        milestoneId: String(updated.milestoneId),
         reviewId: String(updated._id),
-        score: 5,
+        score: updated.score,
       },
     });
 
     return updated;
+  }
+
+  async reconcileCompletedProjectReviews() {
+    if (!this.projectRepository) return [];
+
+    let candidateProjects = [];
+
+    try {
+      if (typeof this.projectRepository.findAllProjects === "function") {
+        const result = await this.projectRepository.findAllProjects({
+          filter: {
+            status: {
+              $in: Array.from(COMPLETED_PROJECT_STATUSES),
+            },
+            needsVolunteers: true,
+          },
+          skip: 0,
+          limit: 200,
+          sortType: "newest",
+        });
+
+        candidateProjects = Array.isArray(result?.projects)
+          ? result.projects
+          : [];
+      }
+    } catch (error) {
+      console.error(
+        "❌ [VolunteerEngagementService] reconcile query failed:",
+        error?.message || error
+      );
+      return [];
+    }
+
+    if (!candidateProjects.length) {
+      return [];
+    }
+
+    const needInit = [];
+
+    for (const project of candidateProjects) {
+      try {
+        const { shouldRebuild, existingReviews } =
+          await this._shouldRebuildReviewWorkflow(project._id);
+
+        if (shouldRebuild || existingReviews.length === 0) {
+          needInit.push(project);
+        }
+      } catch (error) {
+        console.error(
+          "❌ [VolunteerEngagementService] check review workflow failed:",
+          error?.message || error
+        );
+      }
+    }
+
+    if (!needInit.length) {
+      return [];
+    }
+
+    console.log(
+      `[ReviewReconciler] found ${needInit.length} completed project(s) needing review workflow init`
+    );
+
+    const handled = [];
+
+    for (const project of needInit) {
+      try {
+        await this.onProjectCompleted(project._id);
+        handled.push(String(project._id));
+        console.log(
+          `[ReviewReconciler] initialized review workflow for project ${String(
+            project._id
+          )}`
+        );
+      } catch (error) {
+        console.error(
+          `[ReviewReconciler] failed for project ${String(project._id)}:`,
+          error?.message || error
+        );
+      }
+    }
+
+    return handled;
   }
 }
 

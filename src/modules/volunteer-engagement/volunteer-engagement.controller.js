@@ -5,98 +5,13 @@ class VolunteerEngagementController {
     this.volunteerEngagementService = volunteerEngagementService;
   }
 
-  bootstrapAttendance = async (req, res, next) => {
+  getProjectReviews = async (req, res, next) => {
     try {
-      const { projectId, milestoneId } = req.params;
-      const actorId = req.user.userId;
+      const { projectId } = req.params;
+      const actorId = req.user?.userId || req.user?._id || req.user?.id;
 
-      const result = await this.volunteerEngagementService.bootstrapAttendance(
+      const result = await this.volunteerEngagementService.getProjectReviews(
         projectId,
-        milestoneId,
-        actorId
-      );
-
-      return ApiResponse.success(
-        res,
-        result,
-        "Khởi tạo danh sách chấm công thành công"
-      );
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  getAttendanceList = async (req, res, next) => {
-    try {
-      const { projectId, milestoneId } = req.params;
-      const actorId = req.user.userId;
-
-      const result = await this.volunteerEngagementService.getAttendanceList(
-        projectId,
-        milestoneId,
-        actorId
-      );
-
-      return ApiResponse.success(
-        res,
-        result,
-        "Lấy danh sách chấm công thành công"
-      );
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  updateAttendance = async (req, res, next) => {
-    try {
-      const { attendanceId } = req.params;
-      const actorId = req.user.userId;
-
-      const result = await this.volunteerEngagementService.updateAttendance(
-        attendanceId,
-        actorId,
-        req.body
-      );
-
-      return ApiResponse.success(
-        res,
-        result,
-        "Cập nhật chấm công thành công"
-      );
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  bootstrapReviews = async (req, res, next) => {
-    try {
-      const { projectId, milestoneId } = req.params;
-      const actorId = req.user.userId;
-
-      const result = await this.volunteerEngagementService.bootstrapReviews(
-        projectId,
-        milestoneId,
-        actorId
-      );
-
-      return ApiResponse.success(
-        res,
-        result,
-        "Khởi tạo đánh giá volunteer thành công"
-      );
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  getReviewList = async (req, res, next) => {
-    try {
-      const { projectId, milestoneId } = req.params;
-      const actorId = req.user.userId;
-
-      const result = await this.volunteerEngagementService.getReviewList(
-        projectId,
-        milestoneId,
         actorId
       );
 
@@ -110,10 +25,30 @@ class VolunteerEngagementController {
     }
   };
 
+  getMyProjectReview = async (req, res, next) => {
+    try {
+      const { projectId } = req.params;
+      const actorId = req.user?.userId || req.user?._id || req.user?.id;
+
+      const result = await this.volunteerEngagementService.getMyProjectReview(
+        projectId,
+        actorId
+      );
+
+      return ApiResponse.success(
+        res,
+        { review: result },
+        "Lấy đánh giá của volunteer thành công"
+      );
+    } catch (error) {
+      next(error);
+    }
+  };
+
   submitReview = async (req, res, next) => {
     try {
       const { reviewId } = req.params;
-      const actorId = req.user.userId;
+      const actorId = req.user?.userId || req.user?._id || req.user?.id;
 
       const result = await this.volunteerEngagementService.submitReview(
         reviewId,

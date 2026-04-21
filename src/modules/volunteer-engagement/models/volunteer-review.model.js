@@ -8,20 +8,9 @@ const volunteerReviewSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    milestoneId: {
-      type: String,
-      required: true,
-      index: true,
-    },
     applicationId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "volunteer",
-      required: true,
-      index: true,
-    },
-    attendanceId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "VolunteerAttendance",
       required: true,
       index: true,
     },
@@ -41,17 +30,17 @@ const volunteerReviewSchema = new mongoose.Schema(
       type: Number,
       min: 1,
       max: 5,
-      default: null,
+      default: 5,
     },
     comment: {
       type: String,
       trim: true,
-      default: "",
+      default: "Bạn đã hoàn thành tốt vai trò tình nguyện viên trong dự án.",
       maxlength: 1000,
     },
     status: {
       type: String,
-      enum: ["PENDING", "REVIEWED", "AUTO_MAXED"],
+      enum: ["PENDING", "REVIEWED"],
       default: "PENDING",
       index: true,
     },
@@ -69,10 +58,6 @@ const volunteerReviewSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-    autoScoredAt: {
-      type: Date,
-      default: null,
-    },
   },
   {
     timestamps: true,
@@ -81,11 +66,9 @@ const volunteerReviewSchema = new mongoose.Schema(
 );
 
 volunteerReviewSchema.index(
-  { projectId: 1, milestoneId: 1, volunteerId: 1 },
-  { unique: true, name: "uniq_review_per_milestone_volunteer" }
+  { projectId: 1, volunteerId: 1 },
+  { unique: true, name: "uniq_review_per_project_volunteer" }
 );
-
-volunteerReviewSchema.index({ status: 1, deadlineAt: 1 });
 
 const VolunteerReview =
   mongoose.models.VolunteerReview ||

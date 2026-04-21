@@ -2,29 +2,54 @@ import VolunteerReview from "../models/volunteer-review.model.js";
 
 class VolunteerReviewRepository {
   _applySession(query, session = null) {
-    if (session) {
-      query = query.session(session);
-    }
+    if (session) query = query.session(session);
     return query;
   }
 
   async findById(id, session = null) {
-    let query = VolunteerReview.findById(id)
-      .populate("volunteerId", "fullName email avatar")
-      .populate("attendanceId");
+    let query = VolunteerReview.findById(id).populate(
+      "volunteerId",
+      "fullName email avatar"
+    );
 
     query = this._applySession(query, session);
     return query.lean().exec();
   }
 
-  async findByProjectAndMilestone(projectId, milestoneId, session = null) {
-    let query = VolunteerReview.find({ projectId, milestoneId })
+  async findByProject(projectId, session = null) {
+    let query = VolunteerReview.find({ projectId })
       .populate("volunteerId", "fullName email avatar")
-      .populate("attendanceId")
       .sort({ createdAt: 1 });
 
     query = this._applySession(query, session);
     return query.lean().exec();
+  }
+
+  async existsByProject(projectId, session = null) {
+    let query = VolunteerReview.exists({ projectId });
+    query = this._applySession(query, session);
+    const result = await query;
+    return Boolean(result);
+  }
+
+  async findReviewedByVolunteer(volunteerId, session = null) {
+    let query = VolunteerReview.find({
+      volunteerId,
+      status: "REVIEWED",
+    }).sort({ reviewedAt: -1, updatedAt: -1, createdAt: -1 });
+
+    query = this._applySession(query, session);
+    return query.lean().exec();
+  }
+
+  async findDistinctReviewedProjectIdsByVolunteer(volunteerId, session = null) {
+    let query = VolunteerReview.distinct("projectId", {
+      volunteerId,
+      status: "REVIEWED",
+    });
+
+    query = this._applySession(query, session);
+    return query.exec();
   }
 
   async bulkUpsert(records = [], session = null) {
@@ -37,7 +62,6 @@ class VolunteerReviewRepository {
         updateOne: {
           filter: {
             projectId: item.projectId,
-            milestoneId: item.milestoneId,
             volunteerId: item.volunteerId,
           },
           update: {
@@ -50,9 +74,7 @@ class VolunteerReviewRepository {
     );
 
     const projectId = records[0]?.projectId;
-    const milestoneId = records[0]?.milestoneId;
-
-    return this.findByProjectAndMilestone(projectId, milestoneId, session);
+    return this.findByProject(projectId, session);
   }
 
   async updateById(id, updateData, session = null) {
@@ -60,12 +82,16 @@ class VolunteerReviewRepository {
       id,
       { $set: updateData },
       { new: true, runValidators: true }
-    )
-      .populate("volunteerId", "fullName email avatar")
-      .populate("attendanceId");
+    ).populate("volunteerId", "fullName email avatar");
 
     query = this._applySession(query, session);
     return query.lean().exec();
+  }
+
+  async deleteByProject(projectId, session = null) {
+    let query = VolunteerReview.deleteMany({ projectId });
+    query = this._applySession(query, session);
+    return query.exec();
   }
 
   async findPendingExpired(limit = 100, session = null) {
@@ -80,18 +106,8 @@ class VolunteerReviewRepository {
     return query.lean().exec();
   }
 
-  async countByProjectAndMilestone(projectId, milestoneId, session = null) {
-    let query = VolunteerReview.countDocuments({ projectId, milestoneId });
-    query = this._applySession(query, session);
-    return query.exec();
-  }
-
-  async countPendingByProjectAndMilestone(projectId, milestoneId, session = null) {
-    let query = VolunteerReview.countDocuments({
-      projectId,
-      milestoneId,
-      status: "PENDING",
-    });
+  async countByProject(projectId, session = null) {
+    let query = VolunteerReview.countDocuments({ projectId });
     query = this._applySession(query, session);
     return query.exec();
   }

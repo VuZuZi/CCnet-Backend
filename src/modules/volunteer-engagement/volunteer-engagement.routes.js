@@ -6,10 +6,7 @@ import {
   validateParams,
 } from "../../middlewares/validate.middleware.js";
 import {
-  projectMilestoneParamsSchema,
-  attendanceIdParamsSchema,
   reviewIdParamsSchema,
-  updateAttendanceSchema,
   submitReviewSchema,
 } from "./volunteer-engagement.validation.js";
 
@@ -22,39 +19,15 @@ const execute = (action) => (req, res, next) => {
 };
 
 router.get(
-  "/projects/:projectId/milestones/:milestoneId/attendance",
+  "/projects/:projectId/reviews",
   authenticate,
-  validateParams(projectMilestoneParamsSchema),
-  execute("getAttendanceList")
-);
-
-router.post(
-  "/projects/:projectId/milestones/:milestoneId/attendance/bootstrap",
-  authenticate,
-  validateParams(projectMilestoneParamsSchema),
-  execute("bootstrapAttendance")
-);
-
-router.patch(
-  "/attendance/:attendanceId",
-  authenticate,
-  validateParams(attendanceIdParamsSchema),
-  validateBody(updateAttendanceSchema),
-  execute("updateAttendance")
+  execute("getProjectReviews")
 );
 
 router.get(
-  "/projects/:projectId/milestones/:milestoneId/reviews",
+  "/projects/:projectId/my-review",
   authenticate,
-  validateParams(projectMilestoneParamsSchema),
-  execute("getReviewList")
-);
-
-router.post(
-  "/projects/:projectId/milestones/:milestoneId/reviews/bootstrap",
-  authenticate,
-  validateParams(projectMilestoneParamsSchema),
-  execute("bootstrapReviews")
+  execute("getMyProjectReview")
 );
 
 router.patch(
