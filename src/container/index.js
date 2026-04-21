@@ -44,7 +44,7 @@ export const initializeContainer = () => {
       "!../modules/notification/repositories/notification.repository.js",
       "!../modules/notification/repositories/notificationSetting.repository.js",
       "!../modules/notification/notification.controller.js",
-      
+
       "../modules/**/*.service.js",
       "../modules/**/*.repository.js",
       "../modules/**/*.controller.js",
@@ -75,9 +75,15 @@ export const getContainer = () => {
 export const startWorkers = () => {
   const container = getContainer();
   const jobQueue = container.resolve("jobQueue");
+
   const followProcessor = container.resolve("followProcessor");
+  const volunteerReviewProcessor = container.resolve("volunteerReviewProcessor");
 
   jobQueue.registerWorker("follow-updates", followProcessor.getProcessor());
+  jobQueue.registerWorker(
+    "volunteer-review",
+    volunteerReviewProcessor.getProcessor()
+  );
 
   const eventBus = container.resolve("eventBus");
   const transactionService = container.resolve("transactionService");

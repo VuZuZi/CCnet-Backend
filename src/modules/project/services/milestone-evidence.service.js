@@ -5,17 +5,19 @@ import { DOMAIN_EVENTS } from '../../../config/notification.js';
 
 class MilestoneEvidenceService {
     constructor({
-        milestoneEvidenceRepository,
-        projectRepository,
-        disbursementRequestRepository,
-        mediaRepository,
-        transactionManager
-    }) {
+    milestoneEvidenceRepository,
+    projectRepository,
+    disbursementRequestRepository,
+    mediaRepository,
+    transactionManager,
+    volunteerEngagementService
+}) {
         this.milestoneEvidenceRepository = milestoneEvidenceRepository;
         this.projectRepository = projectRepository;
         this.disbursementRequestRepository = disbursementRequestRepository;
         this.mediaRepository = mediaRepository;
         this.transactionManager = transactionManager;
+        this.volunteerEngagementService = volunteerEngagementService;
     }
 
     async _getPreviousUnspentAmount(projectId, milestones, currentIdx) {
