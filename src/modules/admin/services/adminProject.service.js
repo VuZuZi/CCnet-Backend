@@ -88,6 +88,11 @@ class AdminProjectService {
       feedback
     );
 
+    const actionUrl =
+      project.status === PROJECT_STATUS.UPDATING
+        ? `/projects/${project._id}/updating`
+        : `/projects/${project._id}`;
+
     this.eventBus.emit(DOMAIN_EVENTS.PROJECT_STATUS_UPDATED, {
       recipientIds: [String(organizerId)],
       actorId,
@@ -96,7 +101,7 @@ class AdminProjectService {
       status: project.status,
       title,
       message,
-      actionUrl: `/projects/${project._id}`,
+      actionUrl,
     });
   }
 
@@ -292,10 +297,15 @@ class AdminProjectService {
         },
       });
 
+      const notificationFeedback =
+        finalStatus === PROJECT_STATUS.UPDATING
+          ? updateData.updateRequestReason
+          : updateData.rejectionReason;
+
       this._emitProjectStatusUpdated({
         project: updatedProject,
         actorId: adminId,
-        feedback: updateData.rejectionReason,
+        feedback: notificationFeedback,
       });
 
       return updatedProject;

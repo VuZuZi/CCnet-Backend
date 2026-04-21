@@ -180,6 +180,14 @@ const projectSchema = new mongoose.Schema(
     revisionRequestedAt: { type: Date, default: null },
     revisionCount: { type: Number, default: 0 },
     rejectionReason: { type: String, default: null },
+    updateRequestReason: { type: String, default: null },
+    updateRequestedAt: { type: Date, default: null },
+    updateSubmittedAt: { type: Date, default: null },
+    updateSubmittedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
 
     fromHelpRequestId: {
       type: mongoose.Schema.Types.ObjectId,
