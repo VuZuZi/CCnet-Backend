@@ -722,6 +722,105 @@ class ProjectService {
     });
   }
 
+  _mergeUpdatingMilestones(existingMilestones = [], incomingMilestones = []) {
+    const existingById = new Map(
+      (existingMilestones || [])
+        .filter((milestone) => milestone?.milestoneId)
+        .map((milestone) => [String(milestone.milestoneId), milestone]),
+    );
+
+    return (incomingMilestones || []).map((milestone, index) => {
+      const matchedExisting =
+        existingById.get(String(milestone?.milestoneId || "")) ||
+        existingMilestones[index] ||
+        null;
+
+      return {
+        ...(matchedExisting || {}),
+        ...milestone,
+        milestoneId:
+          milestone?.milestoneId ||
+          matchedExisting?.milestoneId ||
+          undefined,
+        status:
+          matchedExisting?.status ||
+          milestone?.status ||
+          MILESTONE_STATUS.PENDING,
+        disbursementRequestId:
+          matchedExisting?.disbursementRequestId || null,
+        refundSummary:
+          matchedExisting?.refundSummary ||
+          milestone?.refundSummary ||
+          undefined,
+      };
+    });
+  }
+
+  async _getEscrowBackedFundedAmount(project) {
+    const fallbackAmount = Number(project?.currentAmount || 0);
+
+    if (project?.projectType !== PROJECT_TYPE.FUNDED) {
+      return fallbackAmount;
+    }
+
+    if (
+      !this.escrowRepository ||
+      typeof this.escrowRepository.findByProjectId !== "function"
+    ) {
+      return fallbackAmount;
+    }
+
+    const projectId = project?._id || project?.id;
+    if (!projectId) {
+      return fallbackAmount;
+    }
+
+    const escrow = await this.escrowRepository.findByProjectId(projectId);
+    const escrowAmount = Number(escrow?.availableBalance);
+
+    if (!Number.isFinite(escrowAmount)) {
+      return fallbackAmount;
+    }
+
+    return escrowAmount;
+  }
+
+  async _validateUpdatingMilestones(project, milestones = []) {
+    if (!Array.isArray(milestones) || milestones.length === 0) {
+      throw new AppError("Phải có ít nhất 1 milestone để cập nhật.", 400);
+    }
+
+    if (project?.projectType === PROJECT_TYPE.VOLUNTEER_ONLY) {
+      const hasBudgetedMilestone = milestones.some(
+        (milestone) => Number(milestone?.targetAmount || 0) > 0,
+      );
+
+      if (hasBudgetedMilestone) {
+        throw new AppError(
+          "Dự án volunteer-only không được gán ngân sách cho milestone.",
+          400,
+        );
+      }
+
+      return true;
+    }
+
+    const expectedAmount = await this._getEscrowBackedFundedAmount(project);
+    const totalMilestoneAmount = milestones.reduce(
+      (sum, milestone) => sum + Number(milestone?.targetAmount || 0),
+      0,
+    );
+
+    if (totalMilestoneAmount !== expectedAmount) {
+      throw new AppError(
+        `Tổng tiền milestone (${totalMilestoneAmount.toLocaleString("vi-VN")}đ) phải khớp với số tiền donate thực tế trong escrow (${expectedAmount.toLocaleString("vi-VN")}đ).`,
+        400,
+      );
+    }
+
+    return true;
+  }
+
   async submitForApproval(projectId, organizerId) {
     const project = await this.projectRepository.findById(projectId);
     if (!project) throw new AppError("Không tìm thấy dự án.", 404);
@@ -1232,6 +1331,131 @@ class ProjectService {
     }
 
     return project;
+  }
+
+  async getUpdatingProjectDetail(projectId, organizerId) {
+    const project = await this.projectRepository.findByIdWithDetails(projectId);
+    if (!project) {
+      throw new AppError("Không tìm thấy dự án hoặc dự án đã bị xóa", 404);
+    }
+
+    const ownerId = project.organizerId?._id || project.organizerId;
+    if (toIdString(ownerId) !== toIdString(organizerId)) {
+      throw new AppError("Bạn không có quyền truy cập dự án này", 403);
+    }
+
+    if (project.status !== PROJECT_STATUS.UPDATING) {
+      throw new AppError("Dự án này hiện không ở trạng thái Updating.", 400);
+    }
+
+    const fundedAmountFromEscrow = await this._getEscrowBackedFundedAmount(
+      project,
+    );
+
+    return {
+      ...project,
+      fundedAmountFromEscrow,
+      financialDetail:
+        project?.projectType === PROJECT_TYPE.FUNDED
+          ? {
+              ...(project?.financialDetail || {}),
+              availableBalance: fundedAmountFromEscrow,
+            }
+          : project?.financialDetail,
+    };
+  }
+
+  async updateUpdatingProject(projectId, organizerId, updateData = {}) {
+    const existingProject = await this.projectRepository.findById(projectId);
+    if (!existingProject) {
+      throw new AppError("Không tìm thấy dự án", 404);
+    }
+
+    if (String(existingProject.organizerId) !== String(organizerId)) {
+      throw new AppError("Bạn không có quyền", 403);
+    }
+
+    if (existingProject.status !== PROJECT_STATUS.UPDATING) {
+      throw new AppError(
+        "Chỉ có thể cập nhật milestone khi dự án đang ở trạng thái Updating.",
+        400,
+      );
+    }
+
+    const mergedMilestones = this._mergeUpdatingMilestones(
+      existingProject.milestones || [],
+      updateData.milestones || [],
+    );
+
+    const normalizedMilestones = this._applyMilestoneSmartDefaults(
+      mergedMilestones,
+      existingProject.location,
+    );
+
+    await this._validateUpdatingMilestones(existingProject, normalizedMilestones);
+
+    const updatedProject =
+      await this.projectRepository.updateUpdatingProjectAtomic(
+        projectId,
+        organizerId,
+        {
+          milestones: normalizedMilestones,
+          updateSubmittedAt: null,
+          updateSubmittedBy: null,
+        },
+      );
+
+    if (!updatedProject) {
+      throw new AppError("Không thể cập nhật dự án lúc này.", 409);
+    }
+
+    return updatedProject;
+  }
+
+  async confirmUpdatingProject(projectId, organizerId) {
+    const project = await this.projectRepository.findById(projectId);
+    if (!project) {
+      throw new AppError("Không tìm thấy dự án", 404);
+    }
+
+    if (String(project.organizerId) !== String(organizerId)) {
+      throw new AppError("Bạn không có quyền", 403);
+    }
+
+    if (project.status !== PROJECT_STATUS.UPDATING) {
+      throw new AppError("Dự án này hiện không ở trạng thái Updating.", 400);
+    }
+
+    await this._validateUpdatingMilestones(project, project.milestones || []);
+
+    const updatedProject = await this.projectRepository.updateById(projectId, {
+      updateSubmittedAt: new Date(),
+      updateSubmittedBy: organizerId,
+    });
+
+    const admins = await this.userRepository.findAdmins();
+    const adminIds = (admins || [])
+      .map((admin) => String(admin?._id || ""))
+      .filter(Boolean);
+
+    if (
+      adminIds.length > 0 &&
+      this.eventBus &&
+      typeof this.eventBus.emit === "function"
+    ) {
+      this.eventBus.emit(DOMAIN_EVENTS.PROJECT_STATUS_UPDATED, {
+        recipientIds: adminIds,
+        actorId: organizerId,
+        projectId: updatedProject?._id || projectId,
+        projectName: updatedProject?.title || project.title,
+        status: PROJECT_STATUS.UPDATING,
+        title: "Organizer đã cập nhật dự án",
+        message: `Organizer đã cập nhật milestone cho dự án "${updatedProject?.title || project.title}". Vui lòng kiểm tra và cập nhật trạng thái dự án.`,
+        actionUrl: `/admin/projects/${updatedProject?._id || projectId}`,
+      });
+    }
+
+    return updatedProject;
   }
 
   async getWorkspaceStats(organizerId) {

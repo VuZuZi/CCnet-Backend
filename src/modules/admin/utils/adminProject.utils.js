@@ -87,6 +87,7 @@ export function getAllowedProjectTransitions(project) {
     case PROJECT_STATUS.ACTIVE:
     case PROJECT_STATUS.EXECUTING:
       return [
+        PROJECT_STATUS.UPDATING,
         PROJECT_STATUS.PAUSED,
         PROJECT_STATUS.COMPLETED_SUCCESSFULLY,
         PROJECT_STATUS.CANCELLED_BY_PLATFORM,
@@ -95,7 +96,15 @@ export function getAllowedProjectTransitions(project) {
     case PROJECT_STATUS.PAUSED:
       return [
         getResumeStatusForProject(project),
+        PROJECT_STATUS.UPDATING,
         PROJECT_STATUS.COMPLETED_SUCCESSFULLY,
+        PROJECT_STATUS.CANCELLED_BY_PLATFORM,
+      ];
+
+    case PROJECT_STATUS.UPDATING:
+      return [
+        PROJECT_STATUS.EXECUTING,
+        PROJECT_STATUS.PAUSED,
         PROJECT_STATUS.CANCELLED_BY_PLATFORM,
       ];
 
@@ -127,9 +136,20 @@ export function buildProjectActionName(fromStatus, toStatus) {
     return "PAUSE_PROJECT";
   }
 
+  if (normalizedTo === PROJECT_STATUS.UPDATING) {
+    return "REQUEST_PROJECT_UPDATE";
+  }
+
   if (
     [PROJECT_STATUS.FUNDING, PROJECT_STATUS.RECRUITING].includes(normalizedTo) &&
     normalizedFrom === PROJECT_STATUS.PAUSED
+  ) {
+    return "RESUME_PROJECT";
+  }
+
+  if (
+    normalizedTo === PROJECT_STATUS.EXECUTING &&
+    normalizedFrom === PROJECT_STATUS.UPDATING
   ) {
     return "RESUME_PROJECT";
   }
@@ -166,6 +186,13 @@ export function buildProjectUpdateData(project, finalStatus, feedback, adminId) 
     updateData.rejectionReason = feedback;
   }
 
+  if (finalStatus === PROJECT_STATUS.UPDATING) {
+    updateData.updateRequestReason = feedback;
+    updateData.updateRequestedAt = new Date();
+    updateData.updateSubmittedAt = null;
+    updateData.updateSubmittedBy = null;
+  }
+
   if (
     [
       PROJECT_STATUS.PENDING_APPROVAL,
@@ -176,6 +203,13 @@ export function buildProjectUpdateData(project, finalStatus, feedback, adminId) 
     ].includes(finalStatus)
   ) {
     updateData.rejectionReason = feedback || null;
+  }
+
+  if (finalStatus === PROJECT_STATUS.EXECUTING) {
+    updateData.updateRequestReason = null;
+    updateData.updateRequestedAt = null;
+    updateData.updateSubmittedAt = null;
+    updateData.updateSubmittedBy = null;
   }
 
   return updateData;
@@ -222,6 +256,13 @@ export function buildProjectStatusNotificationMessage(
     return {
       title: "Project paused",
       message: `Your project "${projectTitle}" has been paused. Reason: ${feedback || "No reason provided"}.`,
+    };
+  }
+
+  if (status === PROJECT_STATUS.UPDATING) {
+    return {
+      title: "Yêu cầu cập nhật dự án",
+      message: feedback || `Project "${projectTitle}" needs to be updated.`,
     };
   }
 

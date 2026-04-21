@@ -3,6 +3,8 @@ import { scopePerRequest } from "../../middlewares/di.middleware.js";
 import { authenticate } from "../../middlewares/auth.middleware.js";
 import { validateBody, validateParams, validateQuery } from "../../middlewares/validate.middleware.js";
 import {
+    adminRefundDecisionSchema,
+    adminRefundRequestsQuerySchema,
     approveClaimSchema,
     donateSchema,
     getDonationsQuerySchema,
@@ -12,7 +14,6 @@ import {
     requestRefundSchema,
     submitClaimSchema,
     transactionIdParamSchema,
-    updateMessageSchema,
     withdrawSchema
 } from "./transaction.validation.js";
 import { adminMiddleware } from "../../middlewares/admin.middleware.js";
@@ -108,12 +109,30 @@ router.post(
     execute("approveSuspenseClaim")
 );
 
-router.patch(
-    "/:id/message",
+router.get(
+    "/admin/refund-requests",
     authenticate,
+    adminMiddleware,
+    validateQuery(adminRefundRequestsQuerySchema),
+    execute("getRefundRequests")
+);
+
+router.patch(
+    "/admin/refund-requests/:id/approve",
+    authenticate,
+    adminMiddleware,
     validateParams(transactionIdParamSchema),
-    validateBody(updateMessageSchema),
-    execute("updateMessage")
+    validateBody(adminRefundDecisionSchema),
+    execute("approveRefundRequest")
+);
+
+router.patch(
+    "/admin/refund-requests/:id/reject",
+    authenticate,
+    adminMiddleware,
+    validateParams(transactionIdParamSchema),
+    validateBody(adminRefundDecisionSchema),
+    execute("rejectRefundRequest")
 );
 
 router.patch(

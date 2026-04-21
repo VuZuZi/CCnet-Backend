@@ -15,6 +15,13 @@ class UserRepository {
     return await User.findById(id).lean().exec();
   }
 
+  async findAdmins() {
+    return await User.find({ role: "admin", isActive: true })
+      .select("_id fullName email role")
+      .lean()
+      .exec();
+  }
+
   async findByIdWithSecurityData(id) {
     return await User.findById(id)
       .select("+password +googleId +avatarPublicId +coverPhotoPublicId")
@@ -134,7 +141,7 @@ class UserRepository {
 
     return await User.find(query)
       .select(
-        "_id fullName email avatar role location organization headline about skills phone followersCount followingCount level title createdAt kyc"
+        "_id fullName email avatar role location organization headline about skills phone followersCount followingCount level title createdAt kyc",
       )
       .lean()
       .exec();
@@ -166,7 +173,7 @@ class UserRepository {
     return await User.findByIdAndUpdate(
       userId,
       { $inc: counters },
-      { new: true }
+      { new: true },
     )
       .lean()
       .exec();
@@ -200,7 +207,7 @@ class UserRepository {
   async updateKycStatusBatch(userIds, status) {
     return await User.updateMany(
       { _id: { $in: userIds } },
-      { $set: { "kyc.status": status } }
+      { $set: { "kyc.status": status } },
     ).exec();
   }
 
@@ -210,7 +217,7 @@ class UserRepository {
 
     const savedPostsArray = user.savedPosts || [];
     const isSaved = savedPostsArray.some(
-      (savedId) => savedId.toString() === postId.toString()
+      (savedId) => savedId.toString() === postId.toString(),
     );
 
     const validPostId = new mongoose.Types.ObjectId(postId);

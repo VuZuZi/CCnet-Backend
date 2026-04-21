@@ -22,6 +22,7 @@ import { scopePerRequest } from "../../middlewares/di.middleware.js";
 import {
   createDraftSchema,
   updateDraftSchema,
+  updateUpdatingProjectSchema,
   exploreQuerySchema,
   workspaceQuerySchema,
   mapQuerySchema,
@@ -174,6 +175,25 @@ router.get(
   "/:id/draft",
   ...organizerOnly,
   execute("getDraftDetail")
+);
+
+router.get(
+  "/:id/updating",
+  ...organizerOnly,
+  execute("getUpdatingDetail")
+);
+
+router.put(
+  "/:id/updating",
+  ...organizerOnly,
+  validateBody(updateUpdatingProjectSchema),
+  execute("updateUpdatingProject")
+);
+
+router.post(
+  "/:id/updating/confirm",
+  ...organizerOnly,
+  execute("confirmUpdatingProject")
 );
 
 router.post(

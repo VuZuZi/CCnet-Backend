@@ -12,7 +12,7 @@ class TransactionController {
         try {
             const donorId = req.user.userId;
             const result = await this.transactionService.initiateDonation(donorId, req.body);
-            return ApiResponse.created(res, result, "Tạo liên kết thanh toán thành công");
+            return ApiResponse.created(res, result, "Khởi tạo thông tin quyên góp thành công. Vui lòng hoàn tất thanh toán.");
         } catch (error) { next(error); }
     };
 
@@ -36,15 +36,15 @@ class TransactionController {
 
     requestRefund = async (req, res, next) => {
         try {
-            const result = await this.transactionService.processUserRefundRequest(req.user.userId, req.params.id);
-            return ApiResponse.success(res, result, "Yêu cầu hoàn tiền đã được xử lý. Tiền đã cộng vào Ví của bạn.");
+            const result = await this.transactionService.processUserRefundRequest(req.user.userId, req.params.id, req.body);
+            return ApiResponse.success(res, result, "Yêu cầu hoàn tiền đã được gửi đi thành công. Quản trị viên sẽ phản hồi bạn sớm nhất.");
         } catch (error) { next(error); }
     };
 
     withdrawWallet = async (req, res, next) => {
         try {
             const result = await this.transactionService.processWalletWithdrawal(req.user.userId, req.body);
-            return ApiResponse.created(res, result, "Đã tạo lệnh rút tiền. Kế toán sẽ xử lý trong 1-3 ngày làm việc.");
+            return ApiResponse.created(res, result, "Lệnh rút tiền đã được khởi tạo. Hệ thống sẽ xử lý và chuyển tiền đến bạn trong vòng 1-3 ngày làm việc.");
         } catch (error) { next(error); }
     };
 
@@ -69,10 +69,24 @@ class TransactionController {
         } catch (error) { next(error); }
     };
 
-    updateMessage = async (req, res, next) => {
+    getRefundRequests = async (req, res, next) => {
         try {
-            const result = await this.transactionService.updateDonationMessage(req.user.userId, req.params.id, req.body);
-            return ApiResponse.success(res, result, "Cập nhật lời nhắn thành công");
+            const result = await this.transactionService.getRefundRequestsForAdmin(req.query);
+            return ApiResponse.success(res, result, "Lấy danh sách yêu cầu hoàn tiền thành công");
+        } catch (error) { next(error); }
+    };
+
+    approveRefundRequest = async (req, res, next) => {
+        try {
+            const result = await this.transactionService.approveRefundRequest(req.user.userId, req.params.id, req.body);
+            return ApiResponse.success(res, result, "Đã duyệt yêu cầu hoàn tiền");
+        } catch (error) { next(error); }
+    };
+
+    rejectRefundRequest = async (req, res, next) => {
+        try {
+            const result = await this.transactionService.rejectRefundRequest(req.user.userId, req.params.id, req.body);
+            return ApiResponse.success(res, result, "Đã từ chối yêu cầu hoàn tiền");
         } catch (error) { next(error); }
     };
 
@@ -86,7 +100,7 @@ class TransactionController {
     submitClaim = async (req, res, next) => {
         try {
             const result = await this.suspenseService.submitClaimRequest(req.user.userId, req.body);
-            return ApiResponse.success(res, result, "Gửi yêu cầu tra soát thành công");
+            return ApiResponse.success(res, result, "Yêu cầu tra soát của bạn đã được gửi thành công. Chúng tôi sẽ kiểm tra ngay.");
         } catch (error) { next(error); }
     };
 
