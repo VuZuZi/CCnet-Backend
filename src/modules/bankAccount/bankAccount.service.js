@@ -45,8 +45,6 @@ class BankAccountService {
         const isCrossLinked = otherUserIds.length > 0;
         const crossLinkedToUserIds = isCrossLinked ? [...new Set(otherUserIds)] : [];
 
-        const microDepositAmount = Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000;
-
         const newAccount = await this.transactionManager.runInTransaction(async (session) => {
             const account = await this.bankAccountRepository.create({
                 userId,
@@ -54,7 +52,8 @@ class BankAccountService {
                 bin,
                 accountNumber,
                 accountName: normalizedAccountName,
-                microDepositAmount,
+                isVerified: true,
+                microDepositAmount: null,
                 isCrossLinked,
                 crossLinkedToUserIds,
                 status: BANK_ACCOUNT_STATUS.ACTIVE
@@ -75,8 +74,8 @@ class BankAccountService {
 
         return {
             bankAccountId: newAccount._id,
-            message: "Hệ thống đã chuyển một số tiền nhỏ. Vui lòng nhập số tiền nhận được để xác thực.",
-            mockAmountForTesting: microDepositAmount,
+            message: "Đã thêm và xác thực tài khoản ngân hàng thành công.",
+            isVerified: true,
             isCrossLinkedWarning: isCrossLinked
         };
     }

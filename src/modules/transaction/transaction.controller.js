@@ -36,8 +36,8 @@ class TransactionController {
 
     requestRefund = async (req, res, next) => {
         try {
-            const result = await this.transactionService.processUserRefundRequest(req.user.userId, req.params.id);
-            return ApiResponse.success(res, result, "Yêu cầu hoàn tiền đã được xử lý. Tiền đã cộng vào Ví của bạn.");
+            const result = await this.transactionService.processUserRefundRequest(req.user.userId, req.params.id, req.body);
+            return ApiResponse.success(res, result, "Đã gửi yêu cầu hoàn tiền. Vui lòng chờ admin duyệt.");
         } catch (error) { next(error); }
     };
 
@@ -69,10 +69,24 @@ class TransactionController {
         } catch (error) { next(error); }
     };
 
-    updateMessage = async (req, res, next) => {
+    getRefundRequests = async (req, res, next) => {
         try {
-            const result = await this.transactionService.updateDonationMessage(req.user.userId, req.params.id, req.body);
-            return ApiResponse.success(res, result, "Cập nhật lời nhắn thành công");
+            const result = await this.transactionService.getRefundRequestsForAdmin(req.query);
+            return ApiResponse.success(res, result, "Lấy danh sách yêu cầu hoàn tiền thành công");
+        } catch (error) { next(error); }
+    };
+
+    approveRefundRequest = async (req, res, next) => {
+        try {
+            const result = await this.transactionService.approveRefundRequest(req.user.userId, req.params.id, req.body);
+            return ApiResponse.success(res, result, "Đã duyệt yêu cầu hoàn tiền");
+        } catch (error) { next(error); }
+    };
+
+    rejectRefundRequest = async (req, res, next) => {
+        try {
+            const result = await this.transactionService.rejectRefundRequest(req.user.userId, req.params.id, req.body);
+            return ApiResponse.success(res, result, "Đã từ chối yêu cầu hoàn tiền");
         } catch (error) { next(error); }
     };
 

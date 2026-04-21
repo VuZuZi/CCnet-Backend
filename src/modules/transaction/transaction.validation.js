@@ -51,14 +51,17 @@ export const approveClaimSchema = z.object({
     projectId: objectIdSchema
 }).strict();
 
-export const updateMessageSchema = z.object({
-    message: z.string().max(500, "Lời nhắn tối đa 500 ký tự").optional(),
-    isAnonymous: z.boolean().optional()
-}).strict().refine(data => data.message !== undefined || data.isAnonymous !== undefined, {
-    message: "Cần cung cấp ít nhất lời nhắn hoặc trạng thái ẩn danh"
-});
-
 export const getProjectDisbursementsQuerySchema = z.object({
     page: z.coerce.number().min(1, "Page phải lớn hơn hoặc bằng 1").optional().default(1),
     limit: z.coerce.number().min(1, "Limit phải lớn hơn 0").max(50, "Limit tối đa là 50").optional().default(10)
+}).strict();
+
+export const adminRefundRequestsQuerySchema = z.object({
+    page: z.coerce.number().min(1).optional().default(1),
+    limit: z.coerce.number().min(1).max(50).optional().default(10),
+    status: z.enum(['PENDING', 'COMPLETED', 'REJECTED', 'ALL']).optional().default('PENDING')
+}).strict();
+
+export const adminRefundDecisionSchema = z.object({
+    note: z.string().trim().max(500, 'Ghi chú tối đa 500 ký tự').optional().default('')
 }).strict();
