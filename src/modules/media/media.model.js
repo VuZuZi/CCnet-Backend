@@ -7,10 +7,12 @@ const captureMetadataSchema = new mongoose.Schema(
     location: {
       type: {
         type: String,
-        enum: ['Point']
+        enum: ['Point'],
+        default: undefined
       },
       coordinates: {
-        type: [Number]
+        type: [Number],
+        default: undefined
       }
     },
     capturedAt: { type: Date, default: null },
