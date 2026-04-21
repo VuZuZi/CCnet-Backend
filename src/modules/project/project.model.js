@@ -30,6 +30,7 @@ const milestoneSchema = new mongoose.Schema(
     milestoneId: { type: String, default: uuidv4 },
     title: { type: String, required: true, trim: true, maxlength: 100 },
     description: { type: String, required: true, trim: true, maxlength: 500 },
+    deliverables: { type: String, trim: true, maxlength: 1000 },
     targetAmount: { type: Number, default: 0, min: 0 },
     startDate: { type: Date, default: null },
     endDate: { type: Date, default: null },
