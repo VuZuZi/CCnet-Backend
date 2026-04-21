@@ -339,14 +339,21 @@ class PostService {
 
   async _getFollowingIds(userId) {
     if (!userId) return [];
-    const followingDocs = await Follow.aggregate([
-      { $match: { followerId: userId } },
-      { $project: { followingId: 1 } },
-    ]);
+
+    const followingDocs = await Follow.find({ followerId: userId })
+      .select("followingId")
+      .lean();
+
     return followingDocs.map((d) => d.followingId);
   }
 
-  async getNewsFeed({ cursor, limit = 10, userId, type, profileUserId = null }) {
+  async getNewsFeed({
+    cursor,
+    limit = 10,
+    userId,
+    type,
+    profileUserId = null,
+  }) {
     let filter = { status: "active" };
     const isProfileFeed = type === "profile";
     let useCache = false;
