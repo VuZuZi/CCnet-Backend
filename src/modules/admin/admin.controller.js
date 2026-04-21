@@ -30,6 +30,15 @@ class AdminController {
     }
   };
 
+  getUserDetail = async (req, res, next) => {
+    try {
+      const user = await this.adminService.getUserDetail(req.params.id);
+      res.json({ status: "success", data: user });
+    } catch (e) {
+      next(e);
+    }
+  };
+
   banUser = async (req, res, next) => {
     try {
       const { reason } = req.body || {};
@@ -134,6 +143,15 @@ class AdminController {
     try {
       const projects = await this.adminService.getProjects(req.query || {});
       res.json({ status: "success", data: projects });
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  getProjectDetail = async (req, res, next) => {
+    try {
+      const project = await this.adminService.getProjectDetail(req.params.id);
+      res.json({ status: "success", data: project });
     } catch (e) {
       next(e);
     }

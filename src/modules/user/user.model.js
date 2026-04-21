@@ -77,7 +77,7 @@ const userSchema = new mongoose.Schema(
     followersCount: { type: Number, default: 0 },
     followingCount: { type: Number, default: 0 },
     level: { type: Number, default: 1 },
-    title: { type: String, default: "Advocate" },
+    title: { type: String, trim: true, default: "" },
 
     isEmailVerified: { type: Boolean, default: false },
     isVerified: { type: Boolean, default: false },

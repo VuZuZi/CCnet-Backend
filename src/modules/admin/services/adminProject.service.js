@@ -153,6 +153,16 @@ class AdminProjectService {
     );
   }
 
+  async getProjectDetail(projectId) {
+    const project = await this.adminProjectRepository.findProjectById(projectId);
+
+    if (!project) {
+      throw new AppError("Project not found.", 404);
+    }
+
+    return project;
+  }
+
   async updateProjectStatus(projectId, targetStatus, feedback, adminId) {
     if (!targetStatus) {
       throw new AppError("Project status is required.", 400);
