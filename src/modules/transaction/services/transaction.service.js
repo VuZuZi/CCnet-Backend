@@ -282,6 +282,63 @@ class TransactionService {
         return [...new Set([...matches10, ...matchesLegacy])];
     }
 
+    _computeProportionalRefunds(contributions = [], totalPool = 0) {
+        if (!Array.isArray(contributions) || contributions.length === 0) {
+            return [];
+        }
+
+        const normalizedPool = Math.max(0, Math.floor(Number(totalPool || 0)));
+        if (normalizedPool <= 0) return [];
+
+        const totalContribution = contributions.reduce(
+            (sum, item) => sum + Math.max(0, Math.floor(Number(item?.amount || 0))),
+            0
+        );
+
+        if (totalContribution <= 0) return [];
+
+        const allocated = contributions.map((item) => {
+            const amount = Math.max(0, Math.floor(Number(item?.amount || 0)));
+            const exact = (normalizedPool * amount) / totalContribution;
+            const baseAmount = Math.floor(exact);
+
+            return {
+                donorId: String(item?.donorId || '').trim(),
+                donatedAmount: amount,
+                refundAmount: baseAmount,
+                remainderWeight: exact - baseAmount,
+            };
+        }).filter((item) => item.donorId && item.donatedAmount > 0);
+
+        let distributed = allocated.reduce((sum, item) => sum + item.refundAmount, 0);
+        let remainder = Math.max(0, normalizedPool - distributed);
+
+        if (remainder > 0 && allocated.length > 0) {
+            const ranked = [...allocated].sort((a, b) => {
+                if (b.remainderWeight !== a.remainderWeight) {
+                    return b.remainderWeight - a.remainderWeight;
+                }
+
+                if (b.donatedAmount !== a.donatedAmount) {
+                    return b.donatedAmount - a.donatedAmount;
+                }
+
+                return a.donorId.localeCompare(b.donorId);
+            });
+
+            let pointer = 0;
+            while (remainder > 0) {
+                ranked[pointer].refundAmount += 1;
+                remainder -= 1;
+                pointer = (pointer + 1) % ranked.length;
+            }
+        }
+
+        return allocated
+            .filter((item) => item.refundAmount > 0)
+            .map(({ remainderWeight, ...item }) => item);
+    }
+
     async _processMatchedDonation(baseTx, transferAmount, bankRef, rawWebhook) {
         const feeRate = this.config?.platformFeePercent || 0.015;
         const { netAmount, platformFee } = MoneyMath.calculateProRata(transferAmount, feeRate);
@@ -333,6 +390,125 @@ class TransactionService {
             }
         }
         return result;
+    }
+
+    async processProjectCancellationRefund(projectId, options = {}) {
+        const { session = null, actorId = null } = options;
+        const project = await this.projectRepository.findById(projectId, session);
+        if (!project) throw new AppError('Project not found.', 404);
+
+        const donations = await this.transactionRepository.findCompletedDonationsByProject(projectId, session);
+
+        if (!donations || donations.length === 0) {
+            return {
+                projectId: String(projectId),
+                projectTitle: project.title,
+                totalRefunded: 0,
+                donorCount: 0,
+                donationCount: 0,
+                refundedUserIds: [],
+                refundAllocations: [],
+            };
+        }
+
+        const lockedDonations = [];
+        for (const donation of donations) {
+            const locked = await this.transactionRepository.reconcileDonationAtomic(donation._id, session);
+            if (locked) {
+                lockedDonations.push(donation);
+            }
+        }
+
+        if (lockedDonations.length === 0) {
+            return {
+                projectId: String(projectId),
+                projectTitle: project.title,
+                totalRefunded: 0,
+                donorCount: 0,
+                donationCount: 0,
+                refundedUserIds: [],
+                refundAllocations: [],
+            };
+        }
+
+        const donorMap = new Map();
+        for (const donation of lockedDonations) {
+            const donorId = String(donation?.donorRef || '').trim();
+            if (!donorId) continue;
+
+            const donatedAmount = MoneyMath.toIntegerAmount(
+                Number(donation?.netAmount ?? donation?.amount ?? 0)
+            );
+
+            if (donatedAmount <= 0) continue;
+            donorMap.set(donorId, (donorMap.get(donorId) || 0) + donatedAmount);
+        }
+
+        const donorContributions = [...donorMap.entries()].map(([donorId, amount]) => ({ donorId, amount }));
+        const totalContributed = donorContributions.reduce((sum, item) => sum + item.amount, 0);
+        const refundAllocations = this._computeProportionalRefunds(donorContributions, totalContributed);
+
+        if (refundAllocations.length === 0) {
+            return {
+                projectId: String(projectId),
+                projectTitle: project.title,
+                totalRefunded: 0,
+                donorCount: 0,
+                donationCount: lockedDonations.length,
+                refundedUserIds: [],
+                refundAllocations: [],
+            };
+        }
+
+        const refundTransactions = refundAllocations.map((allocation) => ({
+            type: 'REFUND',
+            amount: allocation.refundAmount,
+            grossAmount: allocation.refundAmount,
+            netAmount: -allocation.refundAmount,
+            platformFee: 0,
+            projectId,
+            donorRef: allocation.donorId,
+            status: 'COMPLETED',
+            message: 'Hoàn tiền 100% tự động vào ví do dự án bị hủy bởi hệ thống',
+            gatewayResponse: {
+                source: 'PROJECT_CANCELLATION',
+                cancelledBy: actorId ? String(actorId) : null,
+                donationShareAmount: allocation.donatedAmount,
+            },
+        }));
+
+        await this.transactionRepository.bulkInsert(refundTransactions, session);
+
+        for (const allocation of refundAllocations) {
+            await this.walletRepository.incrementBalance(
+                allocation.donorId,
+                allocation.refundAmount,
+                session
+            );
+        }
+
+        const totalRefunded = refundAllocations.reduce(
+            (sum, item) => sum + item.refundAmount,
+            0
+        );
+
+        if (totalRefunded > 0) {
+            await this.escrowRepository.recordRefund(projectId, totalRefunded, session);
+        }
+
+        return {
+            projectId: String(projectId),
+            projectTitle: project.title,
+            totalRefunded,
+            donorCount: refundAllocations.length,
+            donationCount: lockedDonations.length,
+            refundedUserIds: refundAllocations.map((item) => String(item.donorId)),
+            refundAllocations: refundAllocations.map((item) => ({
+                donorId: String(item.donorId),
+                refundAmount: item.refundAmount,
+                donatedAmount: item.donatedAmount,
+            })),
+        };
     }
 
     async processAutoRefundToWallet(projectId) {

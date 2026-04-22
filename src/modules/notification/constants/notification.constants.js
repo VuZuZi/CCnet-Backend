@@ -31,6 +31,10 @@ export const NOTIFICATION_TYPES = Object.freeze({
   VOLUNTEER_WITHDRAW_REQUESTED: 'volunteer_withdraw_requested',
   VOLUNTEER_WITHDRAW_APPROVED: 'volunteer_withdraw_approved',
   VOLUNTEER_WITHDRAW_REJECTED: 'volunteer_withdraw_rejected',
+
+  VOLUNTEER_REVIEW_REQUIRED: 'volunteer_review_required',
+  VOLUNTEER_REVIEW_SUBMITTED: 'volunteer_review_submitted',
+  VOLUNTEER_REVIEW_AUTO_MAXED: 'volunteer_review_auto_maxed',
 });
 
 export const NOTIFICATION_CHANNELS = Object.freeze({

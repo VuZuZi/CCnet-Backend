@@ -15,6 +15,13 @@ class UserRepository {
     return await User.findById(id).lean().exec();
   }
 
+  async findAdmins() {
+    return await User.find({ role: "admin", isActive: true })
+      .select("_id fullName email role")
+      .lean()
+      .exec();
+  }
+
   async findByIdWithSecurityData(id) {
     return await User.findById(id)
       .select("+password +googleId +avatarPublicId +coverPhotoPublicId")

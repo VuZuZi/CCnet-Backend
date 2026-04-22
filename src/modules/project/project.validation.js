@@ -57,6 +57,7 @@ const evidencePolicySchema = z.object({
 });
 
 const milestoneSchema = z.object({
+  milestoneId: z.string().uuid().optional(),
   title: z.string().max(100, "Tiêu đề mốc tối đa 100 ký tự"),
   description: z.string().max(500, "Mô tả mốc tối đa 500 ký tự"),
   targetAmount: z.coerce.number().min(0, "Số tiền không được âm").optional().default(0),
@@ -149,6 +150,10 @@ export const updateDraftSchema = z.object({
       }
     }
   });
+
+export const updateUpdatingProjectSchema = z.object({
+  milestones: z.array(milestoneSchema).min(1, "Phải có ít nhất 1 milestone"),
+}).strict();
 
 export const submitApprovalSchema = z.object({}).strict();
 

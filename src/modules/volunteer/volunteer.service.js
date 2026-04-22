@@ -389,6 +389,10 @@ class VolunteerService {
 
     const latestProject = await this._getFreshProjectAfterVolunteerSync(opportunityId);
 
+    if (String(latestProject?.status || "") === PROJECT_STATUS.UPDATING) {
+      throw new AppError("This project is being updated and is temporarily closed for volunteer applications", 400);
+    }
+
     if (latestProject.isVolunteerFull) {
       throw new AppError("This project has reached the volunteer limit", 400);
     }
@@ -557,6 +561,10 @@ class VolunteerService {
       throw new AppError("This project is not recruiting volunteers", 400);
     }
 
+    if (String(initialProject?.status || "") === PROJECT_STATUS.UPDATING) {
+      throw new AppError("This project is being updated and cannot accept new volunteers right now", 400);
+    }
+
     const result = await this._runInTransaction(async (session) => {
       const txApplication = await this.volunteerRepository.findById(applicationId, session);
       if (!txApplication) {
@@ -574,6 +582,10 @@ class VolunteerService {
 
       if (!txProject.needsVolunteers) {
         throw new AppError("This project is not recruiting volunteers", 400);
+      }
+
+      if (String(txProject?.status || "") === PROJECT_STATUS.UPDATING) {
+        throw new AppError("This project is being updated and cannot accept new volunteers right now", 400);
       }
 
       if (txProject.isVolunteerFull) {

@@ -104,8 +104,11 @@ export const createApp = async () => {
   initVolunteerWorkers();
   initUserWorkers();
   initTransactionWorkers();
+
   setTimeout(() => {
-    getContainer().resolve("jobQueue").addJob("financial-reconciliation", "daily-reconciliation", {});
+    getContainer()
+      .resolve("jobQueue")
+      .addJob("financial-reconciliation", "daily-reconciliation", {});
   }, 5000);
 
   startWorkers();
@@ -147,7 +150,7 @@ export const createApp = async () => {
   });
 
   setTimeout(async () => {
-    if (process.env.NODE_ENV === 'development') {
+    if (process.env.NODE_ENV === "development") {
       console.log("=========================================");
       console.log("🧪 [DEV MODE] CHẠY TEST LUỒNG ĐỐI SOÁT...");
       const txService = getContainer().resolve("transactionService");
