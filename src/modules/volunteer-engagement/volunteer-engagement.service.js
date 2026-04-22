@@ -333,6 +333,10 @@ class VolunteerEngagementService {
         return String(volunteerId || "") === String(actorId || "");
       }) || null;
 
+    if (!myReview || myReview.status !== "REVIEWED") {
+      return null;
+    }
+
     return myReview;
   }
 
