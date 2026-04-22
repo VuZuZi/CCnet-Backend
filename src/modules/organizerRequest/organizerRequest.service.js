@@ -28,6 +28,18 @@ const normalizeLocation = (location) => {
   };
 };
 
+const normalizeBankBin = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "UNKNOWN";
+
+  const digits = raw.replace(/\D/g, "");
+  if (digits && digits.length <= 10) {
+    return digits;
+  }
+
+  return raw.slice(0, 10);
+};
+
 class OrganizerRequestService {
   constructor({
     userRepository,
@@ -111,8 +123,14 @@ class OrganizerRequestService {
       : 0;
 
     return await this.transactionManager.runInTransaction(async (session) => {
-      const normalizedUserName = user.fullName.trim().toLowerCase();
-      const normalizedBankName = payload.bankAccountName.trim().toLowerCase();
+      const normalizedUserName = String(
+        user.fullName || payload.fullNameSnapshot || ""
+      )
+        .trim()
+        .toLowerCase();
+      const normalizedBankName = String(payload.bankAccountName || "")
+        .trim()
+        .toLowerCase();
       const isNameMatch = normalizedUserName === normalizedBankName;
 
       const nextStatus = ORGANIZER_REQUEST_STATUS.PENDING;
@@ -132,6 +150,7 @@ class OrganizerRequestService {
       const bankData = {
         userId,
         bankName: payload.bankName,
+        bin: normalizeBankBin(payload.bankBin),
         accountNumber: payload.bankAccountNumber,
         accountName: payload.bankAccountName,
         isVerified: false,

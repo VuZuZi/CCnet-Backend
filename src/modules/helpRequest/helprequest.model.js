@@ -67,7 +67,7 @@ const helpRequestSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: ['PENDING', 'VERIFIED', 'IN_PROGRESS', 'COMPLETED', 'REJECTED', 'CANCELLED'],
-      default: 'PENDING',
+      default: 'VERIFIED',
       index: true,
     },
     verifiedBy: {

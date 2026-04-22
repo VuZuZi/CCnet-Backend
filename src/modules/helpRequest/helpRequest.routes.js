@@ -12,7 +12,6 @@ import {
   getHelpRequestsSchema,
   getHelpRequestByIdSchema,
   deleteHelpRequestSchema,
-  verifyHelpRequestSchema,
   assignOrganizerSchema,
   getNearbyRequestsSchema,
   getOrganizerSuggestionsSchema,
@@ -133,14 +132,6 @@ router.patch(
   authenticate,
   validate(getHelpRequestByIdSchema),
   execute('completeHelpRequest')
-);
-
-router.patch(
-  '/:id/verify',
-  authenticate,
-  adminMiddleware,
-  validate(verifyHelpRequestSchema),
-  execute('verifyHelpRequest')
 );
 
 router.patch(

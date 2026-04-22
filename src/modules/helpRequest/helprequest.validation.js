@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 const CATEGORIES = ['Y_TE', 'GIAO_DUC', 'THIEN_TAI', 'XAY_DUNG', 'MOI_TRUONG', 'KHAC'];
 const URGENCY_LEVELS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
-const STATUSES = ['PENDING', 'VERIFIED', 'IN_PROGRESS', 'COMPLETED', 'REJECTED', 'CANCELLED'];
+const STATUSES = ['VERIFIED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'];
 
 const locationSchema = z.object({
   type: z.literal('Point').optional().default('Point'),
@@ -104,16 +104,6 @@ export const getHelpRequestByIdSchema = z.object({
 });
 
 export const deleteHelpRequestSchema = z.object({
-  params: z.object({
-    id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid help request ID'),
-  }),
-});
-
-export const verifyHelpRequestSchema = z.object({
-  body: z.object({
-    approved: z.boolean(),
-    rejectionReason: z.string().max(1000).optional(),
-  }),
   params: z.object({
     id: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid help request ID'),
   }),
