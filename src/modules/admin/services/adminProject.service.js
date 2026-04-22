@@ -123,7 +123,11 @@ class AdminProjectService {
     feedback,
   }) {
     const uniqueRecipientIds = [
-      ...new Set((recipientIds || []).map((id) => String(id || "").trim()).filter(Boolean)),
+      ...new Set(
+        (recipientIds || [])
+          .map((id) => String(id || "").trim())
+          .filter(Boolean)
+      ),
     ];
 
     if (!uniqueRecipientIds.length) return;
@@ -135,16 +139,19 @@ class AdminProjectService {
       actorId,
       userIds: uniqueRecipientIds,
       title: "Dự án đã bị hủy bởi hệ thống",
-      message: `Dự án \"${project?.title || "Dự án không tên"}\" đã bị hủy bởi hệ thống. Lý do: ${safeReason}. Nếu bạn đã tham gia quyên góp, 100% số tiền gốc sẽ được hoàn trả tự động vào ví CCNet của bạn mà không mất bất kỳ khoản phí nào.`,
+      message: `Dự án "${project?.title || "Dự án không tên"}" đã bị hủy bởi hệ thống. Lý do: ${safeReason}. Nếu bạn đã tham gia quyên góp, 100% số tiền gốc sẽ được hoàn trả tự động vào ví CCNet của bạn mà không mất bất kỳ khoản phí nào.`,
       actionUrl: `/projects/${project?._id}`,
       entityId: project?._id,
       severity: "high",
     });
   }
 
-  async _syncProjectConversationOnActive(project, adminId = null) {
-    if (!project || String(project.status) !== PROJECT_STATUS.ACTIVE) return null;
+  async _syncProjectConversation(project, adminId = null) {
+    if (!project) return null;
     if (!this.conversationService || !this.volunteerRepository) return null;
+
+    const organizerId = extractObjectId(project.organizerId);
+    if (!organizerId) return null;
 
     const approvedApplications = await this.volunteerRepository.findByProject(
       project._id,
@@ -157,7 +164,7 @@ class AdminProjectService {
 
     return this.conversationService.ensureProjectGroupConversation({
       projectId: project._id,
-      organizerId: extractObjectId(project.organizerId),
+      organizerId,
       participantIds: approvedVolunteerIds,
       groupName: project.title,
       actorId: adminId,
@@ -256,7 +263,6 @@ class AdminProjectService {
 
       let cancellationSummary = null;
       let cancellationRecipientIds = [];
-
       let userUpdate = null;
 
       if (finalStatus === PROJECT_STATUS.REJECTED) {
@@ -266,13 +272,14 @@ class AdminProjectService {
       }
 
       if (finalStatus === PROJECT_STATUS.CANCELLED_BY_PLATFORM) {
-        cancellationSummary = await this.transactionService.processProjectCancellationRefund(
-          projectId,
-          {
-            session,
-            actorId: adminId,
-          }
-        );
+        cancellationSummary =
+          await this.transactionService.processProjectCancellationRefund(
+            projectId,
+            {
+              session,
+              actorId: adminId,
+            }
+          );
 
         const totalRefunded = Number(cancellationSummary?.totalRefunded || 0);
         const refundedAt = totalRefunded > 0 ? new Date() : null;
@@ -288,7 +295,9 @@ class AdminProjectService {
           refundedAt,
           message:
             totalRefunded > 0
-              ? `Hệ thống đã tự động hoàn 100% tiền cho ${Number(cancellationSummary?.donorCount || 0)} người dùng quyên góp do dự án bị hủy.`
+              ? `Hệ thống đã tự động hoàn 100% tiền cho ${Number(
+                  cancellationSummary?.donorCount || 0
+                )} người dùng quyên góp do dự án bị hủy.`
               : "Không có giao dịch quyên góp hợp lệ nào cần hoàn tiền cho dự án này.",
         };
 
@@ -348,8 +357,12 @@ class AdminProjectService {
           );
       }
 
-      if (String(updatedProject?.status) === PROJECT_STATUS.ACTIVE) {
-        await this._syncProjectConversationOnActive(updatedProject, adminId);
+      const shouldSyncProjectConversation =
+        approveAction ||
+        String(updatedProject?.status) === PROJECT_STATUS.ACTIVE;
+
+      if (shouldSyncProjectConversation) {
+        await this._syncProjectConversation(updatedProject, adminId);
       }
 
       await this._logAdminAction({
