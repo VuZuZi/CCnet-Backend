@@ -106,17 +106,59 @@ class TransactionRepository {
         return await Transaction.findById(id).session(session).lean().exec();
     }
 
+    async findRefundRequestBySourceTransaction(sourceTransactionId, session = null) {
+        if (!mongoose.Types.ObjectId.isValid(sourceTransactionId)) return null;
+
+        return await Transaction.findOne({
+            type: TRANSACTION_TYPES.USER_REFUND_REQUEST,
+            'gatewayResponse.sourceTransactionId': String(sourceTransactionId),
+            status: { $in: ['PENDING', 'COMPLETED'] }
+        }).session(session).lean().exec();
+    }
+
+    async findRefundRequestsForAdmin({ skip = 0, limit = 10, status = 'PENDING' } = {}, session = null) {
+        const filter = {
+            type: TRANSACTION_TYPES.USER_REFUND_REQUEST
+        };
+
+        if (status && status !== 'ALL') {
+            filter.status = status;
+        }
+
+        const [requests, total] = await Promise.all([
+            Transaction.find(filter)
+                .populate('donorRef', 'fullName email avatar')
+                .populate('projectId', 'title status')
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .session(session)
+                .lean()
+                .exec(),
+            Transaction.countDocuments(filter).session(session).exec()
+        ]);
+
+        return { requests, total };
+    }
+
     async findWalletTransactions(userId, skip = 0, limit = 10) {
         const query = {
             donorRef: userId,
-            type: {
-                $in: [
-                    TRANSACTION_TYPES.WALLET_DEPOSIT,
-                    TRANSACTION_TYPES.WALLET_WITHDRAWAL,
-                    TRANSACTION_TYPES.DONATION_FROM_WALLET,
-                    TRANSACTION_TYPES.USER_REFUND_REQUEST
-                ]
-            }
+            $or: [
+                {
+                    type: {
+                        $in: [
+                            TRANSACTION_TYPES.WALLET_DEPOSIT,
+                            TRANSACTION_TYPES.WALLET_WITHDRAWAL,
+                            TRANSACTION_TYPES.DONATION_FROM_WALLET,
+                        ]
+                    }
+                },
+                {
+                    type: TRANSACTION_TYPES.USER_REFUND_REQUEST,
+                    status: 'COMPLETED'
+                }
+            ]
         };
 
         const [transactions, total] = await Promise.all([
@@ -130,7 +172,7 @@ class TransactionRepository {
         const query = {
             donorRef: userId,
             type: { $in: [TRANSACTION_TYPES.DONATION, TRANSACTION_TYPES.DONATION_FROM_WALLET] },
-            status: 'COMPLETED'
+            status: { $in: ['COMPLETED', 'REFUNDED'] }
         };
 
         const [transactions, total] = await Promise.all([
@@ -138,6 +180,21 @@ class TransactionRepository {
             Transaction.countDocuments(query).exec()
         ]);
         return { transactions, total };
+    }
+
+    async findRefundRequestsBySourceTransactionIds(sourceTransactionIds = [], session = null) {
+        if (!Array.isArray(sourceTransactionIds) || sourceTransactionIds.length === 0) return [];
+
+        const normalizedIds = sourceTransactionIds
+            .filter((id) => mongoose.Types.ObjectId.isValid(id))
+            .map((id) => String(id));
+
+        if (normalizedIds.length === 0) return [];
+
+        return await Transaction.find({
+            type: TRANSACTION_TYPES.USER_REFUND_REQUEST,
+            'gatewayResponse.sourceTransactionId': { $in: normalizedIds }
+        }).session(session).lean().exec();
     }
 
     async findPublicDonorsByProject(projectId, skip = 0, limit = 10) {

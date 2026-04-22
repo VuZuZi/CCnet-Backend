@@ -171,17 +171,55 @@ export function buildNotificationPayload(input) {
         },
       };
 
+    case NOTIFICATION_TYPES.REFUND_REQUEST_SUBMITTED:
+      return {
+        title: 'Đã gửi yêu cầu hoàn tiền',
+        message: ensureText(
+          input.message,
+          'Yêu cầu hoàn tiền đã được ghi nhận và đang chờ admin xem xét.'
+        ),
+        actionUrl: ensureText(
+          input.actionUrl,
+          '/profile?view=wallet&tab=donation'
+        ),
+        entityType: 'transaction',
+        entityId: input.entityId || null,
+        metadata: {
+          amount: input.amount || 0,
+          reason: input.reason || null,
+        },
+      };
+
     case NOTIFICATION_TYPES.TRANSACTION_REFUNDED: {
       const refundReason = input.isAutoRefund ? 'từ dự án đã hủy' : 'theo yêu cầu của bạn';
       return {
         title: 'Hoàn tiền thành công',
         message: `Số tiền ${input.amount ? input.amount.toLocaleString('vi-VN') : ''} VNĐ đã được hoàn vào ví nội bộ ${refundReason}.`,
-        actionUrl: ensureText(input.actionUrl, '/wallet'),
+        actionUrl: ensureText(input.actionUrl, '/profile?view=wallet&tab=wallet'),
         entityType: 'transaction',
         entityId: input.entityId || null,
         metadata: { amount: input.amount || 0, isAutoRefund: input.isAutoRefund },
       };
     }
+
+    case NOTIFICATION_TYPES.REFUND_REQUEST_REJECTED:
+      return {
+        title: 'Yêu cầu hoàn tiền bị từ chối',
+        message: ensureText(
+          input.message,
+          'Admin đã từ chối yêu cầu hoàn tiền của bạn.'
+        ),
+        actionUrl: ensureText(
+          input.actionUrl,
+          '/profile?view=wallet&tab=donation'
+        ),
+        entityType: 'transaction',
+        entityId: input.entityId || null,
+        metadata: {
+          amount: input.amount || 0,
+          reviewNote: input.reviewNote || null,
+        },
+      };
 
     case NOTIFICATION_TYPES.TRANSACTION_WITHDRAWAL_REQUESTED:
       return {

@@ -1,10 +1,13 @@
 import User from "../../user/user.model.js";
 import Report from "../../report/report.model.js";
 import Project from "../../project/project.model.js";
+import EscrowAccount from "../../escrow/escrow.model.js";
+import SystemFinancial from "../../transaction/models/system-financial.model.js";
+import Transaction from "../../transaction/models/transaction.model.js";
 
 class AdminDashboardRepository {
   async getSystemStats() {
-    const [userStats, reportStats, projectStats] = await Promise.all([
+    const [userStats, reportStats, projectStats, escrowStats, systemFinancial, refundRequestStats] = await Promise.all([
       User.aggregate([
         {
           $group: {
@@ -49,6 +52,28 @@ class AdminDashboardRepository {
           },
         },
       ]),
+      EscrowAccount.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalEscrowBalance: { $sum: "$availableBalance" },
+          },
+        },
+      ]),
+      SystemFinancial.findOne({ identifier: "SYSTEM_MAIN" }).lean().exec(),
+      Transaction.aggregate([
+        {
+          $match: {
+            type: 'USER_REFUND_REQUEST',
+          },
+        },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+          },
+        },
+      ]),
     ]);
 
     const reportsTotal = reportStats.reduce(
@@ -60,6 +85,13 @@ class AdminDashboardRepository {
       (sum, item) => sum + Number(item.count || 0),
       0
     );
+
+    const refundRequestsTotal = refundRequestStats.reduce(
+      (sum, item) => sum + Number(item.count || 0),
+      0
+    );
+
+    const totalEscrowBalance = Number(escrowStats?.[0]?.totalEscrowBalance || 0);
 
     return {
       users: userStats[0] || {
@@ -76,6 +108,14 @@ class AdminDashboardRepository {
       projects: {
         total: projectsTotal,
         byStatus: projectStats,
+      },
+      finance: {
+        globalProjectWalletBalance: totalEscrowBalance,
+        retainedPenaltyFund: Number(systemFinancial?.retainedPenaltyFund || 0),
+      },
+      refunds: {
+        total: refundRequestsTotal,
+        byStatus: refundRequestStats,
       },
     };
   }

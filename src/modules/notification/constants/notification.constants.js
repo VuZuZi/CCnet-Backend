@@ -16,7 +16,9 @@ export const NOTIFICATION_TYPES = Object.freeze({
 
   DONATION_SUCCESSFUL: 'donation_successful',
 
+  REFUND_REQUEST_SUBMITTED: 'refund_request_submitted',
   TRANSACTION_REFUNDED: 'transaction_refunded',
+  REFUND_REQUEST_REJECTED: 'refund_request_rejected',
   TRANSACTION_WITHDRAWAL_REQUESTED: 'transaction_withdrawal_requested',
   TRANSACTION_FAILED: 'transaction_failed',
   POST_REACTED: 'post_reacted',
@@ -29,6 +31,10 @@ export const NOTIFICATION_TYPES = Object.freeze({
   VOLUNTEER_WITHDRAW_REQUESTED: 'volunteer_withdraw_requested',
   VOLUNTEER_WITHDRAW_APPROVED: 'volunteer_withdraw_approved',
   VOLUNTEER_WITHDRAW_REJECTED: 'volunteer_withdraw_rejected',
+
+  VOLUNTEER_REVIEW_REQUIRED: 'volunteer_review_required',
+  VOLUNTEER_REVIEW_SUBMITTED: 'volunteer_review_submitted',
+  VOLUNTEER_REVIEW_AUTO_MAXED: 'volunteer_review_auto_maxed',
 });
 
 export const NOTIFICATION_CHANNELS = Object.freeze({

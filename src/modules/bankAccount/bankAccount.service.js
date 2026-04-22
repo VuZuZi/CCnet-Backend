@@ -23,7 +23,7 @@ class BankAccountService {
 
         const bankInfo = getBankByShortName(bankName);
         if (!bankInfo) {
-            throw new AppError("Ngân hàng không được hệ thống hỗ trợ.", 400);
+            throw new AppError("Rất tiếc, ngân hàng này hiện chưa được hệ thống hỗ trợ liên kết.", 400);
         }
         const bin = bankInfo.bin;
 
@@ -35,7 +35,7 @@ class BankAccountService {
             acc => String(acc.userId) === String(userId) && acc.status !== BANK_ACCOUNT_STATUS.DEPRECATED
         );
         if (isSelfDuplicated) {
-            throw new AppError("Tài khoản ngân hàng này đã được liên kết với bạn.", 400);
+            throw new AppError("Tài khoản ngân hàng này đã tồn tại trong danh sách liên kết của bạn.", 400);
         }
 
         const otherUserIds = existingAccounts
@@ -45,8 +45,6 @@ class BankAccountService {
         const isCrossLinked = otherUserIds.length > 0;
         const crossLinkedToUserIds = isCrossLinked ? [...new Set(otherUserIds)] : [];
 
-        const microDepositAmount = Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000;
-
         const newAccount = await this.transactionManager.runInTransaction(async (session) => {
             const account = await this.bankAccountRepository.create({
                 userId,
@@ -54,7 +52,8 @@ class BankAccountService {
                 bin,
                 accountNumber,
                 accountName: normalizedAccountName,
-                microDepositAmount,
+                isVerified: true,
+                microDepositAmount: null,
                 isCrossLinked,
                 crossLinkedToUserIds,
                 status: BANK_ACCOUNT_STATUS.ACTIVE
@@ -75,8 +74,8 @@ class BankAccountService {
 
         return {
             bankAccountId: newAccount._id,
-            message: "Hệ thống đã chuyển một số tiền nhỏ. Vui lòng nhập số tiền nhận được để xác thực.",
-            mockAmountForTesting: microDepositAmount,
+            message: "Tuyệt vời! Tài khoản ngân hàng của bạn đã được liên kết thành công.",
+            isVerified: true,
             isCrossLinkedWarning: isCrossLinked
         };
     }
@@ -105,7 +104,7 @@ class BankAccountService {
             microDepositAmount: null
         });
 
-        return { success: true, message: "Xác thực tài khoản ngân hàng thành công." };
+        return { success: true, message: "Xác thực tài khoản ngân hàng hoàn tất. Bạn đã có thể sử dụng đầy đủ tính năng." };
     }
 
     async getMyVerifiedAccounts(userId) {
@@ -131,7 +130,7 @@ class BankAccountService {
             isVerified: false
         });
 
-        return { success: true, message: "Đã hủy liên kết tài khoản ngân hàng." };
+        return { success: true, message: "Đã hủy liên kết tài khoản ngân hàng thành công." };
     }
 }
 

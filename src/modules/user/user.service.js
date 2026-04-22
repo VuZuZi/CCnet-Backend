@@ -3,6 +3,97 @@ import { toUserResponse } from "./user.dto.js";
 import bcrypt from "bcryptjs";
 import sharp from "sharp";
 
+const STAR_TO_POINTS = {
+  1: 20,
+  2: 40,
+  3: 60,
+  4: 80,
+  5: 100,
+};
+
+const COMPLETED_PROJECT_STATUSES = new Set([
+  "COMPLETED",
+  "COMPLETED_SUCCESSFULLY",
+  "COMPLETED_PARTIAL",
+]);
+
+const PROFILE_BADGE_CONFIG = {
+  HEALTH: {
+    key: "HEALTH",
+    label: "Y tế & Sức khỏe",
+    icon: "heart",
+    bgColor: "#E0F2FE",
+    textColor: "#1D4ED8",
+    borderColor: "#BFDBFE",
+  },
+  EDUCATION: {
+    key: "EDUCATION",
+    label: "Giáo dục",
+    icon: "graduation-cap",
+    bgColor: "#F3E8FF",
+    textColor: "#7E22CE",
+    borderColor: "#E9D5FF",
+  },
+  ENVIRONMENT: {
+    key: "ENVIRONMENT",
+    label: "Môi trường",
+    icon: "tree-pine",
+    bgColor: "#DCFCE7",
+    textColor: "#15803D",
+    borderColor: "#BBF7D0",
+  },
+  EMERGENCY: {
+    key: "EMERGENCY",
+    label: "Cứu trợ khẩn cấp",
+    icon: "life-buoy",
+    bgColor: "#FEF2F2",
+    textColor: "#DC2626",
+    borderColor: "#FECACA",
+  },
+  CONSTRUCTION: {
+    key: "CONSTRUCTION",
+    label: "Xây dựng",
+    icon: "hammer",
+    bgColor: "#FEF3C7",
+    textColor: "#B45309",
+    borderColor: "#FDE68A",
+  },
+  DEFAULT: {
+    key: "COMMUNITY",
+    label: "Hoạt động cộng đồng",
+    icon: "award",
+    bgColor: "#F8FAFC",
+    textColor: "#334155",
+    borderColor: "#E2E8F0",
+  },
+};
+
+const CATEGORY_ALIASES = {
+  HEALTH: "HEALTH",
+  Y_TE: "HEALTH",
+  YT: "HEALTH",
+  MEDICAL: "HEALTH",
+  HEALTHCARE: "HEALTH",
+
+  EDUCATION: "EDUCATION",
+  GIAO_DUC: "EDUCATION",
+  EDUCATE: "EDUCATION",
+
+  ENVIRONMENT: "ENVIRONMENT",
+  MOI_TRUONG: "ENVIRONMENT",
+  ECOLOGY: "ENVIRONMENT",
+
+  EMERGENCY: "EMERGENCY",
+  THIEN_TAI: "EMERGENCY",
+  DISASTER_RELIEF: "EMERGENCY",
+  CUU_TRO_KHAN_CAP: "EMERGENCY",
+  RELIEF: "EMERGENCY",
+
+  CONSTRUCTION: "CONSTRUCTION",
+  XAY_DUNG: "CONSTRUCTION",
+  BUILDING: "CONSTRUCTION",
+};
+
 const normalizeLocation = (location) => {
   if (!location || typeof location !== "object") return null;
 
@@ -36,12 +127,147 @@ class UserService {
     cloudinaryProvider,
     jobQueue,
     followRepository,
+    volunteerReviewRepository,
+    projectRepository,
   }) {
     this.userRepository = userRepository;
     this.mediaRepository = mediaRepository;
     this.cloudinaryProvider = cloudinaryProvider;
     this.jobQueue = jobQueue;
     this.followRepository = followRepository;
+    this.volunteerReviewRepository = volunteerReviewRepository;
+    this.projectRepository = projectRepository;
+  }
+
+  _normalizeProjectCategory(categoryValue) {
+    const raw = String(categoryValue || "")
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, "_");
+
+    return CATEGORY_ALIASES[raw] || raw || "DEFAULT";
+  }
+
+  _computeVolunteerImpactMetrics(reviews = []) {
+    const validReviews = Array.isArray(reviews)
+      ? reviews.filter((review) => {
+          const score = Number(review?.score || 0);
+          return (
+            String(review?.status || "").toUpperCase() === "REVIEWED" &&
+            score >= 1 &&
+            score <= 5
+          );
+        })
+      : [];
+
+    const completedCount = validReviews.length;
+
+    const trustScore = validReviews.reduce((total, review) => {
+      const score = Number(review?.score || 0);
+      return total + (STAR_TO_POINTS[score] || 0);
+    }, 0);
+
+    const averageRating =
+      completedCount > 0
+        ? Number(
+            (
+              validReviews.reduce(
+                (total, review) => total + Number(review?.score || 0),
+                0
+              ) / completedCount
+            ).toFixed(1)
+          )
+        : 0;
+
+    return {
+      completedCount,
+      averageRating,
+      trustScore,
+    };
+  }
+
+  _buildAchievementBadges(projects = []) {
+    const grouped = new Map();
+
+    for (const project of projects) {
+      const normalizedCategory = this._normalizeProjectCategory(
+        project?.category
+      );
+      const config =
+        PROFILE_BADGE_CONFIG[normalizedCategory] || PROFILE_BADGE_CONFIG.DEFAULT;
+
+      if (grouped.has(config.key)) {
+        grouped.get(config.key).count += 1;
+        continue;
+      }
+
+      grouped.set(config.key, {
+        ...config,
+        count: 1,
+      });
+    }
+
+    return Array.from(grouped.values()).sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return a.label.localeCompare(b.label, "vi");
+    });
+  }
+
+  async _buildVolunteerProfileInsights(userId) {
+    const emptyData = {
+      impactMetrics: {
+        completedCount: 0,
+        averageRating: 0,
+        trustScore: 0,
+      },
+      achievementBadges: [],
+    };
+
+    if (!this.volunteerReviewRepository) {
+      return emptyData;
+    }
+
+    const reviewedVolunteerProjects =
+      await this.volunteerReviewRepository.findReviewedByVolunteer(userId);
+
+    const impactMetrics =
+      this._computeVolunteerImpactMetrics(reviewedVolunteerProjects);
+
+    if (!reviewedVolunteerProjects.length || !this.projectRepository) {
+      return {
+        impactMetrics,
+        achievementBadges: [],
+      };
+    }
+
+    const reviewedProjectIds = [
+      ...new Set(
+        reviewedVolunteerProjects
+          .map((item) => String(item?.projectId || "").trim())
+          .filter(Boolean)
+      ),
+    ];
+
+    const projects = await Promise.all(
+      reviewedProjectIds.map((projectId) =>
+        this.projectRepository.findById(projectId)
+      )
+    );
+
+    const completedProjects = projects.filter(
+      (project) =>
+        project &&
+        COMPLETED_PROJECT_STATUSES.has(
+          String(project?.status || "").toUpperCase()
+        )
+    );
+
+    const achievementBadges = this._buildAchievementBadges(completedProjects);
+
+    return {
+      impactMetrics,
+      achievementBadges,
+    };
   }
 
   async getUserById(id) {
@@ -53,7 +279,16 @@ class UserService {
   async getProfile(userId) {
     const user = await this.userRepository.findById(userId);
     if (!user) throw new AppError("User not found", 404);
-    return toUserResponse(user);
+
+    const baseUser = toUserResponse(user);
+    const { impactMetrics, achievementBadges } =
+      await this._buildVolunteerProfileInsights(user._id);
+
+    return {
+      ...baseUser,
+      impactMetrics,
+      achievementBadges,
+    };
   }
 
   async getUserByEmail(email) {
@@ -80,7 +315,15 @@ class UserService {
     const updatedUser = await this.userRepository.updateById(userId, payload);
     if (!updatedUser) throw new AppError("User not found", 404);
 
-    return toUserResponse(updatedUser);
+    const baseUser = toUserResponse(updatedUser);
+    const { impactMetrics, achievementBadges } =
+      await this._buildVolunteerProfileInsights(updatedUser._id);
+
+    return {
+      ...baseUser,
+      impactMetrics,
+      achievementBadges,
+    };
   }
 
   async changePassword(id, currentPassword, newPassword) {

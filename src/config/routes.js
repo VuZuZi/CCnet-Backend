@@ -8,6 +8,7 @@ import chatRoutes from "../modules/chat/chat.routes.js";
 import followRoutes from "../modules/follow/follow.routes.js";
 import projectRoutes from "../modules/project/project.routes.js";
 import volunteerRoutes from "../modules/volunteer/volunteer.routes.js";
+import volunteerEngagementRoutes from "../modules/volunteer-engagement/volunteer-engagement.routes.js";
 import helpRequestRoutes from "../modules/helpRequest/helpRequest.routes.js";
 import transactionRoutes from "../modules/transaction/transaction.routes.js";
 import bankAccountRoutes from "../modules/bankAccount/bankAccount.routes.js";
@@ -35,6 +36,7 @@ export const configureRoutes = (app, { notificationModule }) => {
     { path: "/follow", handler: followRoutes },
     { path: "/project", handler: projectRoutes },
     { path: "/volunteer", handler: volunteerRoutes },
+    { path: "/volunteer-engagement", handler: volunteerEngagementRoutes },
     { path: "/help-requests", handler: helpRequestRoutes },
     { path: "/organizer-requests", handler: organizerRequestUserRouter },
     { path: "/admin/organizer-requests", handler: organizerRequestAdminRouter },
@@ -53,3 +55,5 @@ export const configureRoutes = (app, { notificationModule }) => {
     console.log(`Route registered: ${API_PREFIX}${path}`);
   });
 };
+
+export default configureRoutes;

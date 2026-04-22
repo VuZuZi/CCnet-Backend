@@ -16,7 +16,9 @@ export const DOMAIN_EVENTS = Object.freeze({
   SYSTEM_NOTIFICATION: 'system.notification',
 
   DONATION_SUCCESSFUL: 'donation.successful',
+  TRANSACTION_REFUND_REQUESTED: 'transaction.refundRequested',
   TRANSACTION_REFUNDED: 'transaction.refunded',
+  TRANSACTION_REFUND_REJECTED: 'transaction.refundRejected',
   TRANSACTION_WITHDRAWAL_REQUESTED: 'transaction.withdrawalRequested',
   TRANSACTION_FAILED: 'transaction.failed',
   REFUND_COMPLETED: "transaction.refundCompleted",
