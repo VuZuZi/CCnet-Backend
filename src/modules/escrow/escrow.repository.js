@@ -132,6 +132,14 @@ class EscrowRepository {
             { new: true, runValidators: true, session }
         ).lean().exec();
     }
+
+    async updateOrganizerRetainedBalance(projectId, amount, session = null) {
+        return await EscrowAccount.findOneAndUpdate(
+            { projectId },
+            { $inc: { organizerRetainedBalance: amount } },
+            { new: true, runValidators: true, session }
+        ).lean().exec();
+    }
 }
 
 export default EscrowRepository;

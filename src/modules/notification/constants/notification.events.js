@@ -5,6 +5,7 @@ export const DOMAIN_EVENTS = Object.freeze({
   PROJECT_SUBMITTED_FOR_APPROVAL: 'project.submittedForApproval',
   PROJECT_STATUS_UPDATED: 'project.statusUpdated',
   PROJECT_MILESTONE_COMPLETED: 'project.milestoneCompleted',
+  PROJECT_FUNDING_COMPLETED: 'project.fundingCompleted',
 
   EVIDENCE_SUBMITTED_MANUAL: 'evidence.submittedManual',
 

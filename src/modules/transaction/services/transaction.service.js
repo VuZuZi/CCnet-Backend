@@ -42,6 +42,41 @@ class TransactionService {
         this.webhookAuditLogRepository = webhookAuditLogRepository;
     }
 
+    async _checkAndFinalizeFundingGoal(project, session, dispatchEvent) {
+        if (project.targetAmount > 0 && project.status === PROJECT_STATUS.FUNDING) {
+
+            if (project.currentAmount >= project.targetAmount) {
+
+                await this.projectRepository.updateById(
+                    project._id,
+                    {
+                        status: PROJECT_STATUS.EXECUTING,
+                        endDate: new Date()
+                    },
+                    session
+                );
+
+                const donations = await this.transactionRepository.findCompletedDonationsByProject(project._id);
+                const donorIds = [...new Set(donations.map(d => d.donorRef ? String(d.donorRef) : null).filter(Boolean))];
+
+                const recipientIds = ['ADMIN_GROUP', String(project.organizerId), ...donorIds];
+
+                if (DOMAIN_EVENTS.SYSTEM_NOTIFICATION) {
+                    dispatchEvent(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, {
+                        recipientIds,
+                        title: '🎉 Dự án đã gọi vốn thành công!',
+                        message: `Dự án "${project.title}" đã đạt 100% mục tiêu quyên góp và chính thức bước vào giai đoạn Thực thi. Cảm ơn sự đồng hành của bạn!`
+                    });
+                }
+
+                dispatchEvent('PROJECT_FUNDING_COMPLETED', { projectId: String(project._id) });
+
+                return true;
+            }
+        }
+        return false;
+    }
+
     async getPublicProjectDisbursements(projectId, query) {
         const project = await this.projectRepository.findById(projectId);
         if (!project) throw new AppError("Không tìm thấy dự án", 404);
@@ -61,7 +96,6 @@ class TransactionService {
     _checkFundingConstraints(project) {
         if (project.status !== PROJECT_STATUS.FUNDING) throw new AppError("Dự án hiện không trong giai đoạn nhận tài trợ", 400);
         if (project.endDate && new Date() > new Date(project.endDate)) throw new AppError("Dự án đã kết thúc thời gian nhận tài trợ", 400);
-        if (project.targetAmount > 0 && project.currentAmount >= (project.targetAmount * 1.1)) throw new AppError("Dự án đã đạt giới hạn gọi vốn tối đa (110% mục tiêu). Không thể nhận thêm.", 400);
     }
 
     async initiateDonation(donorId, payload) {
@@ -88,14 +122,7 @@ class TransactionService {
                 const updatedEscrow = await this.escrowRepository.incrementBalance(projectId, safeAmount, session);
                 const updatedProject = await this.projectRepository.incrementFunding(projectId, safeAmount, session);
 
-                let isHardCapped = false;
-                if (updatedProject.targetAmount > 0) {
-                    const currentPercentage = (updatedProject.currentAmount / updatedProject.targetAmount) * 100;
-                    if (currentPercentage >= 110 && updatedProject.status === PROJECT_STATUS.FUNDING) {
-                        await this.projectRepository.transitionStatus(updatedProject._id, PROJECT_STATUS.FUNDING, PROJECT_STATUS.EXECUTING, session);
-                        isHardCapped = true;
-                    }
-                }
+                const isHardCapped = await this._checkAndFinalizeFundingGoal(updatedProject, session, dispatchEvent);
 
                 let donorName = "Nhà hảo tâm ẩn danh";
                 if (!isAnonymous) {
@@ -118,7 +145,7 @@ class TransactionService {
         const redisClient = this.redis.getClient();
         const now = new Date();
         const datePrefix = `${now.getFullYear().toString().slice(-2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-        
+
         const redisKey = `sepay:${datePrefix}:seq`;
         const seq = await redisClient.incr(redisKey);
         if (seq === 1) await redisClient.expire(redisKey, 172800);
@@ -150,14 +177,13 @@ class TransactionService {
 
         try {
             const verifiedData = this.paymentProvider.verifyWebhookData(headers, webhookBody);
-            
-            // --- BẮT MẠCH INBOUND / OUTBOUND ---
+
             const isOutbound = verifiedData.transferType === 'out' || Number(verifiedData.amount_out) > 0;
             const transferAmount = MoneyMath.toIntegerAmount(
-                isOutbound ? (verifiedData.amount_out || verifiedData.transferAmount || 0) 
-                           : (verifiedData.amount_in || verifiedData.transferAmount || 0)
+                isOutbound ? (verifiedData.amount_out || verifiedData.transferAmount || 0)
+                    : (verifiedData.amount_in || verifiedData.transferAmount || 0)
             );
-            
+
             const bankRef = String(verifiedData.referenceCode || verifiedData.id || '');
             const content = String(verifiedData.content || verifiedData.transaction_content || '').toUpperCase();
 
@@ -166,7 +192,7 @@ class TransactionService {
             const redisClient = this.redis.getClient();
             const lockKey = `webhook:${bankRef}:lock`;
             const lockValue = crypto.randomBytes(16).toString('hex');
-            
+
             const acquired = await redisClient.set(lockKey, lockValue, 'NX', 'PX', 30000);
 
             if (!acquired) {
@@ -175,15 +201,12 @@ class TransactionService {
             }
 
             try {
-                // --- XỬ LÝ NHÁNH TIỀN RA (OUTBOUND) ---
                 if (isOutbound) {
-                    // Dò tìm mã Giải Ngân. Cú pháp sinh tử: GN {ObjectId 24 ký tự}
                     const gnMatch = content.match(/GN\s*([A-Z0-9]{24})/i);
-                    
+
                     if (gnMatch) {
                         const requestId = gnMatch[1].toLowerCase();
-                        
-                        // KHÔNG GỌI SERVICE GIẢI NGÂN Ở ĐÂY. Bắn EventBus để tách bạch Module.
+
                         if (this.eventBus) {
                             this.eventBus.emit('WEBHOOK_DISBURSEMENT_OUTBOUND', {
                                 requestId,
@@ -191,18 +214,17 @@ class TransactionService {
                                 bankTransactionRef: bankRef
                             });
                         }
-                        
+
                         await this.webhookAuditLogRepository.updateStatus(auditLog._id, 'PROCESSED', {
                             processedAt: new Date(), note: 'Disbursement Event Emitted'
                         });
                         return { status: 'processed_outbound_disbursement' };
                     }
-                    
+
                     await this.webhookAuditLogRepository.updateStatus(auditLog._id, 'IGNORED', { errorMessage: 'Tiền ra không phải Giải ngân tự động' });
                     return { status: 'ignored_outbound' };
                 }
 
-                // --- XỬ LÝ NHÁNH TIỀN VÀO (INBOUND) ---
                 const [existingTx, existingSuspense] = await Promise.all([
                     this.transactionRepository.findByBankTransactionRef(bankRef),
                     this.suspenseTransactionRepository.findByBankTransactionRef(bankRef)
@@ -271,14 +293,7 @@ class TransactionService {
             const updatedProject = await this.projectRepository.incrementFunding(currentTx.projectId, netAmount, session);
             await this.systemFinancialRepository.incrementSystemFunds(platformFee, 0, session);
 
-            let isHardCapped = false;
-            if (updatedProject.targetAmount > 0) {
-                const currentPercentage = (updatedProject.currentAmount / updatedProject.targetAmount) * 100;
-                if (currentPercentage >= 110 && updatedProject.status === PROJECT_STATUS.FUNDING) {
-                    await this.projectRepository.transitionStatus(updatedProject._id, PROJECT_STATUS.FUNDING, PROJECT_STATUS.EXECUTING, session);
-                    isHardCapped = true;
-                }
-            }
+            const isHardCapped = await this._checkAndFinalizeFundingGoal(updatedProject, session, dispatchEvent);
 
             let donorName = "Nhà hảo tâm ẩn danh";
             if (currentTx.donorRef && !currentTx.isAnonymous) {
@@ -343,7 +358,7 @@ class TransactionService {
             if (project) {
                 const updates = {};
                 if (project.currentAmount > 0) updates.currentAmount = 0;
-                
+
                 updates.refundSummary = {
                     isRefunded: true,
                     totalRefunded: donations.reduce((sum, d) => sum + d.amount, 0),
@@ -364,6 +379,12 @@ class TransactionService {
         if (!tx) throw new AppError("Không tìm thấy giao dịch", 404);
         if (String(tx.donorRef) !== String(userId)) throw new AppError("Bạn không có quyền hoàn tiền giao dịch này", 403);
         if (tx.status !== 'COMPLETED' || !['DONATION', 'DONATION_FROM_WALLET'].includes(tx.type)) throw new AppError("Chỉ có thể hoàn tiền các giao dịch donate thành công", 400);
+
+        const project = await this.projectRepository.findById(tx.projectId);
+        if (!project) throw new AppError("Không tìm thấy dự án", 404);
+        if (project.status !== PROJECT_STATUS.FUNDING) {
+            throw new AppError("Dự án đã đóng quỹ và đang thực thi, không thể hoàn tiền", 403);
+        }
 
         const hoursSinceDonation = (Date.now() - new Date(tx.createdAt).getTime()) / (1000 * 60 * 60);
         if (hoursSinceDonation > (USER_REFUND_POLICY.ALLOWED_HOURS || 72)) throw new AppError("Đã quá thời hạn 72h được phép hoàn tiền tự động", 400);

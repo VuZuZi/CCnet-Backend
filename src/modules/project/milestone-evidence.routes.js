@@ -26,7 +26,6 @@ router.get(
     execute('getPublicEvidence')
 );
 
-
 router.get(
     '/my-evidence',
     authenticate,
@@ -35,6 +34,13 @@ router.get(
     execute('getMyEvidence')
 );
 
+router.get(
+    '/admin/list',
+    authenticate,
+    authorize('admin', 'manager'),
+    validateQuery(adminListEvidenceQuerySchema),
+    execute('getAdminEvidenceList')
+);
 
 router.get(
     '/:id',
@@ -52,7 +58,6 @@ router.post(
     execute('submitEvidence')
 );
 
-
 router.patch(
     '/:id/review',
     authenticate,
@@ -69,14 +74,6 @@ router.patch(
     validateParams(evidenceParamsSchema),
     validateBody(patchEvidenceSchema),
     execute('patchEvidence')
-);
-
-router.get(
-    '/admin/list',
-    authenticate,
-    authorize('admin', 'manager'),
-    validateQuery(adminListEvidenceQuerySchema),
-    execute('getAdminEvidenceList')
 );
 
 export default router;

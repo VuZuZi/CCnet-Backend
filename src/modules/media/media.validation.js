@@ -8,7 +8,7 @@ export const syncMediaSchema = z.object({
     size: z.number().positive('Size phải lớn hơn 0'),
     width: z.number().default(0),
     height: z.number().default(0),
-    context: z.enum(['avatar', 'post', 'comment', 'general', 'cover', 'project_document', 'project_cover', 'organizer_kyc']).default('general')
+    context: z.enum(['avatar', 'post', 'comment', 'general', 'cover', 'project_document', 'project_cover', 'organizer_kyc', 'milestone_evidence', 'project_receipt']).default('general')
 }).strict();
 
 export const deleteMediaSchema = z.object({
