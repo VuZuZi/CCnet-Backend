@@ -32,6 +32,9 @@ const milestoneSchema = new mongoose.Schema(
     description: { type: String, required: true, trim: true, maxlength: 500 },
     deliverables: { type: String, trim: true, maxlength: 1000 },
     targetAmount: { type: Number, default: 0, min: 0 },
+    
+    actualDisbursedAmount: { type: Number, default: 0, min: 0 },
+
     startDate: { type: Date, default: null },
     endDate: { type: Date, default: null },
     location: {

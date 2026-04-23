@@ -174,7 +174,40 @@ class PostService {
     return updated;
   }
 
-  async addComment({ postId, user, content }) {
+  _shapeComment(comment, reactionsMap = new Map(), replies = []) {
+    if (!comment) return null;
+    const commentObject = comment.toObject?.() || comment;
+    const commentId = commentObject._id?.toString?.() || String(commentObject._id);
+    const reaction = reactionsMap.get(commentId) || null;
+
+    return {
+      ...commentObject,
+      likesCount: Math.max(0, commentObject.likesCount || 0),
+      likedByMe: reaction === "like",
+      userReaction: reaction,
+      replies,
+    };
+  }
+
+  async _attachUserCommentReactions(comments, viewerId) {
+    if (!viewerId || !comments.length) return new Map();
+
+    const ids = comments.map((comment) => comment._id).filter(Boolean);
+    const reactions = await this.postRepository.getReactionsByUserAndTargets(
+      viewerId,
+      ids,
+      "Comment",
+    );
+
+    return new Map(
+      reactions.map((reaction) => [
+        reaction.targetId.toString(),
+        reaction.type,
+      ]),
+    );
+  }
+
+  async addComment({ postId, user, content, parentCommentId = null }) {
     const targetPost = await this.postRepository.findById(postId);
     if (!targetPost) {
       throw new AppError("Rất tiếc, bài viết này không còn tồn tại hoặc đã bị xóa.", 404);
@@ -185,6 +218,16 @@ class PostService {
       throw new AppError("Nội dung bình luận không được để trống bạn nhé.", 400);
     }
 
+    let normalizedParentCommentId = null;
+    if (parentCommentId) {
+      const parentComment = await this.postRepository.findCommentById(parentCommentId);
+      if (!parentComment || String(parentComment.postId) !== String(postId)) {
+        throw new AppError("BÃ¬nh luáº­n báº¡n Ä‘ang tráº£ lá»i khÃ´ng cÃ²n tá»“n táº¡i.", 404);
+      }
+      normalizedParentCommentId =
+        parentComment.parentCommentId || parentComment._id;
+    }
+
     const newComment = await mongoose.connection.transaction(
       async (session) => {
         const createdComment = await this.postRepository.createComment(
@@ -192,20 +235,32 @@ class PostService {
             postId,
             author: user.userId,
             content: trimmedContent,
+            parentCommentId: normalizedParentCommentId,
           },
           session,
         );
 
-        await this.postRepository.pushLatestCommentToPost(
-          postId,
-          {
-            _id: createdComment._id,
-            content: createdComment.content,
-            createdAt: createdComment.createdAt || new Date(),
-            author: this._formatUserMini(user),
-          },
-          session,
-        );
+        if (normalizedParentCommentId) {
+          await this.postRepository.incrementPostStats(
+            postId,
+            "comments",
+            1,
+            session,
+          );
+        } else {
+          await this.postRepository.pushLatestCommentToPost(
+            postId,
+            {
+              _id: createdComment._id,
+              content: createdComment.content,
+              createdAt: createdComment.createdAt || new Date(),
+              author: this._formatUserMini(user),
+              likesCount: 0,
+              parentCommentId: null,
+            },
+            session,
+          );
+        }
 
         this.redis.del(`post:${postId}`).catch(() => null);
         return createdComment;
@@ -237,7 +292,35 @@ class PostService {
       });
     }
 
-    return newComment;
+    if (parentCommentId && this.eventBus) {
+      const parentComment = await this.postRepository.findCommentById(
+        normalizedParentCommentId,
+      );
+      const parentAuthorId =
+        parentComment?.author?._id || parentComment?.author || null;
+
+      if (parentAuthorId && String(parentAuthorId) !== actorId) {
+        await this.eventBus.emit(DOMAIN_EVENTS.COMMENT_REPLIED, {
+          recipientId: String(parentAuthorId),
+          actorId,
+          actorName: user.fullName || user.username || "Someone",
+          actorAvatar: user.avatar || null,
+          postId: String(postId),
+          commentId: String(newComment._id),
+          parentCommentId: String(normalizedParentCommentId),
+          previewContent: newComment.content,
+        });
+      }
+    }
+
+    return this._shapeComment({
+      ...(newComment.toObject?.() || newComment),
+      author: this._formatUserMini(user),
+      likesCount: 0,
+      likedByMe: false,
+      userReaction: null,
+      replies: [],
+    });
   }
 
   async toggleReaction({ postId, userId, type }) {
@@ -505,7 +588,7 @@ class PostService {
     return post;
   }
 
-  async getComments({ postId, page = 1, sort = "relevant", viewerId = null }) {
+  async getComments({ postId, page = 1, limit = 10, sort = "relevant", viewerId = null }) {
     const post = await this.postRepository.findById(postId);
     if (!post) {
       throw new AppError("Post not found", 404);
@@ -516,7 +599,6 @@ class PostService {
       throw new AppError("Rất tiếc, bài viết này ở chế độ riêng tư nên bạn không thể xem được.", 403);
     }
 
-    const limit = 10;
     const skip = (page - 1) * limit;
 
     const comments = await this.postRepository.getCommentsByPostId({
@@ -524,9 +606,141 @@ class PostService {
       skip,
       limit,
       sort,
+      parentCommentId: null,
     });
 
-    return { data: comments };
+    const rootTotal = await this.postRepository.countCommentsByPostId({
+      postId,
+      parentCommentId: null,
+    });
+    const replies = await this.postRepository.getRepliesByParentIds(
+      comments.map((comment) => comment._id),
+    );
+    const reactionsMap = await this._attachUserCommentReactions(
+      [...comments, ...replies],
+      viewerId,
+    );
+
+    const repliesByParent = replies.reduce((map, reply) => {
+      const parentId =
+        reply.parentCommentId?.toString?.() || String(reply.parentCommentId);
+      const bucket = map.get(parentId) || [];
+      bucket.push(this._shapeComment(reply, reactionsMap));
+      map.set(parentId, bucket);
+      return map;
+    }, new Map());
+
+    const data = comments.map((comment) => {
+      const commentId = comment._id?.toString?.() || String(comment._id);
+      return this._shapeComment(
+        comment,
+        reactionsMap,
+        repliesByParent.get(commentId) || [],
+      );
+    });
+
+    return {
+      data,
+      total: post.stats?.comments || rootTotal,
+      rootTotal,
+      page,
+      limit,
+      hasMore: skip + comments.length < rootTotal,
+    };
+  }
+
+  async toggleCommentReaction({ postId, commentId, userId, type }) {
+    const targetPost = await this.postRepository.findById(postId);
+    if (!targetPost) {
+      throw new AppError("KhÃ´ng tÃ¬m tháº¥y bÃ i viáº¿t Ä‘á»ƒ thá»±c hiá»‡n tÆ°Æ¡ng tÃ¡c.", 404);
+    }
+
+    const targetComment = await this.postRepository.findCommentById(commentId);
+    if (!targetComment || String(targetComment.postId) !== String(postId)) {
+      throw new AppError("KhÃ´ng tÃ¬m tháº¥y bÃ¬nh luáº­n Ä‘á»ƒ tÆ°Æ¡ng tÃ¡c.", 404);
+    }
+
+    const result = await mongoose.connection.transaction(async (session) => {
+      const existingReaction = await this.postRepository.getReaction(
+        { userId, commentId, targetType: "Comment" },
+        session,
+      );
+
+      const oldType = existingReaction ? existingReaction.type : null;
+      const nextResult = { action: "created", type };
+      let likeChange = 0;
+
+      if (!existingReaction) {
+        await this.postRepository.createReaction(
+          { userId, commentId, targetType: "Comment", type },
+          session,
+        );
+        if (type === "like") likeChange = 1;
+      } else if (oldType === type) {
+        await this.postRepository.deleteReaction(
+          { userId, commentId, targetType: "Comment" },
+          session,
+        );
+        nextResult.action = "removed";
+        nextResult.type = null;
+        if (oldType === "like") likeChange = -1;
+      } else {
+        await this.postRepository.updateReaction(
+          { userId, commentId, targetType: "Comment", type },
+          session,
+        );
+        nextResult.action = "switched";
+        if (oldType === "like" && type === "dislike") {
+          likeChange = -1;
+        } else if (oldType === "dislike" && type === "like") {
+          likeChange = 1;
+        }
+      }
+
+      let updatedComment = targetComment;
+      if (likeChange !== 0) {
+        updatedComment = await this.postRepository.incrementCommentLikes(
+          commentId,
+          likeChange,
+          session,
+        );
+      }
+
+      return {
+        ...nextResult,
+        comment: this._shapeComment(
+          updatedComment,
+          new Map([[String(commentId), nextResult.type]]),
+        ),
+      };
+    });
+
+    const commentAuthorId =
+      targetComment?.author?._id || targetComment?.author || null;
+    const shouldNotify =
+      type === "like" &&
+      result.action !== "removed" &&
+      commentAuthorId &&
+      String(commentAuthorId) !== String(userId) &&
+      this.eventBus;
+
+    if (shouldNotify) {
+      const actor = await this.userRepository
+        ?.findById?.(userId)
+        .catch(() => null);
+
+      await this.eventBus.emit(DOMAIN_EVENTS.COMMENT_REACTED, {
+        recipientId: String(commentAuthorId),
+        actorId: String(userId),
+        actorName: actor?.fullName || actor?.username || "Someone",
+        actorAvatar: actor?.avatar || null,
+        postId: String(postId),
+        commentId: String(commentId),
+        reactionType: type,
+      });
+    }
+
+    return result;
   }
 
   async deletePost({ postId, userId }) {

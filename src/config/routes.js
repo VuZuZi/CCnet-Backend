@@ -13,7 +13,8 @@ import helpRequestRoutes from "../modules/helpRequest/helpRequest.routes.js";
 import transactionRoutes from "../modules/transaction/transaction.routes.js";
 import bankAccountRoutes from "../modules/bankAccount/bankAccount.routes.js";
 import walletRoutes from "../modules/wallet/wallet.routes.js";
-import adminFinanceRoutes from "../modules/admin/admin-finance.routes.js";
+import adminFinanceRoutes from '../modules/admin/admin-finance.routes.js';
+import milestoneEvidenceRoutes from '../modules/project/milestone-evidence.routes.js';
 import {
   organizerRequestUserRouter,
   organizerRequestAdminRouter,
@@ -45,6 +46,8 @@ export const configureRoutes = (app, { notificationModule }) => {
     { path: "/wallets", handler: walletRoutes },
     { path: "/admin-finance", handler: adminFinanceRoutes },
     { path: "/disbursement", handler: disbursementRoutes },
+    { path: "/milestone-evidence", handler: milestoneEvidenceRoutes },
+
   ];
 
   routes.forEach(({ path, handler }) => {

@@ -131,27 +131,6 @@ export default class HelpRequestController {
     }
   };
 
-  verifyHelpRequest = async (req, res, next) => {
-    try {
-      const { approved, rejectionReason } = req.body;
-
-      const helpRequest = await this.helpRequestService.verifyHelpRequest(
-        req.params.id,
-        req.user.userId,
-        approved,
-        rejectionReason
-      );
-
-      return Response.success(
-        res,
-        helpRequest,
-        approved ? 'Help request verified successfully' : 'Help request rejected'
-      );
-    } catch (error) {
-      next(error);
-    }
-  };
-
   assignOrganizer = async (req, res, next) => {
     try {
       const { organizerId } = req.body;

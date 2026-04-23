@@ -140,7 +140,7 @@ export default class HelpRequestRepository {
   async findNearby(coordinates, maxDistance = 50000, options = {}) {
     const filter = {
       isDeleted: false,
-      status: { $in: ['PENDING', 'VERIFIED', 'IN_PROGRESS'] },
+      status: { $in: ['VERIFIED', 'IN_PROGRESS'] },
       location: {
         $near: {
           $geometry: {
@@ -158,7 +158,7 @@ export default class HelpRequestRepository {
   async findUrgent(options = {}) {
     const filter = {
       isDeleted: false,
-      status: { $in: ['PENDING', 'VERIFIED'] },
+      status: { $in: ['VERIFIED', 'IN_PROGRESS'] },
       urgencyLevel: { $in: ['HIGH', 'CRITICAL'] },
     };
 

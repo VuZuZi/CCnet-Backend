@@ -18,6 +18,7 @@ const escrowSchema = new mongoose.Schema(
     disputedAmount: { type: Number, default: 0, min: 0 },
     pendingDisbursementAmount: { type: Number, default: 0, min: 0 },
     availableBalance: { type: Number, default: 0, min: 0 },
+    organizerRetainedBalance: { type: Number, default: 0, min: 0 },
     lastReconciled: { type: Date, default: Date.now },
     reconciliationStatus: {
       type: String,

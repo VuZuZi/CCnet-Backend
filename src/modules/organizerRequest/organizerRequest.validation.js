@@ -74,6 +74,7 @@ export const submitOrganizerRequestSchema = z
       documentPayloadSchema.optional()
     ),
     bankName: z.string().min(2).max(200),
+    bankBin: z.string().trim().max(10).optional(),
     bankAccountNumber: z
       .string()
       .regex(BANK_ACCOUNT_REGEX, "Số tài khoản phải từ 8 đến 19 chữ số"),

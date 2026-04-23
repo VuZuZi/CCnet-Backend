@@ -242,7 +242,7 @@ export default class HelpRequestService {
     const helpRequestData = {
       ...data,
       requesterId: userId,
-      status: 'PENDING',
+      status: 'VERIFIED',
       verifiedBy: null,
       verifiedAt: null,
       rejectionReason: null,
@@ -374,7 +374,7 @@ export default class HelpRequestService {
       throw new AppError('You are not authorized to update this help request', 403);
     }
 
-    if (!['PENDING', 'VERIFIED', 'REJECTED'].includes(helpRequest.status)) {
+    if (!['VERIFIED'].includes(helpRequest.status)) {
       throw new AppError('Cannot update help request in current status', 400);
     }
 
@@ -397,16 +397,6 @@ export default class HelpRequestService {
       }
     }
 
-    if (helpRequest.status === 'REJECTED') {
-      filteredData.status = 'PENDING';
-      filteredData.rejectionReason = null;
-      filteredData.verifiedBy = null;
-      filteredData.verifiedAt = null;
-      filteredData.assignedByAdminId = null;
-      filteredData.assignedOrganizerId = null;
-      filteredData.assignedAt = null;
-    }
-
     const updated = await this.helpRequestRepository.updateById(id, filteredData);
 
     return this.helpRequestRepository.findById(updated._id, {
@@ -425,7 +415,7 @@ export default class HelpRequestService {
       throw new AppError('You are not authorized to delete this help request', 403);
     }
 
-    if (!['PENDING', 'VERIFIED', 'REJECTED', 'CANCELLED'].includes(helpRequest.status)) {
+    if (!['VERIFIED', 'CANCELLED'].includes(helpRequest.status)) {
       throw new AppError('Cannot delete help request in current status', 400);
     }
 
@@ -458,108 +448,6 @@ export default class HelpRequestService {
     }
 
     return this.helpRequestRepository.updateById(id, { status: 'CANCELLED' });
-  }
-
-  async verifyHelpRequest(id, adminId, approved, rejectionReason = null) {
-    const helpRequest = await this.helpRequestRepository.findById(id);
-
-    if (!helpRequest || helpRequest.isDeleted) {
-      throw new AppError('Help request not found', 404);
-    }
-
-    if (helpRequest.status !== 'PENDING') {
-      throw new AppError('Help request is not pending verification', 400);
-    }
-
-    const previousState = {
-      status: helpRequest.status || null,
-      verifiedBy: helpRequest.verifiedBy || null,
-      verifiedAt: helpRequest.verifiedAt || null,
-      assignedByAdminId: helpRequest.assignedByAdminId || null,
-      assignedOrganizerId: helpRequest.assignedOrganizerId || null,
-      assignedAt: helpRequest.assignedAt || null,
-      rejectionReason: helpRequest.rejectionReason || null,
-    };
-
-    const updateData = {
-      verifiedBy: adminId,
-      verifiedAt: new Date(),
-      assignedByAdminId: null,
-      assignedOrganizerId: null,
-      assignedAt: null,
-    };
-
-    if (approved) {
-      updateData.status = 'VERIFIED';
-      updateData.rejectionReason = null;
-    } else {
-      if (!rejectionReason) {
-        throw new AppError('Rejection reason is required', 400);
-      }
-      updateData.status = 'REJECTED';
-      updateData.rejectionReason = rejectionReason.trim();
-    }
-
-    const updated = await this.helpRequestRepository.updateById(id, updateData);
-
-    await this.logAdminHelpRequestAction({
-      actorId: adminId,
-      actorRole: 'admin',
-      targetId: updated._id,
-      action: approved ? 'HELP_REQUEST_VERIFIED' : 'HELP_REQUEST_REJECTED',
-      reason: approved ? '' : updateData.rejectionReason,
-      previousState,
-      nextState: {
-        status: updated.status || null,
-        verifiedBy: updated.verifiedBy || null,
-        verifiedAt: updated.verifiedAt || null,
-        assignedByAdminId: updated.assignedByAdminId || null,
-        assignedOrganizerId: updated.assignedOrganizerId || null,
-        assignedAt: updated.assignedAt || null,
-        rejectionReason: updated.rejectionReason || null,
-      },
-      metadata: {
-        title: helpRequest.title,
-        helpRequestTitle: helpRequest.title,
-        requesterId: String(helpRequest.requesterId || ''),
-        approved: Boolean(approved),
-      },
-    });
-
-    const requesterId = helpRequest.requesterId?._id || helpRequest.requesterId;
-
-    if (approved && requesterId) {
-      await this.createHelpRequestNotification({
-        type: 'HELP_REQUEST_VERIFIED',
-        title: 'NeedHelp request verified',
-        message: `Your NeedHelp request "${helpRequest.title}" has been verified.`,
-        recipientId: requesterId,
-        senderId: adminId,
-        link: `/need-help/${helpRequest._id}`,
-        metadata: {
-          helpRequestId: helpRequest._id.toString(),
-          action: 'verified',
-        },
-      });
-    }
-
-    if (!approved && requesterId) {
-      await this.createHelpRequestNotification({
-        type: 'HELP_REQUEST_REJECTED',
-        title: 'NeedHelp request needs revision',
-        message: `Your NeedHelp request "${helpRequest.title}" was rejected. Please review and resubmit.`,
-        recipientId: requesterId,
-        senderId: adminId,
-        link: `/need-help/${helpRequest._id}/edit`,
-        metadata: {
-          helpRequestId: helpRequest._id.toString(),
-          action: 'rejected',
-          rejectionReason: updateData.rejectionReason,
-        },
-      });
-    }
-
-    return updated;
   }
 
   async assignOrganizer(id, adminId, organizerId) {
@@ -844,7 +732,7 @@ export default class HelpRequestService {
       return this.helpRequestRepository.findMany(
         {
           isDeleted: false,
-          status: { $in: ['PENDING', 'VERIFIED', 'IN_PROGRESS'] },
+          status: { $in: ['VERIFIED', 'IN_PROGRESS'] },
           urgencyLevel: { $in: ['HIGH', 'CRITICAL'] },
         },
         {
@@ -865,7 +753,7 @@ export default class HelpRequestService {
       return this.helpRequestRepository.findMany(
         {
           isDeleted: false,
-          status: { $in: ['PENDING', 'VERIFIED', 'IN_PROGRESS'] },
+          status: { $in: ['VERIFIED', 'IN_PROGRESS'] },
           location: {
             $near: {
               $geometry: {

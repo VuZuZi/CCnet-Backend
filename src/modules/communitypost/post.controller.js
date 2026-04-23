@@ -105,13 +105,14 @@ class PostController {
 
   addComment = async (req, res, next) => {
     try {
-      const { content } = req.body;
+      const { content, parentCommentId } = req.body;
       if (!content) return ApiResponse.badRequest(res, "Content is required");
 
       const comment = await this.postService.addComment({
         postId: req.params.id,
         user: req.user,
         content,
+        parentCommentId: parentCommentId || null,
       });
 
       return ApiResponse.created(res, comment);
@@ -124,15 +125,31 @@ class PostController {
     try {
       const page = parseInt(req.query.page, 10) || 1;
       const sort = req.query.sort || "relevant";
+      const limit = parseInt(req.query.limit, 10) || 10;
       const currentUserId = req.user?.userId || null;
 
       const comments = await this.postService.getComments({
         postId: req.params.id,
         page,
+        limit,
         sort,
         viewerId: currentUserId,
       });
       return ApiResponse.success(res, comments);
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  toggleCommentReaction = async (req, res, next) => {
+    try {
+      const result = await this.postService.toggleCommentReaction({
+        postId: req.params.id,
+        commentId: req.params.commentId,
+        userId: req.user.userId,
+        type: req.body.type,
+      });
+      return ApiResponse.success(res, result);
     } catch (error) {
       next(error);
     }

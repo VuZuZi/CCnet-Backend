@@ -10,7 +10,13 @@ const expenseItemSchema = new mongoose.Schema({
 const financialReportSchema = new mongoose.Schema(
     {
         spentAmount: { type: Number, required: true, min: 0 },
+        
+        approvedSpentAmount: { type: Number, default: null, min: 0 },
+
+        overspentAmount: { type: Number, default: 0, min: 0 },
+        
         unspentAmount: { type: Number, required: true, min: 0 },
+        
         expenseItems: { type: [expenseItemSchema], default: [] },
         note: { type: String, trim: true }
     },

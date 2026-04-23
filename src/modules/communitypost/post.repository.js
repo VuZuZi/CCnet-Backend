@@ -33,22 +33,22 @@ class PostRepository {
     ).lean();
   }
 
-  async getReactionsByUserAndTargets(userId, targetIds) {
+  async getReactionsByUserAndTargets(userId, targetIds, targetType = "Post") {
     if (!userId || targetIds.length === 0) return [];
     return Reaction.find({
       userId: userId,
-      targetType: "Post",
+      targetType,
       targetId: { $in: targetIds },
     })
       .select("targetId type")
       .lean();
   }
 
-  async getReaction({ userId, postId }, session) {
+  async getReaction({ userId, postId, commentId, targetId, targetType = "Post" }, session) {
     return Reaction.findOne({
       userId,
-      targetId: postId,
-      targetType: "Post",
+      targetId: targetId || commentId || postId,
+      targetType,
     }).session(session);
   }
 
@@ -61,18 +61,45 @@ class PostRepository {
       .lean();
   }
 
-  async getCommentsByPostId({ postId, skip, limit, sort }) {
+  async getCommentsByPostId({ postId, skip, limit, sort, parentCommentId = null }) {
     let sortQuery = { createdAt: -1 };
     if (sort === "all") {
       sortQuery = { createdAt: 1 };
-    } else if (sort === "relevant") {
+    } else if (sort === "newest" || sort === "relevant") {
       sortQuery = { createdAt: -1 };
     }
 
-    return Comment.find({ postId, isDeleted: { $ne: true } })
+    return Comment.find({ postId, parentCommentId, isDeleted: { $ne: true } })
       .sort(sortQuery)
       .skip(skip)
       .limit(limit)
+      .populate("author", "_id fullName avatar username")
+      .lean()
+      .exec();
+  }
+
+  async countCommentsByPostId({ postId, parentCommentId = null }) {
+    return Comment.countDocuments({
+      postId,
+      parentCommentId,
+      isDeleted: { $ne: true },
+    });
+  }
+
+  async findCommentById(commentId) {
+    return Comment.findOne({ _id: commentId, isDeleted: { $ne: true } })
+      .populate("author", "_id fullName avatar username")
+      .lean();
+  }
+
+  async getRepliesByParentIds(parentIds) {
+    if (!parentIds.length) return [];
+
+    return Comment.find({
+      parentCommentId: { $in: parentIds },
+      isDeleted: { $ne: true },
+    })
+      .sort({ createdAt: 1 })
       .populate("author", "_id fullName avatar username")
       .lean()
       .exec();
@@ -83,25 +110,25 @@ class PostRepository {
     return post;
   }
 
-  async createReaction({ userId, postId, type }, session) {
+  async createReaction({ userId, postId, commentId, targetId, targetType = "Post", type }, session) {
     const [reaction] = await Reaction.create(
-      [{ userId, targetId: postId, targetType: "Post", type }],
+      [{ userId, targetId: targetId || commentId || postId, targetType, type }],
       { session },
     );
     return reaction;
   }
 
-  async updateReaction({ userId, postId, type }, session) {
+  async updateReaction({ userId, postId, commentId, targetId, targetType = "Post", type }, session) {
     return Reaction.updateOne(
-      { userId, targetId: postId, targetType: "Post" },
+      { userId, targetId: targetId || commentId || postId, targetType },
       { $set: { type } },
       { session },
     );
   }
 
-  async deleteReaction({ userId, postId }, session) {
+  async deleteReaction({ userId, postId, commentId, targetId, targetType = "Post" }, session) {
     return Reaction.findOneAndDelete(
-      { userId, targetId: postId, targetType: "Post" },
+      { userId, targetId: targetId || commentId || postId, targetType },
       { session },
     );
   }
@@ -129,6 +156,26 @@ class PostRepository {
       );
     }
     return updatedPost;
+  }
+
+  async incrementCommentLikes(commentId, value, session) {
+    const updatedComment = await Comment.findOneAndUpdate(
+      { _id: commentId },
+      { $inc: { likesCount: value } },
+      { session, new: true },
+    )
+      .populate("author", "_id fullName avatar username");
+
+    if (updatedComment && updatedComment.likesCount < 0) {
+      await Comment.updateOne(
+        { _id: commentId },
+        { $set: { likesCount: 0 } },
+        { session },
+      );
+      updatedComment.likesCount = 0;
+    }
+
+    return updatedComment?.toObject ? updatedComment.toObject() : updatedComment;
   }
 
   async createComment(data, session) {

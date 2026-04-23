@@ -13,9 +13,20 @@ class DisbursementSSEService {
         this.subscriber.psubscribe('disbursement_status:*', (err, count) => {
             if (err) console.error('[CTO Alert] Disbursement SSE psubscribe error:', err.message);
         });
+        this.subscriber.psubscribe('disbursement:*:status', (err, count) => {
+            if (err) console.error('[CTO Alert] Disbursement SSE psubscribe error:', err.message);
+        });
 
         this.subscriber.on('pmessage', (pattern, channel, message) => {
-            const requestId = channel.split(':')[1];
+            const parts = channel.split(':');
+            let requestId = null;
+
+            if (pattern === 'disbursement_status:*') {
+                requestId = parts[1];
+            } else if (pattern === 'disbursement:*:status') {
+                requestId = parts[1];
+            }
+
             if (!requestId) return;
 
             const activeClients = this.clients.get(requestId);

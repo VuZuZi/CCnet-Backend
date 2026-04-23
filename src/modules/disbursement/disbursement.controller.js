@@ -71,9 +71,7 @@ class DisbursementController {
         try {
             const { id } = req.params;
             const adminId = req.user.userId;
-            const { bankTransactionRef } = req.body;
-
-            const result = await this.disbursementService.confirmManualTransfer(id, adminId, bankTransactionRef);
+            const result = await this.disbursementService.confirmManualTransfer(id, adminId, req.body);
             return ApiResponse.success(res, result, 'Xác nhận chuyển khoản và hoàn tất giải ngân thành công');
         } catch (error) {
             next(error);
@@ -84,9 +82,7 @@ class DisbursementController {
         try {
             const { id } = req.params;
             const adminId = req.user.userId;
-            const { reason } = req.body;
-
-            const result = await this.disbursementService.failManualTransfer(id, adminId, reason);
+            const result = await this.disbursementService.failManualTransfer(id, adminId, req.body);
             return ApiResponse.success(res, result, 'Đã ghi nhận lỗi chuyển khoản và phong tỏa tài khoản ngân hàng của Organizer');
         } catch (error) {
             next(error);

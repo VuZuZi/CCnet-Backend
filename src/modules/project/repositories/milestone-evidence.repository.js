@@ -34,6 +34,14 @@ class MilestoneEvidenceRepository {
         ).lean().exec();
     }
 
+    async updateStatusIfCurrent(id, currentStatus, updateData, session = null) {
+        return await MilestoneEvidence.findOneAndUpdate(
+            { _id: id, status: currentStatus },
+            { $set: updateData },
+            { new: true, runValidators: true, session }
+        ).lean().exec();
+    }
+
     async findPublicApprovedByMilestone(projectId, milestoneId) {
         return await MilestoneEvidence.findOne({
             projectId,
@@ -42,7 +50,7 @@ class MilestoneEvidenceRepository {
         })
             .populate({
                 path: 'mediaIds',
-                select: 'url mimetype originalName captureMetadata'
+                select: 'url mimetype originalName'
             })
             .populate({
                 path: 'financialReport.expenseItems.receiptMediaId',
@@ -140,6 +148,20 @@ class MilestoneEvidenceRepository {
     async findAllByProject(projectId, session = null) {
         return await MilestoneEvidence.find({ projectId })
             .sort({ createdAt: -1 })
+            .session(session)
+            .lean()
+            .exec();
+    }
+
+    async findDetailWithPopulate(id, session = null) {
+        return await MilestoneEvidence.findById(id)
+            .populate('mediaIds')
+            .populate('projectId')
+            .populate('organizerId', 'fullName avatar email')
+            .populate({
+                path: 'financialReport.expenseItems.receiptMediaId',
+                model: 'Media'
+            })
             .session(session)
             .lean()
             .exec();
