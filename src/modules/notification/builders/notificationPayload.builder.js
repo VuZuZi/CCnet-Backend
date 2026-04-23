@@ -282,6 +282,73 @@ export function buildNotificationPayload(input) {
       };
     }
 
+    case NOTIFICATION_TYPES.COMMENT_REPLIED: {
+      const actorName = ensureText(input.actorName, 'Someone');
+      const previewContent = buildCommentPreview(input.previewContent);
+
+      return {
+        title: 'Có phản hồi mới cho bình luận của bạn',
+        message: previewContent
+          ? `${actorName} đã trả lời bình luận của bạn: "${previewContent}"`
+          : `${actorName} đã trả lời bình luận của bạn.`,
+        actionUrl: ensureText(
+          input.actionUrl,
+          `/community/${input.postId || ''}?commentId=${input.commentId || ''}`
+        ),
+        entityType: 'comment_reply',
+        entityId: input.commentId || null,
+        metadata: {
+          postId: input.postId || null,
+          commentId: input.commentId || null,
+          parentCommentId: input.parentCommentId || null,
+          actorName: input.actorName || null,
+          actorAvatar: input.actorAvatar || null,
+          previewContent: input.previewContent || null,
+        },
+      };
+    }
+
+    case NOTIFICATION_TYPES.COMMENT_REACTED: {
+      const actorName = ensureText(input.actorName, 'Someone');
+
+      return {
+        title: 'Bình luận của bạn có tương tác mới',
+        message: `${actorName} đã thích bình luận của bạn.`,
+        actionUrl: ensureText(
+          input.actionUrl,
+          `/community/${input.postId || ''}?commentId=${input.commentId || ''}`
+        ),
+        entityType: 'comment_reaction',
+        entityId: input.commentId || null,
+        metadata: {
+          postId: input.postId || null,
+          commentId: input.commentId || null,
+          reactionType: input.reactionType || 'like',
+          actorName: input.actorName || null,
+          actorAvatar: input.actorAvatar || null,
+        },
+      };
+    }
+
+    case NOTIFICATION_TYPES.MESSAGE_REACTED: {
+      const actorName = ensureText(input.actorName, 'Someone');
+
+      return {
+        title: 'Tin nhắn của bạn có tương tác mới',
+        message: `${actorName} đã bày tỏ cảm xúc với tin nhắn của bạn${input.emoji ? `: ${input.emoji}` : '.'}`,
+        actionUrl: ensureText(input.actionUrl, `/chat?conversationId=${input.conversationId || ''}`),
+        entityType: 'message_reaction',
+        entityId: input.messageId || null,
+        metadata: {
+          conversationId: input.conversationId || null,
+          messageId: input.messageId || null,
+          emoji: input.emoji || null,
+          actorName: input.actorName || null,
+          actorAvatar: input.actorAvatar || null,
+        },
+      };
+    }
+
     default:
       throw new Error(`Unsupported notification type: ${type}`);
   }

@@ -99,6 +99,17 @@ export const PostValidation = {
         .string()
         .min(1, "Comment cannot be empty")
         .max(2000, "Comment too long"),
+      parentCommentId: objectId.optional().nullable(),
+    }),
+  }),
+
+  toggleCommentReaction: z.object({
+    params: z.object({
+      id: objectId,
+      commentId: objectId,
+    }),
+    body: z.object({
+      type: z.enum(["like", "dislike"]),
     }),
   }),
 
@@ -107,6 +118,7 @@ export const PostValidation = {
       limit: z.coerce.number().positive().optional(),
       page: z.coerce.number().positive().optional(),
       cursor: objectId.optional(),
+      sort: z.enum(["relevant", "newest", "all"]).optional(),
       type: z.enum(["for-you", "following", "profile"]).optional(),
       profileUserId: objectId.optional(),
     }),
