@@ -1494,6 +1494,46 @@ class ProjectService {
   }
 
   async createDraftProject(organizerId, projectData) {
+    let linkedHelpRequest = null;
+
+    if (projectData.fromHelpRequestId && this.helpRequestRepository) {
+      linkedHelpRequest = await this.helpRequestRepository.findById(
+        projectData.fromHelpRequestId,
+      );
+
+      if (!linkedHelpRequest || linkedHelpRequest.isDeleted) {
+        throw new AppError("Help request not found", 404);
+      }
+
+      if (linkedHelpRequest.linkedProjectId) {
+        throw new AppError(
+          "This help request is already linked to another project",
+          400,
+        );
+      }
+
+      if (!["VERIFIED", "IN_PROGRESS"].includes(linkedHelpRequest.status)) {
+        throw new AppError(
+          "This help request is not available for project hosting",
+          400,
+        );
+      }
+
+      const assignedOrganizerId =
+        linkedHelpRequest.assignedOrganizerId?._id ||
+        linkedHelpRequest.assignedOrganizerId;
+
+      if (
+        assignedOrganizerId &&
+        String(assignedOrganizerId) !== String(organizerId)
+      ) {
+        throw new AppError(
+          "This help request is assigned to another organizer",
+          403,
+        );
+      }
+    }
+
     const coverPayload = Array.isArray(projectData.coverMedia)
       ? projectData.coverMedia
       : projectData.coverMedia
@@ -1604,13 +1644,15 @@ class ProjectService {
 
           if (projectData.fromHelpRequestId && this.helpRequestRepository) {
             try {
-              const linkedHelpRequest =
-                await this.helpRequestRepository.findById(
-                  projectData.fromHelpRequestId,
-                );
               await this.helpRequestRepository.updateById(
                 projectData.fromHelpRequestId,
-                { linkedProjectId: createdProject._id },
+                {
+                  linkedProjectId: createdProject._id,
+                  assignedOrganizerId:
+                    linkedHelpRequest?.assignedOrganizerId || organizerId,
+                  assignedAt: linkedHelpRequest?.assignedAt || new Date(),
+                  status: "IN_PROGRESS",
+                },
                 session,
               );
 
