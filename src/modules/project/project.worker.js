@@ -238,12 +238,12 @@ export const processFundingDeadlines = async (job) => {
       let eventTitle = "";
       let eventMessage = "";
 
-      const { currentAmount, targetAmount, mvpAmount } = project;
+      const { currentAmount, targetAmount } = project;
 
-      if (currentAmount < mvpAmount) {
+      if (currentAmount < targetAmount) {
         nextStatus = PROJECT_STATUS.FAILED_FUNDING;
         eventTitle = "Funding failed";
-        eventMessage = `Project "${project.title}" did not reach MVP before the funding deadline. The system is preparing donor refunds.`;
+        eventMessage = `Dự án "${project.title}" không đạt đủ 100% mục tiêu ngân sách trước thời hạn. Hệ thống đang tiến hành đối soát và hoàn tiền cho các Nhà hảo tâm.`;
 
         await jobQueue.addJob(
           "financial-reconciliation",
@@ -251,14 +251,10 @@ export const processFundingDeadlines = async (job) => {
           { projectId: project._id },
           { attempts: 3, backoff: { type: "exponential", delay: 5000 } },
         );
-      } else if (currentAmount >= mvpAmount && currentAmount < targetAmount) {
-        nextStatus = PROJECT_STATUS.ADJUSTMENT_REQUIRED;
-        eventTitle = "Adjusted plan required";
-        eventMessage = `Project "${project.title}" reached MVP but not the full target. Organizer must submit an adjusted plan within 48 hours.`;
       } else {
         nextStatus = PROJECT_STATUS.EXECUTING;
         eventTitle = "Funding completed";
-        eventMessage = `Project "${project.title}" reached its funding target and moved to execution.`;
+        eventMessage = `Dự án "${project.title}" đã gọi vốn thành công và chính thức bước vào giai đoạn Thực thi (Executing).`;
       }
 
       await projectRepository.transitionStatus(

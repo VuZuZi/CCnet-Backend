@@ -44,11 +44,6 @@ const beneficiaryInfoSchema = z.object({
   evidenceMethod: z.string().max(500, "Phương pháp chứng minh quá dài").optional()
 });
 
-const budgetItemSchema = z.object({
-  item: z.string().min(1, "Tên hạng mục không được để trống").max(200),
-  amount: z.coerce.number().min(0, "Số tiền không được âm"),
-  note: z.string().max(500).optional()
-});
 
 const evidencePolicySchema = z.object({
   requireFinancial: z.boolean().optional(),
@@ -85,9 +80,6 @@ const projectBaseSchema = {
   beneficiaryInfo: beneficiaryInfoSchema.optional(),
 
   targetAmount: z.coerce.number().min(0, "Mục tiêu ngân sách không được âm").optional().default(0),
-  mvpAmount: z.coerce.number().min(0, "Ngưỡng MVP không được âm").optional().default(0),
-  budgetBreakdown: z.array(budgetItemSchema).max(50, "Tối đa 50 hạng mục ngân sách").optional(),
-
   surplusPolicy: z.enum(Object.values(SURPLUS_POLICY)).optional(),
   carryOverProjectId: objectIdSchema.nullable().optional(),
 
@@ -105,16 +97,9 @@ const projectBaseSchema = {
 };
 
 const lifecycleRefinement = (data, ctx) => {
-  if (data.projectType === PROJECT_TYPE.FUNDED) {
-    if (data.mvpAmount > data.targetAmount) {
-      addIssue(ctx, ["mvpAmount"], "Số tiền MVP (ngưỡng tối thiểu) không được lớn hơn Tổng mục tiêu (Target Amount)");
-    }
-  } else if (data.projectType === PROJECT_TYPE.VOLUNTEER_ONLY) {
+  if (data.projectType === PROJECT_TYPE.VOLUNTEER_ONLY) {
     if (data.targetAmount > 0) {
       addIssue(ctx, ["targetAmount"], "Dự án VOLUNTEER_ONLY bị bypass luồng tiền, không được phép nhập Target Amount");
-    }
-    if (data.budgetBreakdown && data.budgetBreakdown.length > 0) {
-      addIssue(ctx, ["budgetBreakdown"], "Dự án VOLUNTEER_ONLY không được khai báo phân bổ ngân sách (Budget Breakdown)");
     }
     if (data.milestones && data.milestones.some(m => m.targetAmount > 0)) {
       addIssue(ctx, ["milestones"], "Các mốc của dự án VOLUNTEER_ONLY không được phép có ngân sách");
@@ -168,8 +153,6 @@ export const projectCompleteSchema = z.object({
   coverMedia: z.any().optional(),
   documents: z.array(z.any()).optional(),
   targetAmount: z.number().optional(),
-  mvpAmount: z.number().optional(),
-  budgetBreakdown: z.array(z.any()).optional(),
   milestones: z.array(z.any()).min(1, "Dự án bắt buộc phải có ít nhất 1 Mốc hoạt động (Block 4)"),
   needsVolunteers: z.boolean().optional(),
   volunteerRoles: z.array(z.any()).optional()
@@ -184,13 +167,6 @@ export const projectCompleteSchema = z.object({
     if (!data.targetAmount || data.targetAmount <= 0) {
       addIssue(ctx, ["targetAmount"], "Dự án FUNDED bắt buộc phải có Mục tiêu ngân sách (Block 3)");
     }
-    if (!data.mvpAmount || data.mvpAmount <= 0) {
-      addIssue(ctx, ["mvpAmount"], "Dự án FUNDED bắt buộc phải có Ngưỡng tối thiểu MVP (Block 3)");
-    }
-    if (!data.budgetBreakdown || data.budgetBreakdown.length === 0) {
-      addIssue(ctx, ["budgetBreakdown"], "Dự án FUNDED bắt buộc phải có Giải trình ngân sách (Block 3)");
-    }
-
     const sumMilestones = data.milestones.reduce((acc, curr) => acc + (curr.targetAmount || 0), 0);
     if (sumMilestones !== data.targetAmount) {
       addIssue(ctx, ["milestones"], `Tổng ngân sách các mốc (${sumMilestones}) không khớp với Mục tiêu ngân sách dự án (${data.targetAmount}).`);

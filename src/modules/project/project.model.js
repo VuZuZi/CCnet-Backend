@@ -134,14 +134,7 @@ const projectSchema = new mongoose.Schema(
     },
     targetAmount: { type: Number, default: 0, min: 0 },
     currentAmount: { type: Number, default: 0, min: 0 },
-    mvpAmount: { type: Number, default: 0, min: 0 },
-    budgetBreakdown: [
-      {
-        item: { type: String, required: true },
-        amount: { type: Number, required: true },
-        note: { type: String },
-      },
-    ],
+    
     surplusPolicy: {
       type: String,
       enum: Object.values(SURPLUS_POLICY),

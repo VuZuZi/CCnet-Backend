@@ -38,7 +38,7 @@ const envSchema = Joi.object({
   NOTIFICATION_STREAM_CROSS_SITE: Joi.string().valid('true', 'false').default('false'),
 
   PLATFORM_FEE_PERCENT: Joi.number().min(0).max(1).default(0.015),
-  
+
   SEPAY_BANK_NAME: Joi.string().required(),
   SEPAY_ACCOUNT_NUMBER: Joi.string().required(),
   SEPAY_WEBHOOK_SECRET: Joi.string().required(),
@@ -47,6 +47,14 @@ const envSchema = Joi.object({
   PAYOS_CLIENT_ID: Joi.string().optional(),
   PAYOS_API_KEY: Joi.string().optional(),
   PAYOS_CHECKSUM_KEY: Joi.string().optional(),
+
+  GEMINI_FLASH_KEY: Joi.string().required().description('Key for fast operations (Flash)'),
+  GEMINI_PRO_KEY: Joi.string().required().description('Key for deep logic (Pro)'),
+  GROQ_API_KEY: Joi.string().required().description('Groq Fallback Key'),
+
+  DEFAULT_GEMINI_FLASH_MODEL: Joi.string().default('gemini-2.5-flash'),
+  DEFAULT_GEMINI_PRO_MODEL: Joi.string().default('gemini-2.5-flash'),
+  DEFAULT_GROQ_MODEL: Joi.string().default('llama-3.1-8b-instant'),
 
 }).unknown();
 
@@ -136,6 +144,15 @@ export const config = {
     webhookSecret: envVars.SEPAY_WEBHOOK_SECRET,
     apiToken: envVars.SEPAY_API_TOKEN
   },
-  
+
+  ai: {
+    geminiFlashKey: envVars.GEMINI_FLASH_KEY,
+    geminiProKey: envVars.GEMINI_PRO_KEY,
+    groqKey: envVars.GROQ_API_KEY,
+    defaultFlashModel: envVars.DEFAULT_GEMINI_FLASH_MODEL,
+    defaultProModel: envVars.DEFAULT_GEMINI_PRO_MODEL,
+    defaultGroqModel: envVars.DEFAULT_GROQ_MODEL,
+  },
+
   platformFeePercent: envVars.PLATFORM_FEE_PERCENT,
 };

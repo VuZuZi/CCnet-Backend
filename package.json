@@ -20,6 +20,7 @@
   },
   "homepage": "https://github.com/VuZuZi/CCnet-Backend#readme",
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@payos/node": "^2.0.5",
     "awilix": "^10.0.2",
     "bcryptjs": "^2.4.3",
@@ -43,9 +44,11 @@
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
     "nodemailer": "^7.0.12",
+    "openai": "^6.34.0",
     "sharp": "^0.34.5",
     "socket.io": "^4.8.3",
     "uuid": "^9.0.1",
+    "winston": "^3.19.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

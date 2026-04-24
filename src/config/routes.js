@@ -21,6 +21,7 @@ import {
 } from "../modules/organizerRequest/organizerRequest.routes.js";
 
 import disbursementRoutes from "../modules/disbursement/disbursement.routes.js";
+import aiRoutes from "../modules/ai/ai.routes.js";
 
 const API_PREFIX = "/api/v1";
 
@@ -47,6 +48,7 @@ export const configureRoutes = (app, { notificationModule }) => {
     { path: "/admin-finance", handler: adminFinanceRoutes },
     { path: "/disbursement", handler: disbursementRoutes },
     { path: "/milestone-evidence", handler: milestoneEvidenceRoutes },
+    { path: "/ai", handler: aiRoutes },
 
   ];
 

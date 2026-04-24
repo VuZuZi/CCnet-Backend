@@ -1666,7 +1666,7 @@ class ProjectService {
     }
   }
 
-  async updateDraftProject(projectId, organizerId, updateData) {
+async updateDraftProject(projectId, organizerId, updateData) {
     const existingProject = await this.projectRepository.findById(projectId);
     if (!existingProject) {
       throw new AppError("Không tìm thấy bản nháp dự án", 404);
@@ -1689,8 +1689,6 @@ class ProjectService {
         existingProject.projectType === PROJECT_TYPE.VOLUNTEER_ONLY)
     ) {
       finalUpdateData.targetAmount = 0;
-      finalUpdateData.mvpAmount = 0;
-      finalUpdateData.budgetBreakdown = [];
     }
 
     if (

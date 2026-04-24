@@ -17,6 +17,12 @@ import ProjectStatusChangeStreamService from "../modules/project/project-status.
 import { registerTransactionListeners } from "../modules/transaction/transaction.listener.js";
 import { registerDisbursementListeners } from "../modules/disbursement/disbursement.listener.js";
 
+import WinstonLogger from "../core/winston-logger.js";
+import AppLogger from "../core/app-logger.js";
+import AiProviderFactory from "../modules/ai/ai-provider.factory.js";
+import GroqAiProvider from "../modules/ai/providers/groq-ai.provider.js";
+import GoogleAiProvider from "../modules/ai/providers/google-ai.provider.js";
+
 let container;
 
 export const initializeContainer = () => {
@@ -25,6 +31,8 @@ export const initializeContainer = () => {
   container.register({
     config: asValue(config),
     eventBus: asValue(eventBus),
+    winstonLogger: asClass(WinstonLogger).singleton(),
+    appLogger: asClass(AppLogger).scoped(),
     redis: asClass(RedisClient).singleton(),
     mailProvider: asClass(MailProvider).singleton(),
     cloudinaryProvider: asClass(CloudinaryProvider).singleton(),
@@ -37,6 +45,10 @@ export const initializeContainer = () => {
     projectStatusChangeStreamService: asClass(
       ProjectStatusChangeStreamService
     ).singleton(),
+
+    googleAiProvider: asClass(GoogleAiProvider).scoped(),
+    groqAiProvider: asClass(GroqAiProvider).scoped(),
+    aiProviderFactory: asClass(AiProviderFactory).scoped(),
   });
 
   container.loadModules(
