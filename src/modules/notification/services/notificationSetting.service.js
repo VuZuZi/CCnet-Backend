@@ -2,6 +2,7 @@ import { NOTIFICATION_TYPES } from '../constants/notification.constants.js';
 
 const TYPE_TO_SETTING_KEY = Object.freeze({
   [NOTIFICATION_TYPES.FOLLOW_CREATED]: 'followEnabled',
+
   [NOTIFICATION_TYPES.PROJECT_UPDATED]: 'projectEnabled',
 
   [NOTIFICATION_TYPES.VOLUNTEER_APPLIED]: 'projectEnabled',
@@ -10,17 +11,35 @@ const TYPE_TO_SETTING_KEY = Object.freeze({
   [NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_REQUESTED]: 'projectEnabled',
   [NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_APPROVED]: 'projectEnabled',
   [NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_REJECTED]: 'projectEnabled',
+  [NOTIFICATION_TYPES.VOLUNTEER_REVIEW_REQUIRED]: 'projectEnabled',
+  [NOTIFICATION_TYPES.VOLUNTEER_REVIEW_SUBMITTED]: 'projectEnabled',
+  [NOTIFICATION_TYPES.VOLUNTEER_REVIEW_AUTO_MAXED]: 'projectEnabled',
 
   [NOTIFICATION_TYPES.ORGANIZER_REQUEST_SUBMITTED]: 'organizerRequestEnabled',
   [NOTIFICATION_TYPES.ORGANIZER_REQUEST_UPDATED]: 'organizerRequestEnabled',
 
-  [NOTIFICATION_TYPES.SYSTEM_ANNOUNCEMENT]: 'systemEnabled',
+  [NOTIFICATION_TYPES.HELP_REQUEST_ASSIGNED]: 'helpRequestEnabled',
+  [NOTIFICATION_TYPES.HELP_REQUEST_REASSIGNED]: 'helpRequestEnabled',
+  [NOTIFICATION_TYPES.HELP_REQUEST_VERIFIED]: 'helpRequestEnabled',
+  [NOTIFICATION_TYPES.HELP_REQUEST_REJECTED]: 'helpRequestEnabled',
+  [NOTIFICATION_TYPES.HELP_REQUEST_COMPLETED]: 'helpRequestEnabled',
+  [NOTIFICATION_TYPES.HELP_REQUEST_ASSIGNMENT_RESPONDED]: 'helpRequestEnabled',
+
+  [NOTIFICATION_TYPES.DONATION_SUCCESSFUL]: 'projectEnabled',
+  [NOTIFICATION_TYPES.REFUND_REQUEST_SUBMITTED]: 'projectEnabled',
+  [NOTIFICATION_TYPES.TRANSACTION_REFUNDED]: 'projectEnabled',
+  [NOTIFICATION_TYPES.REFUND_REQUEST_REJECTED]: 'projectEnabled',
+  [NOTIFICATION_TYPES.TRANSACTION_WITHDRAWAL_REQUESTED]: 'projectEnabled',
+  [NOTIFICATION_TYPES.TRANSACTION_FAILED]: 'projectEnabled',
 
   [NOTIFICATION_TYPES.POST_REACTED]: 'postEnabled',
   [NOTIFICATION_TYPES.POST_COMMENTED]: 'postEnabled',
-  [NOTIFICATION_TYPES.VOLUNTEER_REVIEW_REQUIRED]: 'projectEnabled',
-[NOTIFICATION_TYPES.VOLUNTEER_REVIEW_SUBMITTED]: 'projectEnabled',
-[NOTIFICATION_TYPES.VOLUNTEER_REVIEW_AUTO_MAXED]: 'projectEnabled',
+
+  [NOTIFICATION_TYPES.KYC_EXPIRING_WARNING]: 'systemEnabled',
+  [NOTIFICATION_TYPES.KYC_EXPIRED]: 'systemEnabled',
+  [NOTIFICATION_TYPES.KYC_GRACE_PERIOD_ENDED]: 'systemEnabled',
+
+  [NOTIFICATION_TYPES.SYSTEM_ANNOUNCEMENT]: 'systemEnabled',
 });
 
 const ALLOWED_SETTING_KEYS = new Set([
@@ -28,6 +47,7 @@ const ALLOWED_SETTING_KEYS = new Set([
   'followEnabled',
   'projectEnabled',
   'organizerRequestEnabled',
+  'helpRequestEnabled',
   'postEnabled',
 ]);
 
@@ -153,7 +173,16 @@ export class NotificationSettingService {
   async isTypeEnabled(userId, type) {
     const settings = await this.getSettings(userId);
     const settingKey = TYPE_TO_SETTING_KEY[type] || 'systemEnabled';
-    return Boolean(settings?.[settingKey]);
+
+    if (!settings) {
+      return true;
+    }
+
+    if (settings[settingKey] === undefined || settings[settingKey] === null) {
+      return true;
+    }
+
+    return Boolean(settings[settingKey]);
   }
 }
 

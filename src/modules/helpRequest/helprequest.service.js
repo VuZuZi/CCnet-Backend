@@ -77,15 +77,77 @@ const scoreDistance = (distanceKm) => {
   return 2;
 };
 
-const scoreRelevance = (helpRequest, organizer) => {
-  const requestAddress = helpRequest?.location?.address?.toLowerCase() || '';
-  const organizerLocation = organizer?.location?.toLowerCase() || '';
-  const requestCategory = helpRequest?.category?.toLowerCase() || '';
+const normalizeText = (value) => {
+  if (value === undefined || value === null) {
+    return '';
+  }
 
-  const profileText = [organizer?.headline, organizer?.about, ...(organizer?.skills || [])]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
+  if (typeof value === 'string') {
+    return value.trim().toLowerCase();
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value).trim().toLowerCase();
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(normalizeText).filter(Boolean).join(' ');
+  }
+
+  if (typeof value === 'object') {
+    return [
+      value.address,
+      value.fullAddress,
+      value.name,
+      value.ward,
+      value.district,
+      value.city,
+      value.province,
+      value.country,
+      value.description,
+    ]
+      .map(normalizeText)
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  return '';
+};
+
+const normalizeLocationText = (location) => {
+  if (!location) return '';
+
+  if (typeof location === 'string') {
+    return normalizeText(location);
+  }
+
+  if (typeof location === 'object') {
+    return normalizeText({
+      address: location.address,
+      fullAddress: location.fullAddress,
+      name: location.name,
+      ward: location.ward,
+      district: location.district,
+      city: location.city,
+      province: location.province,
+      country: location.country,
+      description: location.description,
+    });
+  }
+
+  return normalizeText(location);
+};
+
+const scoreRelevance = (helpRequest, organizer) => {
+  const requestAddress = normalizeLocationText(helpRequest?.location);
+  const organizerLocation = normalizeLocationText(organizer?.location);
+  const requestCategory = normalizeText(helpRequest?.category);
+
+  const profileText = normalizeText([
+    organizer?.headline,
+    organizer?.about,
+    ...(Array.isArray(organizer?.skills) ? organizer.skills : []),
+  ]);
 
   let score = 0;
 
@@ -195,12 +257,13 @@ const buildMapSummary = ({ mode, zoom, items, clusters }) => ({
 });
 
 export default class HelpRequestService {
-  constructor({
+    constructor({
     helprequestRepository,
     cloudinaryProvider,
     transactionManager,
     userRepository,
     notificationRepository,
+    notificationService = null,
     adminActionLogRepository,
   }) {
     this.helpRequestRepository = helprequestRepository;
@@ -208,6 +271,7 @@ export default class HelpRequestService {
     this.transactionManager = transactionManager;
     this.userRepository = userRepository;
     this.notificationRepository = notificationRepository;
+    this.notificationService = notificationService;
     this.adminActionLogRepository = adminActionLogRepository;
   }
 
@@ -1064,7 +1128,7 @@ export default class HelpRequestService {
     };
   }
 
-  async createHelpRequestNotification({
+     async createHelpRequestNotification({
     type,
     title,
     message,
@@ -1075,24 +1139,44 @@ export default class HelpRequestService {
     entityType = 'help_request',
     entityId = null,
   }) {
-    if (!this.notificationRepository || !recipientId) {
+    if (!recipientId) {
       return null;
     }
 
-    const typeValue = type?.toLowerCase ? type.toLowerCase() : type;
+    const typeValue = typeof type === 'string' ? type.toLowerCase() : type;
+
+    const payload = {
+      type: typeValue,
+      title,
+      message,
+      recipientId,
+      actorId: senderId || null,
+      actionUrl: link || null,
+      entityType,
+      entityId: entityId || metadata?.helpRequestId || null,
+      metadata: metadata || {},
+    };
 
     try {
-      return await this.notificationRepository.create({
-        type: typeValue,
-        title,
-        message,
-        recipientId,
-        actorId: senderId || null,
-        actionUrl: link || null,
-        entityType,
-        entityId: entityId || metadata?.helpRequestId || null,
-        metadata: metadata || {},
-      });
+      if (this.notificationService?.createNotification) {
+        return await this.notificationService.createNotification(payload);
+      }
+
+      if (!this.notificationRepository) {
+        return null;
+      }
+
+      const created = await this.notificationRepository.create(payload);
+
+      console.warn(
+        '[NOTIFY] Created help request notification without realtime because notificationService is unavailable',
+        {
+          type: typeValue,
+          recipientId: String(recipientId),
+        }
+      );
+
+      return created;
     } catch (error) {
       console.error('[NOTIFY] Failed to create help request notification:', error.message);
       return null;
