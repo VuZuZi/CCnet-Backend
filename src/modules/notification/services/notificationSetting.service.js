@@ -1,36 +1,68 @@
 import { NOTIFICATION_TYPES } from '../constants/notification.constants.js';
 
-const TYPE_TO_SETTING_KEY = Object.freeze({
-  [NOTIFICATION_TYPES.FOLLOW_CREATED]: 'followEnabled',
-  [NOTIFICATION_TYPES.PROJECT_UPDATED]: 'projectEnabled',
+function createTypeToSettingKey() {
+  const map = {};
 
-  [NOTIFICATION_TYPES.VOLUNTEER_APPLIED]: 'projectEnabled',
-  [NOTIFICATION_TYPES.VOLUNTEER_APPLICATION_APPROVED]: 'projectEnabled',
-  [NOTIFICATION_TYPES.VOLUNTEER_APPLICATION_REJECTED]: 'projectEnabled',
-  [NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_REQUESTED]: 'projectEnabled',
-  [NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_APPROVED]: 'projectEnabled',
-  [NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_REJECTED]: 'projectEnabled',
+  const add = (type, settingKey) => {
+    if (type) {
+      map[type] = settingKey;
+    }
+  };
 
-  [NOTIFICATION_TYPES.ORGANIZER_REQUEST_SUBMITTED]: 'organizerRequestEnabled',
-  [NOTIFICATION_TYPES.ORGANIZER_REQUEST_UPDATED]: 'organizerRequestEnabled',
+  add(NOTIFICATION_TYPES.FOLLOW_CREATED, 'followEnabled');
 
-  [NOTIFICATION_TYPES.SYSTEM_ANNOUNCEMENT]: 'systemEnabled',
+  add(NOTIFICATION_TYPES.PROJECT_UPDATED, 'projectEnabled');
 
-  [NOTIFICATION_TYPES.POST_REACTED]: 'postEnabled',
-  [NOTIFICATION_TYPES.POST_COMMENTED]: 'postEnabled',
-  [NOTIFICATION_TYPES.COMMENT_REPLIED]: 'postEnabled',
-  [NOTIFICATION_TYPES.COMMENT_REACTED]: 'postEnabled',
-  [NOTIFICATION_TYPES.MESSAGE_REACTED]: 'postEnabled',
-  [NOTIFICATION_TYPES.VOLUNTEER_REVIEW_REQUIRED]: 'projectEnabled',
-[NOTIFICATION_TYPES.VOLUNTEER_REVIEW_SUBMITTED]: 'projectEnabled',
-[NOTIFICATION_TYPES.VOLUNTEER_REVIEW_AUTO_MAXED]: 'projectEnabled',
-});
+  add(NOTIFICATION_TYPES.VOLUNTEER_APPLIED, 'projectEnabled');
+  add(NOTIFICATION_TYPES.VOLUNTEER_APPLICATION_APPROVED, 'projectEnabled');
+  add(NOTIFICATION_TYPES.VOLUNTEER_APPLICATION_REJECTED, 'projectEnabled');
+  add(NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_REQUESTED, 'projectEnabled');
+  add(NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_APPROVED, 'projectEnabled');
+  add(NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_REJECTED, 'projectEnabled');
+  add(NOTIFICATION_TYPES.VOLUNTEER_REVIEW_REQUIRED, 'projectEnabled');
+  add(NOTIFICATION_TYPES.VOLUNTEER_REVIEW_SUBMITTED, 'projectEnabled');
+  add(NOTIFICATION_TYPES.VOLUNTEER_REVIEW_AUTO_MAXED, 'projectEnabled');
+
+  add(NOTIFICATION_TYPES.ORGANIZER_REQUEST_SUBMITTED, 'organizerRequestEnabled');
+  add(NOTIFICATION_TYPES.ORGANIZER_REQUEST_UPDATED, 'organizerRequestEnabled');
+
+  add(NOTIFICATION_TYPES.HELP_REQUEST_ASSIGNED, 'helpRequestEnabled');
+  add(NOTIFICATION_TYPES.HELP_REQUEST_REASSIGNED, 'helpRequestEnabled');
+  add(NOTIFICATION_TYPES.HELP_REQUEST_VERIFIED, 'helpRequestEnabled');
+  add(NOTIFICATION_TYPES.HELP_REQUEST_REJECTED, 'helpRequestEnabled');
+  add(NOTIFICATION_TYPES.HELP_REQUEST_COMPLETED, 'helpRequestEnabled');
+  add(NOTIFICATION_TYPES.HELP_REQUEST_ASSIGNMENT_RESPONDED, 'helpRequestEnabled');
+
+  add(NOTIFICATION_TYPES.DONATION_SUCCESSFUL, 'projectEnabled');
+  add(NOTIFICATION_TYPES.REFUND_REQUEST_SUBMITTED, 'projectEnabled');
+  add(NOTIFICATION_TYPES.TRANSACTION_REFUNDED, 'projectEnabled');
+  add(NOTIFICATION_TYPES.REFUND_REQUEST_REJECTED, 'projectEnabled');
+  add(NOTIFICATION_TYPES.TRANSACTION_WITHDRAWAL_REQUESTED, 'projectEnabled');
+  add(NOTIFICATION_TYPES.TRANSACTION_FAILED, 'projectEnabled');
+
+  add(NOTIFICATION_TYPES.POST_REACTED, 'postEnabled');
+  add(NOTIFICATION_TYPES.POST_COMMENTED, 'postEnabled');
+  add(NOTIFICATION_TYPES.COMMENT_REPLIED, 'postEnabled');
+  add(NOTIFICATION_TYPES.COMMENT_REACTED, 'postEnabled');
+  add(NOTIFICATION_TYPES.MESSAGE_REACTED, 'postEnabled');
+
+  add(NOTIFICATION_TYPES.KYC_EXPIRING_WARNING, 'systemEnabled');
+  add(NOTIFICATION_TYPES.KYC_EXPIRED, 'systemEnabled');
+  add(NOTIFICATION_TYPES.KYC_GRACE_PERIOD_ENDED, 'systemEnabled');
+
+  add(NOTIFICATION_TYPES.SYSTEM_ANNOUNCEMENT, 'systemEnabled');
+
+  return Object.freeze(map);
+}
+
+const TYPE_TO_SETTING_KEY = createTypeToSettingKey();
 
 const ALLOWED_SETTING_KEYS = new Set([
   'systemEnabled',
   'followEnabled',
   'projectEnabled',
   'organizerRequestEnabled',
+  'helpRequestEnabled',
   'postEnabled',
 ]);
 
@@ -156,7 +188,16 @@ export class NotificationSettingService {
   async isTypeEnabled(userId, type) {
     const settings = await this.getSettings(userId);
     const settingKey = TYPE_TO_SETTING_KEY[type] || 'systemEnabled';
-    return Boolean(settings?.[settingKey]);
+
+    if (!settings) {
+      return true;
+    }
+
+    if (settings[settingKey] === undefined || settings[settingKey] === null) {
+      return true;
+    }
+
+    return Boolean(settings[settingKey]);
   }
 }
 
