@@ -550,7 +550,7 @@ class ProjectRepository {
       endDate: { $lt: currentDate },
     })
       .select(
-        "_id title currentAmount targetAmount mvpAmount organizerId endDate status",
+        "_id title currentAmount targetAmount organizerId endDate status",
       )
       .limit(limit)
       .lean()

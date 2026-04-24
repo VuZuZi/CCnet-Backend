@@ -37,7 +37,7 @@ export class ProjectDTO {
         });
 
         if (data.projectType === PROJECT_TYPE.VOLUNTEER_ONLY) {
-            const financialFields = ['targetAmount', 'currentAmount', 'mvpAmount', 'budgetBreakdown'];
+            const financialFields = ['targetAmount', 'currentAmount'];
             financialFields.forEach(f => delete data[f]);
 
             if (data.milestones) {
