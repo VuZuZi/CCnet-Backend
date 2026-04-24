@@ -25,4 +25,7 @@ export const DOMAIN_EVENTS = Object.freeze({
 
   POST_REACTED: 'post.reacted',
   POST_COMMENTED: 'post.commented',
+  COMMENT_REPLIED: 'comment.replied',
+  COMMENT_REACTED: 'comment.reacted',
+  MESSAGE_REACTED: 'message.reacted',
 });

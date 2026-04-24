@@ -87,6 +87,13 @@ router.post(
 );
 
 router.post(
+  "/:id/comments/:commentId/reaction",
+  authenticate,
+  validate(PostValidation.toggleCommentReaction),
+  execute("toggleCommentReaction"),
+);
+
+router.post(
   "/:id/report",
   authenticate,
   validate(PostValidation.reportPost),

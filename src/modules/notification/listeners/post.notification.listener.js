@@ -63,4 +63,64 @@ export function registerPostNotificationListener({
       });
     }
   });
+
+  eventBus.on(DOMAIN_EVENTS.COMMENT_REPLIED, async (event) => {
+    try {
+      if (!event?.recipientId || !event?.actorId) return;
+      if (String(event.recipientId) === String(event.actorId)) return;
+
+      const payload = buildNotificationPayload({
+        type: NOTIFICATION_TYPES.COMMENT_REPLIED,
+        actorName: event.actorName,
+        actorAvatar: event.actorAvatar,
+        postId: event.postId,
+        commentId: event.commentId,
+        parentCommentId: event.parentCommentId,
+        previewContent: event.previewContent,
+        actionUrl: `/community/${event.postId}?commentId=${event.commentId}`,
+      });
+
+      await notificationService.createNotification({
+        recipientId: event.recipientId,
+        actorId: event.actorId,
+        type: NOTIFICATION_TYPES.COMMENT_REPLIED,
+        ...payload,
+      });
+    } catch (error) {
+      logger?.error?.('Failed to handle comment replied notification', {
+        error,
+        event,
+      });
+    }
+  });
+
+  eventBus.on(DOMAIN_EVENTS.COMMENT_REACTED, async (event) => {
+    try {
+      if (!event?.recipientId || !event?.actorId) return;
+      if (String(event.recipientId) === String(event.actorId)) return;
+      if (event.reactionType && event.reactionType !== 'like') return;
+
+      const payload = buildNotificationPayload({
+        type: NOTIFICATION_TYPES.COMMENT_REACTED,
+        actorName: event.actorName,
+        actorAvatar: event.actorAvatar,
+        postId: event.postId,
+        commentId: event.commentId,
+        reactionType: event.reactionType || 'like',
+        actionUrl: `/community/${event.postId}?commentId=${event.commentId}`,
+      });
+
+      await notificationService.createNotification({
+        recipientId: event.recipientId,
+        actorId: event.actorId,
+        type: NOTIFICATION_TYPES.COMMENT_REACTED,
+        ...payload,
+      });
+    } catch (error) {
+      logger?.error?.('Failed to handle comment reacted notification', {
+        error,
+        event,
+      });
+    }
+  });
 }

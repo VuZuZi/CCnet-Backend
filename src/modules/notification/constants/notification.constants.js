@@ -26,6 +26,9 @@ export const NOTIFICATION_TYPES = Object.freeze({
 
   POST_REACTED: 'post_reacted',
   POST_COMMENTED: 'post_commented',
+  COMMENT_REPLIED: 'comment_replied',
+  COMMENT_REACTED: 'comment_reacted',
+  MESSAGE_REACTED: 'message_reacted',
 
   VOLUNTEER_APPLIED: 'volunteer_applied',
   VOLUNTEER_APPLICATION_APPROVED: 'volunteer_application_approved',
