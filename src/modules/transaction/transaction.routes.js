@@ -12,11 +12,13 @@ import {
     getSuspenseQuerySchema,
     projectIdParamSchema,
     requestRefundSchema,
+    supportDonationSchema,
     submitClaimSchema,
     transactionIdParamSchema,
     withdrawSchema
 } from "./transaction.validation.js";
 import { adminMiddleware } from "../../middlewares/admin.middleware.js";
+import { maybeAuthenticate } from "../../middlewares/maybeAuth.middleware.js";
 
 const router = Router();
 router.use(scopePerRequest);
@@ -35,6 +37,13 @@ router.post(
     authenticate,
     validateBody(donateSchema),
     execute("donate")
+);
+
+router.post(
+    "/support-donation",
+    maybeAuthenticate,
+    validateBody(supportDonationSchema),
+    execute("createSupportDonation")
 );
 
 router.get(

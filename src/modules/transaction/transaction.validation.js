@@ -11,6 +11,11 @@ export const donateSchema = z.object({
     message: z.string().max(500, "Lời nhắn tối đa 500 ký tự").optional()
 }).strict();
 
+export const supportDonationSchema = z.object({
+    amount: z.coerce.number().min(2000, "Minimum support amount is 2,000 VND"),
+    message: z.string().max(500, "Message must be 500 characters or less").optional()
+}).strict();
+
 export const requestRefundSchema = z.object({
     reason: z.string().max(255, "Lý do không được vượt quá 255 ký tự").optional()
 }).strict();

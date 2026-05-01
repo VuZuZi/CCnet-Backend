@@ -23,6 +23,11 @@ const systemFinancialSchema = new mongoose.Schema({
         default: 0,
         min: [0, "Quỹ từ thiện chung không được phép âm"]
     },
+    webSupportFundBalance: {
+        type: Number,
+        default: 0,
+        min: [0, "Web support fund cannot be negative"]
+    },
     lastReconciledAt: { type: Date, default: Date.now }
 }, {
     timestamps: true,

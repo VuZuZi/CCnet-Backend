@@ -84,6 +84,20 @@ class ProjectController {
     }
   };
 
+  getLandingMetrics = async (req, res, next) => {
+    try {
+      const result = await this.projectService.getLandingMetrics();
+
+      return ApiResponse.success(
+        res,
+        result,
+        "Láº¥y thá»‘ng kÃª landing page thÃ nh cÃ´ng",
+      );
+    } catch (error) {
+      next(error);
+    }
+  };
+
   getExploreProjects = async (req, res, next) => {
     try {
       const userId = getUserId(req);

@@ -28,14 +28,6 @@ class SuspenseService {
         this.config = config;
     }
 
-    _calculateProRata(transferAmount) {
-        const feeRate = this.config?.platformFeePercent || 0.015;
-        const multiplier = Math.round(feeRate * 1000);
-        const netAmount = Math.round((transferAmount * 1000) / (1000 + multiplier));
-        const platformFee = transferAmount - netAmount;
-        return { netAmount, platformFee };
-    }
-
     async recordSuspense(amount, bankRef, content) {
         console.warn(`[SmartRouter] Giao dịch rơi vào SUSPENSE. BankRef: ${bankRef}, Tiền: ${amount}`);
 
@@ -173,8 +165,6 @@ class SuspenseService {
         const project = await this.projectRepository.findById(projectId);
         const isEligible = this._checkFundingEligibility(project);
 
-        const { netAmount, platformFee } = this._calculateProRata(suspense.amount);
-
         const result = await this.transactionManager.runInTransaction(async (session) => {
             const updatedSuspense = await this.suspenseTransactionRepository.allocateIfUnallocated(
                 suspenseId, claimRequestId,
@@ -187,9 +177,10 @@ class SuspenseService {
             if (isEligible) {
                 const newTx = await this.transactionRepository.create({
                     type: 'DONATION',
-                    amount: netAmount,
+                    amount: suspense.amount,
                     grossAmount: suspense.amount,
-                    platformFee: platformFee,
+                    netAmount: suspense.amount,
+                    platformFee: 0,
                     projectId: projectId,
                     donorRef: claimInfo.userId,
                     bankTransactionRef: suspense.bankTransactionRef,
@@ -197,16 +188,16 @@ class SuspenseService {
                     message: "Được khôi phục thông qua hệ thống Tra soát Admin"
                 }, session);
 
-                await this.escrowRepository.incrementBalance(projectId, netAmount, session);
-                await this.projectRepository.incrementFunding(projectId, netAmount, session);
-                await this.systemFinancialRepository.incrementSystemFunds(platformFee, 0, session);
+                await this.escrowRepository.incrementBalance(projectId, suspense.amount, session);
+                await this.projectRepository.incrementFunding(projectId, suspense.amount, session);
 
-                return { tx: newTx, flow: 'ESCROW_FUNDED', netAmount };
+                return { tx: newTx, flow: 'ESCROW_FUNDED', netAmount: suspense.amount };
             } else {
                 const refundTx = await this.transactionRepository.create({
                     type: 'WALLET_DEPOSIT',
                     amount: suspense.amount,
                     grossAmount: suspense.amount,
+                    netAmount: suspense.amount,
                     platformFee: 0,
                     projectId: projectId,
                     donorRef: claimInfo.userId,

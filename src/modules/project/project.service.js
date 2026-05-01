@@ -55,7 +55,9 @@ class ProjectService {
     eventBus,
     volunteerRepository,
     disbursementRequestRepository,
-    milestoneEvidenceRepository
+    milestoneEvidenceRepository,
+    transactionRepository,
+    systemFinancialRepository
   }) {
     this.projectRepository = projectRepository;
     this.escrowRepository = escrowRepository;
@@ -72,6 +74,8 @@ class ProjectService {
     this.volunteerRepository = volunteerRepository;
     this.disbursementRequestRepository = disbursementRequestRepository;
     this.milestoneEvidenceRepository = milestoneEvidenceRepository;
+    this.transactionRepository = transactionRepository;
+    this.systemFinancialRepository = systemFinancialRepository;
   }
 
   _normalizeText(value) {
@@ -898,6 +902,27 @@ class ProjectService {
     }
 
     return this._decorateProjectUrgency(updatedProject);
+  }
+
+  async getLandingMetrics() {
+    const [projectStats, donationMetrics, systemRecord] = await Promise.all([
+      this.projectRepository.getLandingStats(),
+      this.transactionRepository.getCompletedDonationMetrics(),
+      this.systemFinancialRepository.getSystemRecord(),
+    ]);
+
+    return {
+      totalFundsRaised: Number(
+        donationMetrics?.totalAmount ?? projectStats?.totalFundsRaised ?? 0,
+      ),
+      totalProjects: Number(projectStats?.totalProjects || 0),
+      totalVolunteers: Number(projectStats?.totalVolunteers || 0),
+      totalOrganizers: Number(projectStats?.totalOrganizers || 0),
+      totalSupporters: Number(donationMetrics?.uniqueDonorCount || 0),
+      webSupportFundBalance: Number(systemRecord?.webSupportFundBalance || 0),
+      charityFundBalance: Number(systemRecord?.charityFundBalance || 0),
+      updatedAt: new Date().toISOString(),
+    };
   }
 
   async getFeaturedProjects(userId = null) {

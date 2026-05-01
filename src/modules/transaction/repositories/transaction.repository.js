@@ -259,6 +259,50 @@ class TransactionRepository {
         return await Transaction.insertMany(docs, { session, ordered: false });
     }
 
+    async getCompletedDonationMetrics(session = null) {
+        const result = await Transaction.aggregate([
+            {
+                $match: {
+                    status: 'COMPLETED',
+                    type: {
+                        $in: [
+                            TRANSACTION_TYPES.DONATION,
+                            TRANSACTION_TYPES.DONATION_FROM_WALLET
+                        ]
+                    },
+                    projectId: { $ne: null }
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalAmount: { $sum: '$amount' },
+                    donorIds: { $addToSet: '$donorRef' }
+                }
+            },
+            {
+                $project: {
+                    _id: 0,
+                    totalAmount: 1,
+                    uniqueDonorCount: {
+                        $size: {
+                            $filter: {
+                                input: '$donorIds',
+                                as: 'donorId',
+                                cond: { $ne: ['$$donorId', null] }
+                            }
+                        }
+                    }
+                }
+            }
+        ]).session(session).exec();
+
+        return result[0] || {
+            totalAmount: 0,
+            uniqueDonorCount: 0
+        };
+    }
+
     async findPublicDisbursementsByProject(projectId, skip = 0, limit = 10, session = null) {
         const filter = {
             projectId: new mongoose.Types.ObjectId(projectId),

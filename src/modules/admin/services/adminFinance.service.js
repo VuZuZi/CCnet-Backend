@@ -9,9 +9,10 @@ class AdminFinanceService {
         const { page, limit, status, search } = query;
         const skip = (page - 1) * limit;
 
-        const { data, total } = await this.adminFinanceRepository.getFinancialSummary({ status, search, skip, limit });
+        const { overview, data, total } = await this.adminFinanceRepository.getFinancialSummary({ status, search, skip, limit });
 
         return {
+            overview,
             projects: data,
             pagination: {
                 total,
@@ -23,7 +24,8 @@ class AdminFinanceService {
     }
 
     async getProjectFinancialDetail(projectId) {
-        const { project, escrow, evidences, requests } = await this.adminFinanceRepository.getProjectDetails(projectId);
+        const { project, escrow, evidences, requests, ledgerEntries, ledgerSummary } =
+            await this.adminFinanceRepository.getProjectDetails(projectId);
 
         if (!project) {
             throw new AppError('Không tìm thấy dự án', 404);
@@ -40,6 +42,25 @@ class AdminFinanceService {
             };
         });
 
+        const ledgerSummaryMap = new Map(
+            (ledgerSummary || []).map((item) => [item._id, item])
+        );
+
+        const moneyFlow = {
+            totalProjectDonations:
+                Number(ledgerSummaryMap.get('DONATION')?.totalAmount || 0) +
+                Number(ledgerSummaryMap.get('DONATION_FROM_WALLET')?.totalAmount || 0),
+            totalRefundedToUsers: Number(
+                ledgerSummaryMap.get('USER_REFUND_REQUEST')?.totalAmount || 0
+            ),
+            totalRetainedInProject: Number(
+                ledgerSummaryMap.get('RETAINED_DONATION')?.totalAmount || 0
+            ),
+            totalDisbursed: Number(
+                ledgerSummaryMap.get('DISBURSEMENT')?.totalAmount || 0
+            ),
+        };
+
         return {
             project: {
                 id: project._id,
@@ -49,8 +70,30 @@ class AdminFinanceService {
                 targetAmount: project.targetAmount,
                 organizer: project.organizerId
             },
-            escrow: escrow || { availableBalance: 0, totalDisbursed: 0, pendingDisbursementAmount: 0 },
-            milestones
+            escrow: escrow || {
+                availableBalance: 0,
+                totalDeposited: 0,
+                totalDisbursed: 0,
+                pendingDisbursementAmount: 0,
+                retainedDonations: 0,
+                completedRefunds: 0
+            },
+            milestones,
+            moneyFlow,
+            ledgerEntries: (ledgerEntries || []).map((entry) => ({
+                id: entry._id,
+                type: entry.type,
+                status: entry.status,
+                amount: entry.amount,
+                grossAmount: entry.grossAmount,
+                netAmount: entry.netAmount,
+                donor: entry.donorRef || null,
+                organizer: entry.organizerRef || null,
+                message: entry.message || '',
+                bankTransactionRef: entry.bankTransactionRef || '',
+                createdAt: entry.createdAt,
+                updatedAt: entry.updatedAt
+            }))
         };
     }
 }

@@ -93,6 +93,8 @@ const reportProjectSchema = z.object({
 
 router.get("/featured", optionalAuthenticate, execute("getFeatured"));
 
+router.get("/landing-metrics", execute("getLandingMetrics"));
+
 router.get("/volunteers-needed", execute("getVolunteerNeeded"));
 
 router.get(

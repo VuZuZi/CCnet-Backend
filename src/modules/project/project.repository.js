@@ -567,6 +567,45 @@ class ProjectRepository {
       .exec();
   }
 
+  async getLandingStats() {
+    const result = await Project.aggregate([
+      {
+        $match: {
+          status: { $in: PUBLIC_PROJECT_STATUSES },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalProjects: { $sum: 1 },
+          totalFundsRaised: { $sum: "$currentAmount" },
+          totalVolunteers: {
+            $sum: { $ifNull: ["$stats.currentVolunteers", 0] },
+          },
+          organizerIds: { $addToSet: "$organizerId" },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          totalProjects: 1,
+          totalFundsRaised: 1,
+          totalVolunteers: 1,
+          totalOrganizers: { $size: "$organizerIds" },
+        },
+      },
+    ]).exec();
+
+    return (
+      result[0] || {
+        totalProjects: 0,
+        totalFundsRaised: 0,
+        totalVolunteers: 0,
+        totalOrganizers: 0,
+      }
+    );
+  }
+
   async updateMilestoneStatus(projectId, milestoneId, status, session = null) {
     return await Project.findOneAndUpdate(
       { _id: projectId, "milestones.milestoneId": milestoneId },
