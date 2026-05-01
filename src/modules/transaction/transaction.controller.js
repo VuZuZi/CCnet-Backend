@@ -16,6 +16,14 @@ class TransactionController {
         } catch (error) { next(error); }
     };
 
+    createSupportDonation = async (req, res, next) => {
+        try {
+            const donorId = req.user?.userId || null;
+            const result = await this.transactionService.initiateSupportDonation(donorId, req.body);
+            return ApiResponse.created(res, result, "Support donation QR created successfully.");
+        } catch (error) { next(error); }
+    };
+
     sepayWebhook = async (req, res, next) => {
         try {
             await this.transactionService.handleSepayWebhook(req.headers, req.body);

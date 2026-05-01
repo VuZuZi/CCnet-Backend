@@ -18,7 +18,11 @@ const transactionSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Project',
         required: function () {
-            return ![TRANSACTION_TYPES.WALLET_WITHDRAWAL, TRANSACTION_TYPES.PLATFORM_FEE].includes(this.type);
+            return ![
+                TRANSACTION_TYPES.WALLET_WITHDRAWAL,
+                TRANSACTION_TYPES.PLATFORM_FEE,
+                TRANSACTION_TYPES.WEB_SUPPORT_DONATION
+            ].includes(this.type);
         },
         index: true
     },

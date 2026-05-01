@@ -122,6 +122,20 @@ class TransactionService {
         }
     }
 
+    async _reserveGatewayTransactionId() {
+        const redisClient = this.redis.getClient();
+        const now = new Date();
+        const datePrefix = `${now.getFullYear().toString().slice(-2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+        const redisKey = `sepay:${datePrefix}:seq`;
+        const seq = await redisClient.incr(redisKey);
+
+        if (seq === 1) {
+            await redisClient.expire(redisKey, 172800);
+        }
+
+        return `${datePrefix}${String(seq).padStart(4, '0')}`;
+    }
+
     async initiateDonation(donorId, payload) {
         const { projectId, amount, paymentMethod, isAnonymous, message } = payload;
         const safeAmount = MoneyMath.toIntegerAmount(amount);
@@ -171,31 +185,61 @@ class TransactionService {
             return { transactionId: result.tx._id, paymentMethod: 'WALLET', status: 'COMPLETED', message: 'Tuyệt vời! Bạn đã quyên góp thành công qua Ví CCNet.' };
         }
 
-        const redisClient = this.redis.getClient();
-        const now = new Date();
-        const datePrefix = `${now.getFullYear().toString().slice(-2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-
-        const redisKey = `sepay:${datePrefix}:seq`;
-        const seq = await redisClient.incr(redisKey);
-        if (seq === 1) await redisClient.expire(redisKey, 172800);
-
-        const gatewayTransactionId = `${datePrefix}${String(seq).padStart(4, '0')}`;
-        const feeRate = this.config?.platformFeePercent || 0.015;
-        const { grossAmount, platformFee } = MoneyMath.calculateForward(safeAmount, feeRate);
+        const gatewayTransactionId = await this._reserveGatewayTransactionId();
 
         const transaction = await this.transactionRepository.create({
-            type: 'DONATION', amount: safeAmount, grossAmount: grossAmount, netAmount: safeAmount,
-            platformFee: platformFee, projectId, donorRef: donorId, gatewayTransactionId: gatewayTransactionId,
+            type: 'DONATION', amount: safeAmount, grossAmount: safeAmount, netAmount: safeAmount,
+            platformFee: 0, projectId, donorRef: donorId, gatewayTransactionId: gatewayTransactionId,
             status: 'PENDING', isAnonymous, message
         });
 
         const transferMemo = `SEVQR DONATE ${gatewayTransactionId}`;
-        const paymentData = await this.paymentProvider.createPaymentLink({ orderCode: gatewayTransactionId, amount: grossAmount, description: transferMemo });
+        const paymentData = await this.paymentProvider.createPaymentLink({ orderCode: gatewayTransactionId, amount: safeAmount, description: transferMemo });
 
         return {
             transactionId: transaction._id, paymentLinkId: paymentData.paymentLinkId, qrCode: paymentData.qrCode,
             transferMemo: paymentData.transferMemo, paymentMethod: 'BANK_TRANSFER',
-            breakdown: { baseAmount: safeAmount, fee: platformFee, totalRequired: grossAmount }
+            breakdown: { baseAmount: safeAmount, fee: 0, totalRequired: safeAmount }
+        };
+    }
+
+    async initiateSupportDonation(donorId = null, payload = {}) {
+        const { amount, message } = payload;
+        const safeAmount = MoneyMath.toIntegerAmount(amount);
+        const gatewayTransactionId = await this._reserveGatewayTransactionId();
+
+        const transaction = await this.transactionRepository.create({
+            type: 'WEB_SUPPORT_DONATION',
+            amount: safeAmount,
+            grossAmount: safeAmount,
+            netAmount: safeAmount,
+            platformFee: 0,
+            projectId: null,
+            donorRef: donorId,
+            gatewayTransactionId,
+            status: 'PENDING',
+            message: message || 'Á»¦ng há»™ duy trÃ¬ web CCNet'
+        });
+
+        const transferMemo = `SEVQR SUPPORT ${gatewayTransactionId}`;
+        const paymentData = await this.paymentProvider.createPaymentLink({
+            orderCode: gatewayTransactionId,
+            amount: safeAmount,
+            description: transferMemo
+        });
+
+        return {
+            transactionId: transaction._id,
+            paymentLinkId: paymentData.paymentLinkId,
+            qrCode: paymentData.qrCode,
+            transferMemo: paymentData.transferMemo,
+            paymentMethod: 'BANK_TRANSFER',
+            donationTarget: 'WEB_SUPPORT',
+            breakdown: {
+                baseAmount: safeAmount,
+                fee: 0,
+                totalRequired: safeAmount
+            }
         };
     }
 
@@ -363,21 +407,22 @@ class TransactionService {
     }
 
     async _processMatchedDonation(baseTx, transferAmount, bankRef, rawWebhook) {
-        const feeRate = this.config?.platformFeePercent || 0.015;
-        const { netAmount, platformFee } = MoneyMath.calculateProRata(transferAmount, feeRate);
-
         const result = await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
             const currentTx = await this.transactionRepository.updateStatusIfPending(
                 baseTx.gatewayTransactionId, 'COMPLETED',
-                { grossAmount: transferAmount, amount: netAmount, netAmount: netAmount, platformFee: platformFee, bankTransactionRef: bankRef, gatewayResponse: rawWebhook },
+                { grossAmount: transferAmount, amount: transferAmount, netAmount: transferAmount, platformFee: 0, bankTransactionRef: bankRef, gatewayResponse: rawWebhook },
                 session
             );
 
             if (!currentTx) throw new AppError(`Giao dịch này đã được ghi nhận trước đó. Cảm ơn bạn!`, 409);
 
-            const updatedEscrow = await this.escrowRepository.incrementBalance(currentTx.projectId, netAmount, session);
-            const updatedProject = await this.projectRepository.incrementFunding(currentTx.projectId, netAmount, session);
-            await this.systemFinancialRepository.incrementSystemFunds(platformFee, 0, session);
+            if (currentTx.type === 'WEB_SUPPORT_DONATION' || !currentTx.projectId) {
+                await this.systemFinancialRepository.incrementWebSupportFund(transferAmount, session);
+                return { tx: currentTx, status: 'success' };
+            }
+
+            const updatedEscrow = await this.escrowRepository.incrementBalance(currentTx.projectId, transferAmount, session);
+            const updatedProject = await this.projectRepository.incrementFunding(currentTx.projectId, transferAmount, session);
 
             const isHardCapped = await this._checkAndFinalizeFundingGoal(updatedProject, session, dispatchEvent);
 
@@ -598,7 +643,7 @@ class TransactionService {
         const hoursSinceDonation = (Date.now() - new Date(tx.createdAt).getTime()) / (1000 * 60 * 60);
         if (hoursSinceDonation > (USER_REFUND_POLICY.ALLOWED_HOURS || 72)) throw new AppError("Đã quá thời hạn 72 giờ quy định để yêu cầu hoàn tiền. Cảm ơn bạn đã đồng hành cùng dự án.", 400);
 
-        const penaltyRate = USER_REFUND_POLICY.PERCENTAGE_FEE || 0.02;
+        const penaltyRate = USER_REFUND_POLICY.PERCENTAGE_FEE || 0.01;
         const refundAmount = Math.floor(tx.netAmount * (1 - penaltyRate));
         const retainedFee = tx.netAmount - refundAmount;
 
@@ -694,7 +739,7 @@ class TransactionService {
         if (!sourceTx) throw new AppError('Giao dịch gốc không tồn tại.', 404);
         if (sourceTx.status !== 'COMPLETED') throw new AppError('Giao dịch gốc không còn hợp lệ để hoàn tiền.', 400);
 
-        const penaltyRate = USER_REFUND_POLICY.PERCENTAGE_FEE || 0.02;
+        const penaltyRate = USER_REFUND_POLICY.PERCENTAGE_FEE || 0.01;
         const refundAmount = Math.floor(sourceTx.netAmount * (1 - penaltyRate));
         const retainedFee = sourceTx.netAmount - refundAmount;
 
@@ -720,13 +765,13 @@ class TransactionService {
 
             if (retainedFee > 0) {
                 await this.transactionRepository.create({
-                    type: 'PLATFORM_FEE',
+                    type: 'RETAINED_DONATION',
                     amount: retainedFee,
                     grossAmount: retainedFee,
                     netAmount: retainedFee,
                     platformFee: 0,
-                    projectId: null,
-                    donorRef: null,
+                    projectId: sourceTx.projectId,
+                    donorRef: sourceTx.donorRef,
                     status: 'COMPLETED',
                     message: 'Phí duy trì nền tảng từ yêu cầu hoàn tiền đã duyệt',
                     gatewayResponse: {
@@ -736,10 +781,15 @@ class TransactionService {
                 }, session);
             }
 
-            await this.projectRepository.decrementFunding(sourceTx.projectId, sourceTx.netAmount, session);
-            await this.escrowRepository.recordRefund(sourceTx.projectId, sourceTx.netAmount, session);
+            await this.projectRepository.decrementFunding(sourceTx.projectId, refundAmount, session);
+            await this.escrowRepository.processUserRefundWithFee(
+                sourceTx.projectId,
+                sourceTx.netAmount,
+                refundAmount,
+                retainedFee,
+                session
+            );
             await this.walletRepository.incrementBalance(sourceTx.donorRef, refundAmount, session);
-            await this.systemFinancialRepository.incrementSystemFunds(0, retainedFee, session);
 
             return {
                 requestId: requestTx._id,
@@ -938,14 +988,32 @@ class TransactionService {
             this.walletRepository.getTotalSystemWalletBalance(), this.systemFinancialRepository.getSystemRecord()
         ]);
 
-        const systemFee = (systemRecord?.platformFeePendingWithdrawal || 0) + (systemRecord?.retainedPenaltyFund || 0);
-        const currentDbTotalLiabilities = totalEscrow + totalSuspense + totalWallet + systemFee;
+        const systemFunds =
+            (systemRecord?.platformFeePendingWithdrawal || 0) +
+            (systemRecord?.retainedPenaltyFund || 0) +
+            (systemRecord?.charityFundBalance || 0) +
+            (systemRecord?.webSupportFundBalance || 0);
+        const currentDbTotalLiabilities = totalEscrow + totalSuspense + totalWallet + systemFunds;
         const openingBalance = previousLedger ? previousLedger.closingBalance : 0;
         const expectedClosingBalance = openingBalance + sepayTotalIn - sepayTotalOut;
 
         let dbTotalInMatched = 0;
         const breakdown = {
-            snapshot: { realBankBalance: expectedClosingBalance, dbLiabilities: { total: currentDbTotalLiabilities, escrow: totalEscrow, suspense: totalSuspense, wallet: totalWallet, systemFee }, delta: expectedClosingBalance - currentDbTotalLiabilities },
+            snapshot: {
+                realBankBalance: expectedClosingBalance,
+                dbLiabilities: {
+                    total: currentDbTotalLiabilities,
+                    escrow: totalEscrow,
+                    suspense: totalSuspense,
+                    wallet: totalWallet,
+                    systemFunds,
+                    platformFeePendingWithdrawal: systemRecord?.platformFeePendingWithdrawal || 0,
+                    retainedPenaltyFund: systemRecord?.retainedPenaltyFund || 0,
+                    charityFundBalance: systemRecord?.charityFundBalance || 0,
+                    webSupportFundBalance: systemRecord?.webSupportFundBalance || 0
+                },
+                delta: expectedClosingBalance - currentDbTotalLiabilities
+            },
             matchedIn: 0, matchedOut: 0, missingInDbRefs: [], amountMismatches: [], message: "Sổ cái khớp hoàn toàn."
         };
 

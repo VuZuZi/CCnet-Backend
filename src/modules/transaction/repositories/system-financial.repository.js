@@ -10,7 +10,8 @@ class SystemFinancialRepository {
                     bankBalanceStartOfDay: 0,
                     platformFeePendingWithdrawal: 0,
                     retainedPenaltyFund: 0,
-                    charityFundBalance: 0
+                    charityFundBalance: 0,
+                    webSupportFundBalance: 0
                 }
             },
             { new: true, upsert: true, setDefaultsOnInsert: true, session }
@@ -49,6 +50,18 @@ class SystemFinancialRepository {
             {
                 $inc: {
                     charityFundBalance: amount
+                }
+            },
+            { new: true, runValidators: true, session }
+        ).lean().exec();
+    }
+
+    async incrementWebSupportFund(amount, session = null) {
+        return await SystemFinancial.findOneAndUpdate(
+            { identifier: 'SYSTEM_MAIN' },
+            {
+                $inc: {
+                    webSupportFundBalance: amount
                 }
             },
             { new: true, runValidators: true, session }
