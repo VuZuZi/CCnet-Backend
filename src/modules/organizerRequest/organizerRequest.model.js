@@ -135,6 +135,12 @@ const organizerRequestSchema = new mongoose.Schema(
       signedUserAgent: { type: String, default: "" }
     },
 
+    agreementRecordId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "AgreementRecord",
+      default: null,
+    },
+
     bankAccountId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "BankAccount",
@@ -156,6 +162,7 @@ const organizerRequestSchema = new mongoose.Schema(
     },
 
     notes: { type: String, default: "", trim: true, maxlength: 1000 },
+    riskFlags: { type: [String], default: [] },
     aiRiskScore: { type: Number, min: 0, max: 100, default: 0 },
 
     status: {

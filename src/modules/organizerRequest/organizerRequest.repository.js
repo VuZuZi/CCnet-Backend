@@ -31,6 +31,7 @@ class OrganizerRequestRepository {
         "fullName email avatar role phone location organization kyc"
       )
       .populate("reviewedBy", "fullName email avatar role")
+      .populate("agreementRecordId")
       .lean()
       .exec();
   }
