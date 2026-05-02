@@ -8,7 +8,8 @@ import crypto from "crypto";
 import {
   AGREEMENT_RECORD_STATUS,
   AGREEMENT_SUBJECT_TYPE,
-  ORGANIZER_COMMITMENT_TEMPLATE_V2,
+  ORGANIZER_COMMITMENT_TEMPLATE_V2_1,
+  ORGANIZER_COMMITMENT_VERSION,
 } from "../agreementRecord/agreementRecord.constant.js";
 
 const LEGAL_TYPES_REQUIRING_REGISTRATION = [
@@ -67,19 +68,40 @@ const normalizeProofLinks = (value) => {
   return value.map((link) => String(link).trim()).filter(Boolean);
 };
 
+const PNG_DATA_URL_PREFIX = /^data:image\/png;base64,/;
+const PNG_MAGIC = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]);
+const MAX_SIGNATURE_BYTES = 150 * 1024;
+const REQUIRED_AGREEMENT_CODES = ORGANIZER_COMMITMENT_TEMPLATE_V2_1.sections.map(
+  (section) => section.code
+);
+
 const buildSha256Hash = (value) =>
   crypto.createHash("sha256").update(value).digest("hex");
 
-const buildOrganizerCommitmentSnapshot = (agreementCodes = []) => {
-  const submittedCodes = new Set(agreementCodes);
+const canonicalStringify = (obj) => {
+  if (obj === null || obj === undefined) return JSON.stringify(obj);
+  if (obj instanceof Date) return JSON.stringify(obj.toISOString());
+  if (Array.isArray(obj)) {
+    return `[${obj.map(canonicalStringify).join(",")}]`;
+  }
+  if (typeof obj === "object") {
+    const sortedKeys = Object.keys(obj).sort();
+    const entries = sortedKeys.map(
+      (key) => `${JSON.stringify(key)}:${canonicalStringify(obj[key])}`
+    );
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(obj);
+};
 
+const buildOrganizerCommitmentSnapshot = () => {
   return {
-    title: ORGANIZER_COMMITMENT_TEMPLATE_V2.title,
-    version: ORGANIZER_COMMITMENT_TEMPLATE_V2.version,
-    language: ORGANIZER_COMMITMENT_TEMPLATE_V2.language,
-    sections: ORGANIZER_COMMITMENT_TEMPLATE_V2.sections.filter((section) =>
-      submittedCodes.has(section.code)
-    ).map((section) => ({
+    title: ORGANIZER_COMMITMENT_TEMPLATE_V2_1.title,
+    version: ORGANIZER_COMMITMENT_TEMPLATE_V2_1.version,
+    language: ORGANIZER_COMMITMENT_TEMPLATE_V2_1.language,
+    sections: ORGANIZER_COMMITMENT_TEMPLATE_V2_1.sections.map((section) => ({
       code: section.code,
       title: section.title,
       body: section.body,
@@ -93,22 +115,68 @@ const buildAgreementIntegrityHash = ({
   subjectId,
   signerName,
   version,
+  language,
   signedAt,
   agreementCodes,
   contentSnapshotHash,
+  signatureImageHash,
 }) => {
   const canonicalObject = {
     userId: String(userId),
     subjectType,
     subjectId: String(subjectId),
-    signerName,
     version,
+    language,
+    signerName,
     signedAt: signedAt.toISOString(),
     agreementCodes: [...agreementCodes].sort(),
     contentSnapshotHash,
+    signatureImageHash,
   };
 
-  return buildSha256Hash(JSON.stringify(canonicalObject));
+  return buildSha256Hash(canonicalStringify(canonicalObject));
+};
+
+const assertRequiredAgreementCodes = (agreementCodes = []) => {
+  const received = [...agreementCodes].sort();
+  const required = [...REQUIRED_AGREEMENT_CODES].sort();
+
+  if (
+    received.length !== required.length ||
+    received.some((code, index) => code !== required[index])
+  ) {
+    throw new AppError("Phải có đúng 7 điều khoản cam kết bắt buộc", 400);
+  }
+};
+
+const validateSignatureImageDataUrl = (signatureImageDataUrl = "") => {
+  if (signatureImageDataUrl.length > 200000) {
+    throw new AppError("Dữ liệu chữ ký quá lớn", 400);
+  }
+
+  if (!PNG_DATA_URL_PREFIX.test(signatureImageDataUrl)) {
+    throw new AppError("Chữ ký phải là ảnh PNG hợp lệ", 400);
+  }
+
+  const base64Payload = signatureImageDataUrl.replace(PNG_DATA_URL_PREFIX, "");
+  const decodedBuffer = Buffer.from(base64Payload, "base64");
+
+  if (decodedBuffer.length === 0) {
+    throw new AppError("Chữ ký rỗng", 400);
+  }
+
+  if (decodedBuffer.length > MAX_SIGNATURE_BYTES) {
+    throw new AppError("Chữ ký vượt quá 150KB", 400);
+  }
+
+  if (
+    decodedBuffer.length < PNG_MAGIC.length ||
+    !decodedBuffer.subarray(0, PNG_MAGIC.length).equals(PNG_MAGIC)
+  ) {
+    throw new AppError("Chữ ký phải là ảnh PNG hợp lệ", 400);
+  }
+
+  return decodedBuffer;
 };
 
 const sanitizeOrganizationLegitimacyFields = (payload) => {
@@ -205,7 +273,7 @@ class OrganizerRequestService {
     });
   }
 
-  async submitMyRequest(userId, payload) {
+  async submitMyRequest(userId, payload, reqContext = {}) {
     const user = await this.userRepository.findById(userId);
 
     if (!user) throw new AppError("Không tìm thấy người dùng", 404);
@@ -271,27 +339,31 @@ class OrganizerRequestService {
       };
       const newBank = await this.bankAccountRepository.create(bankData, session);
 
-      let commitmentData = undefined;
-      if (payload.commitment && (payload.commitment.isAccepted || payload.commitment.agreements?.length > 0)) {
-        const signedAt = new Date();
-        const signerName = payload.commitment.signerName;
-        const version = payload.commitment.version;
-        const agreements = Array.isArray(payload.commitment.agreements) ? payload.commitment.agreements : [];
-        const sortedAgreements = [...agreements].sort().join(',');
+      const commitment = payload.commitment || {};
+      const agreementVersion = ORGANIZER_COMMITMENT_VERSION.V2_1;
+      const agreements = Array.isArray(commitment.agreements)
+        ? commitment.agreements
+        : [];
+      assertRequiredAgreementCodes(agreements);
 
-        const hashPayload = `${userId}|${signerName}|${sortedAgreements}|${version}|${signedAt.toISOString()}`;
-        const signatureHash = crypto.createHash('sha256').update(hashPayload).digest('hex');
+      const signedAt = new Date();
+      const signerName = String(commitment.signerName || "").trim();
+      const signatureImageDataUrl = commitment.signatureImageDataUrl || "";
+      const decodedSignatureBuffer =
+        validateSignatureImageDataUrl(signatureImageDataUrl);
+      const signatureImageHash = buildSha256Hash(decodedSignatureBuffer);
 
-        commitmentData = {
-          isAccepted: payload.commitment.isAccepted || false,
-          agreements: agreements,
-          version,
-          signedAt,
-          signerName,
-          userId,
-          signatureHash
-        };
-      }
+      const commitmentData = {
+        isAccepted: true,
+        agreements,
+        version: agreementVersion,
+        signedAt,
+        signerName,
+        userId,
+        signatureHash: signatureImageHash,
+        signedIpAddress: reqContext.ipAddress || "",
+        signedUserAgent: reqContext.userAgent || "",
+      };
 
       const legitimacyFields = sanitizeOrganizationLegitimacyFields(payload);
 
@@ -334,50 +406,62 @@ class OrganizerRequestService {
 
       let requestForResponse = newRequest;
 
-      if (commitmentData?.agreements?.length) {
-        const subjectType = AGREEMENT_SUBJECT_TYPE.ORGANIZER_ONBOARDING;
-        const agreementVersion = ORGANIZER_COMMITMENT_TEMPLATE_V2.version;
-        const contentSnapshot = buildOrganizerCommitmentSnapshot(
-          commitmentData.agreements
-        );
-        const contentSnapshotHash = buildSha256Hash(
-          JSON.stringify(contentSnapshot)
-        );
-        const integrityHash = buildAgreementIntegrityHash({
+      const subjectType = AGREEMENT_SUBJECT_TYPE.ORGANIZER_ONBOARDING;
+      const contentSnapshot = buildOrganizerCommitmentSnapshot();
+      const contentSnapshotHash = buildSha256Hash(
+        canonicalStringify(contentSnapshot)
+      );
+      const integrityHash = buildAgreementIntegrityHash({
+        userId,
+        subjectType,
+        subjectId: newRequest._id,
+        signerName: commitmentData.signerName,
+        version: agreementVersion,
+        language: ORGANIZER_COMMITMENT_TEMPLATE_V2_1.language,
+        signedAt: commitmentData.signedAt,
+        agreementCodes: commitmentData.agreements,
+        contentSnapshotHash,
+        signatureImageHash,
+      });
+
+      const signatureSnapshot = {
+        method: "DRAWN",
+        signerName: commitmentData.signerName,
+        signedAt: commitmentData.signedAt,
+        signatureImageDataUrl,
+        signatureImageHash,
+        metadata: {
+          userAgent: reqContext.userAgent || "",
+          ipAddress: reqContext.ipAddress || "",
+        },
+      };
+
+      const agreementRecord = await this.agreementRecordRepository.create(
+        {
           userId,
           subjectType,
           subjectId: newRequest._id,
-          signerName: commitmentData.signerName,
+          status: AGREEMENT_RECORD_STATUS.ACTIVE,
           version: agreementVersion,
+          language: ORGANIZER_COMMITMENT_TEMPLATE_V2_1.language,
+          signerName: commitmentData.signerName,
           signedAt: commitmentData.signedAt,
           agreementCodes: commitmentData.agreements,
-          contentSnapshotHash,
-        });
+          contentSnapshot,
+          signatureSnapshot,
+          integrityHash,
+          isSealed: true,
+          sealedAt: commitmentData.signedAt,
+          metadata: {},
+        },
+        session
+      );
 
-        const agreementRecord = await this.agreementRecordRepository.create(
-          {
-            userId,
-            subjectType,
-            subjectId: newRequest._id,
-            status: AGREEMENT_RECORD_STATUS.ACTIVE,
-            version: agreementVersion,
-            language: ORGANIZER_COMMITMENT_TEMPLATE_V2.language,
-            signerName: commitmentData.signerName,
-            signedAt: commitmentData.signedAt,
-            agreementCodes: commitmentData.agreements,
-            contentSnapshot,
-            integrityHash,
-            metadata: {},
-          },
-          session
-        );
-
-        requestForResponse = await this.organizerRequestRepository.updateById(
-          newRequest._id,
-          { agreementRecordId: agreementRecord._id },
-          session
-        );
-      }
+      requestForResponse = await this.organizerRequestRepository.updateById(
+        newRequest._id,
+        { agreementRecordId: agreementRecord._id },
+        session
+      );
 
       await this.userRepository.updateById(
         userId,
