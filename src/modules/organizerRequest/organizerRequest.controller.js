@@ -116,13 +116,14 @@ class OrganizerRequestController {
   approveRequest = async (req, res, next) => {
     try {
       const { id } = req.params;
+      const { reviewReason, checklist } = req.body;
       const adminId = req.user.userId;
-      const { reviewReason } = req.body;
 
       const result = await this.organizerRequestService.approveRequest(
         id,
         adminId,
-        reviewReason
+        reviewReason,
+        checklist
       );
 
       return ApiResponse.success(
