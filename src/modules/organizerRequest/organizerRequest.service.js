@@ -5,6 +5,11 @@ import {
 } from "./organizerRequest.constant.js";
 import { DOMAIN_EVENTS } from "../../config/notification.js";
 import crypto from "crypto";
+import {
+  AGREEMENT_RECORD_STATUS,
+  AGREEMENT_SUBJECT_TYPE,
+  ORGANIZER_COMMITMENT_TEMPLATE_V2,
+} from "../agreementRecord/agreementRecord.constant.js";
 
 const LEGAL_TYPES_REQUIRING_REGISTRATION = [
   ORGANIZATION_LEGAL_TYPE.COMPANY,
@@ -62,6 +67,50 @@ const normalizeProofLinks = (value) => {
   return value.map((link) => String(link).trim()).filter(Boolean);
 };
 
+const buildSha256Hash = (value) =>
+  crypto.createHash("sha256").update(value).digest("hex");
+
+const buildOrganizerCommitmentSnapshot = (agreementCodes = []) => {
+  const submittedCodes = new Set(agreementCodes);
+
+  return {
+    title: ORGANIZER_COMMITMENT_TEMPLATE_V2.title,
+    version: ORGANIZER_COMMITMENT_TEMPLATE_V2.version,
+    language: ORGANIZER_COMMITMENT_TEMPLATE_V2.language,
+    sections: ORGANIZER_COMMITMENT_TEMPLATE_V2.sections.filter((section) =>
+      submittedCodes.has(section.code)
+    ).map((section) => ({
+      code: section.code,
+      title: section.title,
+      body: section.body,
+    })),
+  };
+};
+
+const buildAgreementIntegrityHash = ({
+  userId,
+  subjectType,
+  subjectId,
+  signerName,
+  version,
+  signedAt,
+  agreementCodes,
+  contentSnapshotHash,
+}) => {
+  const canonicalObject = {
+    userId: String(userId),
+    subjectType,
+    subjectId: String(subjectId),
+    signerName,
+    version,
+    signedAt: signedAt.toISOString(),
+    agreementCodes: [...agreementCodes].sort(),
+    contentSnapshotHash,
+  };
+
+  return buildSha256Hash(JSON.stringify(canonicalObject));
+};
+
 const sanitizeOrganizationLegitimacyFields = (payload) => {
   const organizationLegalType = payload.organizationLegalType;
   const taxCode = normalizeOptionalString(payload.taxCode);
@@ -106,6 +155,7 @@ class OrganizerRequestService {
     userRepository,
     bankAccountRepository,
     organizerRequestRepository,
+    agreementRecordRepository,
     transactionManager,
     eventBus,
     adminRepository,
@@ -113,6 +163,7 @@ class OrganizerRequestService {
     this.userRepository = userRepository;
     this.bankAccountRepository = bankAccountRepository;
     this.organizerRequestRepository = organizerRequestRepository;
+    this.agreementRecordRepository = agreementRecordRepository;
     this.transactionManager = transactionManager;
     this.eventBus = eventBus;
     this.adminRepository = adminRepository;
@@ -281,15 +332,62 @@ class OrganizerRequestService {
         session
       );
 
+      let requestForResponse = newRequest;
+
+      if (commitmentData?.agreements?.length) {
+        const subjectType = AGREEMENT_SUBJECT_TYPE.ORGANIZER_ONBOARDING;
+        const agreementVersion = ORGANIZER_COMMITMENT_TEMPLATE_V2.version;
+        const contentSnapshot = buildOrganizerCommitmentSnapshot(
+          commitmentData.agreements
+        );
+        const contentSnapshotHash = buildSha256Hash(
+          JSON.stringify(contentSnapshot)
+        );
+        const integrityHash = buildAgreementIntegrityHash({
+          userId,
+          subjectType,
+          subjectId: newRequest._id,
+          signerName: commitmentData.signerName,
+          version: agreementVersion,
+          signedAt: commitmentData.signedAt,
+          agreementCodes: commitmentData.agreements,
+          contentSnapshotHash,
+        });
+
+        const agreementRecord = await this.agreementRecordRepository.create(
+          {
+            userId,
+            subjectType,
+            subjectId: newRequest._id,
+            status: AGREEMENT_RECORD_STATUS.ACTIVE,
+            version: agreementVersion,
+            language: ORGANIZER_COMMITMENT_TEMPLATE_V2.language,
+            signerName: commitmentData.signerName,
+            signedAt: commitmentData.signedAt,
+            agreementCodes: commitmentData.agreements,
+            contentSnapshot,
+            integrityHash,
+            metadata: {},
+          },
+          session
+        );
+
+        requestForResponse = await this.organizerRequestRepository.updateById(
+          newRequest._id,
+          { agreementRecordId: agreementRecord._id },
+          session
+        );
+      }
+
       await this.userRepository.updateById(
         userId,
         { "kyc.status": "PENDING" },
         session
       );
 
-      this._safeEmitSubmittedEvent(newRequest, user);
+      this._safeEmitSubmittedEvent(requestForResponse, user);
 
-      return newRequest;
+      return requestForResponse;
     });
   }
 
