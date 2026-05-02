@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import {
   ORGANIZER_REQUEST_STATUS,
   ORGANIZATION_TYPE,
+  ORGANIZATION_LEGAL_TYPE,
 } from "./organizerRequest.constant.js";
 
 const pointLocationSchema = new mongoose.Schema(
@@ -78,11 +79,61 @@ const organizerRequestSchema = new mongoose.Schema(
       maxlength: 255,
     },
 
-    idCardFront: { type: documentSchema, required: true },
-    idCardBack: { type: documentSchema, required: true },
-    selfie: { type: documentSchema, required: true },
+    organizationLegalType: {
+      type: String,
+      enum: Object.values(ORGANIZATION_LEGAL_TYPE),
+      default: undefined,
+    },
+    taxCode: {
+      type: String,
+      trim: true,
+      default: undefined,
+    },
+    legalRegistrationNumber: {
+      type: String,
+      trim: true,
+      default: undefined,
+    },
+    activityDescription: {
+      type: String,
+      trim: true,
+      default: undefined,
+    },
+    proofLinks: {
+      type: [String],
+      default: undefined,
+    },
+
+    idCardFront: { type: documentSchema, default: null },
+    idCardBack: { type: documentSchema, default: null },
+    selfie: { type: documentSchema, default: null },
     businessLicense: { type: documentSchema, default: null },
     bankProof: { type: documentSchema, default: null },
+
+    ekycMetadata: {
+      providerName: { type: String, trim: true, default: "" },
+      providerSessionId: { type: String, trim: true, default: "" },
+      verificationStatus: { 
+        type: String, 
+        enum: ["NOT_STARTED", "PENDING", "VERIFIED", "FAILED", "EXPIRED", "MANUAL_REVIEW"], 
+        default: "NOT_STARTED" 
+      },
+      resultSummary: { type: String, trim: true, default: "" },
+      score: { type: Number, default: 0 },
+      verifiedAt: { type: Date, default: null }
+    },
+
+    commitment: {
+      isAccepted: { type: Boolean, default: false },
+      agreements: { type: [String], default: [] },
+      version: { type: String, trim: true, default: "" },
+      signedAt: { type: Date, default: null },
+      signerName: { type: String, trim: true, default: "" },
+      userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      signatureHash: { type: String, default: "" },
+      signedIpAddress: { type: String, default: "" },
+      signedUserAgent: { type: String, default: "" }
+    },
 
     bankAccountId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -122,6 +173,32 @@ const organizerRequestSchema = new mongoose.Schema(
     reviewReason: { type: String, default: "", trim: true, maxlength: 1000 },
     submittedAt: { type: Date, default: Date.now },
     reviewedAt: { type: Date, default: null },
+
+    adminReview: {
+      type: {
+        checklist: {
+          manualIdentityReviewAcknowledged: { type: Boolean, default: false },
+          commitmentReviewed: { type: Boolean, default: false },
+          organizationInfoReviewed: { type: Boolean, default: false },
+          bankInfoReviewed: { type: Boolean, default: false },
+          riskFlagsReviewed: { type: Boolean, default: false }
+        },
+        checklistVersion: { type: String, default: "1.0" },
+        reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+        reviewedAt: { type: Date, default: null },
+        decision: { type: String, enum: ['APPROVED'] },
+        decisionReason: { type: String, trim: true },
+        checklistSnapshot: {
+          requestStatusAtReview: String,
+          ekycStatusAtReview: String,
+          commitmentVersionAtReview: String,
+          commitmentSignedAtReview: Date,
+          riskFlagsAtReview: [String],
+          checklistVersion: String
+        }
+      },
+      default: undefined
+    },
 
     resubmissionCount: { type: Number, default: 0, min: 0 },
   },
