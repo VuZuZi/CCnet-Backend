@@ -1,6 +1,16 @@
 import AppError from "../../core/AppError.js";
-import { ORGANIZER_REQUEST_STATUS } from "./organizerRequest.constant.js";
+import {
+  ORGANIZER_REQUEST_STATUS,
+  ORGANIZATION_LEGAL_TYPE,
+} from "./organizerRequest.constant.js";
 import { DOMAIN_EVENTS } from "../../config/notification.js";
+import crypto from "crypto";
+
+const LEGAL_TYPES_REQUIRING_REGISTRATION = [
+  ORGANIZATION_LEGAL_TYPE.COMPANY,
+  ORGANIZATION_LEGAL_TYPE.REGISTERED_NGO,
+  ORGANIZATION_LEGAL_TYPE.HOUSEHOLD_BUSINESS,
+];
 
 const normalizeLocation = (location) => {
   if (!location || typeof location !== "object") return null;
@@ -38,6 +48,57 @@ const normalizeBankBin = (value) => {
   }
 
   return raw.slice(0, 10);
+};
+
+const normalizeOptionalString = (value) => {
+  if (typeof value !== "string") return undefined;
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+};
+
+const normalizeProofLinks = (value) => {
+  if (!Array.isArray(value)) return undefined;
+  return value.map((link) => String(link).trim()).filter(Boolean);
+};
+
+const sanitizeOrganizationLegitimacyFields = (payload) => {
+  const organizationLegalType = payload.organizationLegalType;
+  const taxCode = normalizeOptionalString(payload.taxCode);
+  const legalRegistrationNumber = normalizeOptionalString(
+    payload.legalRegistrationNumber
+  );
+  const activityDescription = normalizeOptionalString(
+    payload.activityDescription
+  );
+  const proofLinks = normalizeProofLinks(payload.proofLinks);
+
+  const sanitized = { organizationLegalType };
+
+  if (LEGAL_TYPES_REQUIRING_REGISTRATION.includes(organizationLegalType)) {
+    if (taxCode) sanitized.taxCode = taxCode;
+    if (legalRegistrationNumber) {
+      sanitized.legalRegistrationNumber = legalRegistrationNumber;
+    }
+    return sanitized;
+  }
+
+  if (organizationLegalType === ORGANIZATION_LEGAL_TYPE.COMMUNITY_GROUP) {
+    if (activityDescription) {
+      sanitized.activityDescription = activityDescription;
+    }
+    if (proofLinks?.length) sanitized.proofLinks = proofLinks;
+    return sanitized;
+  }
+
+  if (organizationLegalType === ORGANIZATION_LEGAL_TYPE.OTHER) {
+    if (activityDescription) {
+      sanitized.activityDescription = activityDescription;
+    }
+    if (proofLinks) sanitized.proofLinks = proofLinks;
+  }
+
+  return sanitized;
 };
 
 class OrganizerRequestService {
@@ -159,6 +220,30 @@ class OrganizerRequestService {
       };
       const newBank = await this.bankAccountRepository.create(bankData, session);
 
+      let commitmentData = undefined;
+      if (payload.commitment && (payload.commitment.isAccepted || payload.commitment.agreements?.length > 0)) {
+        const signedAt = new Date();
+        const signerName = payload.commitment.signerName;
+        const version = payload.commitment.version;
+        const agreements = Array.isArray(payload.commitment.agreements) ? payload.commitment.agreements : [];
+        const sortedAgreements = [...agreements].sort().join(',');
+
+        const hashPayload = `${userId}|${signerName}|${sortedAgreements}|${version}|${signedAt.toISOString()}`;
+        const signatureHash = crypto.createHash('sha256').update(hashPayload).digest('hex');
+
+        commitmentData = {
+          isAccepted: payload.commitment.isAccepted || false,
+          agreements: agreements,
+          version,
+          signedAt,
+          signerName,
+          userId,
+          signatureHash
+        };
+      }
+
+      const legitimacyFields = sanitizeOrganizationLegitimacyFields(payload);
+
       const requestData = {
         userId,
         fullNameSnapshot: payload.fullNameSnapshot || user.fullName || "",
@@ -169,11 +254,16 @@ class OrganizerRequestService {
         organizationName: payload.organizationName,
         organizationType: payload.organizationType,
         organizationWebsite: payload.organizationWebsite || "",
-        idCardFront: payload.idCardFront,
-        idCardBack: payload.idCardBack,
-        selfie: payload.selfie,
+        ...legitimacyFields,
+        idCardFront: payload.idCardFront || null,
+        idCardBack: payload.idCardBack || null,
+        selfie: payload.selfie || null,
         businessLicense: payload.businessLicense || null,
         bankProof: payload.bankProof || null,
+        ekycMetadata: {
+          verificationStatus: "MANUAL_REVIEW"
+        },
+        commitment: commitmentData,
         bankAccountId: newBank._id,
         bankName: payload.bankName,
         bankAccountNumber: payload.bankAccountNumber,
@@ -301,11 +391,20 @@ class OrganizerRequestService {
     return await this.adminRepository.findOrganizerRequestActionLogs(query);
   }
 
-  async approveRequest(requestId, adminId, reviewReason) {
+  async approveRequest(requestId, adminId, reviewReason, checklist) {
     const normalizedReason = this._ensureReason(
       reviewReason,
       "Lý do duyệt là bắt buộc"
     );
+
+    if (!checklist ||
+        !checklist.manualIdentityReviewAcknowledged ||
+        !checklist.commitmentReviewed ||
+        !checklist.organizationInfoReviewed ||
+        !checklist.bankInfoReviewed ||
+        !checklist.riskFlagsReviewed) {
+      throw new AppError("Bắt buộc xác nhận tất cả các mục kiểm tra trước khi phê duyệt", 400);
+    }
 
     return await this.transactionManager.runInTransaction(async (session) => {
       const request = await this.organizerRequestRepository.findById(requestId);
@@ -335,13 +434,39 @@ class OrganizerRequestService {
         reviewReason: request.reviewReason || "",
       };
 
+      const now = new Date();
+
+      const adminReview = {
+        checklist: {
+          manualIdentityReviewAcknowledged: Boolean(checklist.manualIdentityReviewAcknowledged),
+          commitmentReviewed: Boolean(checklist.commitmentReviewed),
+          organizationInfoReviewed: Boolean(checklist.organizationInfoReviewed),
+          bankInfoReviewed: Boolean(checklist.bankInfoReviewed),
+          riskFlagsReviewed: Boolean(checklist.riskFlagsReviewed)
+        },
+        checklistVersion: "1.0",
+        reviewedBy: adminId,
+        reviewedAt: now,
+        decision: ORGANIZER_REQUEST_STATUS.APPROVED,
+        decisionReason: normalizedReason,
+        checklistSnapshot: {
+          requestStatusAtReview: request.status,
+          ekycStatusAtReview: request.ekycMetadata?.verificationStatus || "NOT_STARTED",
+          commitmentVersionAtReview: request.commitment?.version || "",
+          commitmentSignedAtReview: request.commitment?.signedAt || null,
+          riskFlagsAtReview: request.riskFlags || [],
+          checklistVersion: "1.0"
+        }
+      };
+
       const updatedRequest = await this.organizerRequestRepository.updateById(
         requestId,
         {
           status: ORGANIZER_REQUEST_STATUS.APPROVED,
           reviewedBy: adminId,
-          reviewedAt: new Date(),
+          reviewedAt: now,
           reviewReason: normalizedReason,
+          adminReview: adminReview,
         },
         session
       );
