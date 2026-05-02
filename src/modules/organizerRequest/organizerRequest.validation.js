@@ -1,12 +1,14 @@
 import { z } from "zod";
 import { ORGANIZATION_TYPE, ORGANIZATION_LEGAL_TYPE } from "./organizerRequest.constant.js";
 
-const EXACT_AGREEMENTS = [
-  "TRUTHFUL_INFORMATION",
-  "TERMS",
-  "FINANCIAL_RESPONSIBILITY",
-  "TRANSPARENCY_REPORTING",
-  "PLATFORM_ENFORCEMENT"
+const REQUIRED_AGREEMENT_CODES = [
+  "TRUTHFUL_INFO",
+  "REPRESENTATION",
+  "PROPER_USE",
+  "FINANCIAL_USE",
+  "PROGRESS_REPORTING",
+  "COOPERATION",
+  "ACCOUNTABILITY",
 ];
 
 const VN_PHONE_REGEX = /^(?:\+84|0)(?:3|5|7|8|9)\d{8}$/;
@@ -115,7 +117,7 @@ export const submitOrganizerRequestSchema = z
     ),
     bankProof: z.preprocess(
       (value) => (value === null ? undefined : value),
-      documentPayloadSchema.optional()
+      documentPayloadSchema
     ),
     bankName: z.string().min(2).max(200),
     bankBin: z.string().trim().max(10).optional(),
@@ -126,35 +128,38 @@ export const submitOrganizerRequestSchema = z
       .string()
       .regex(ACCOUNT_NAME_REGEX, "Tên chủ tài khoản không hợp lệ"),
     notes: z.string().max(1000).optional().default(""),
-    commitment: z.object({
-      isAccepted: z.boolean().optional(),
-      agreements: z.array(z.enum([
-        "TRUTHFUL_INFORMATION",
-        "TERMS",
-        "FINANCIAL_RESPONSIBILITY",
-        "TRANSPARENCY_REPORTING",
-        "PLATFORM_ENFORCEMENT"
-      ])).optional(),
-      signerName: z.string().min(2, "Tên người ký tối thiểu 2 ký tự"),
-      version: z.string().min(1)
-    }).refine(data => {
-      // Legacy compatibility: if version is not 2.0 or higher, rely on isAccepted
-      if (data.version !== "2.0" && (!data.agreements || data.agreements.length === 0)) {
-        return data.isAccepted === true;
-      }
-
-      // V2 strict validation
-      if (!data.agreements || data.agreements.length !== EXACT_AGREEMENTS.length) return false;
-      const unique = new Set(data.agreements);
-      if (unique.size !== EXACT_AGREEMENTS.length) return false;
-      for (const code of EXACT_AGREEMENTS) {
-        if (!unique.has(code)) return false;
-      }
-      return true;
-    }, {
-      message: "Bạn phải đồng ý với tất cả các điều khoản cam kết hợp lệ",
-      path: ["agreements"]
-    }).optional(),
+    commitment: z
+      .object({
+        agreements: z.array(z.enum(REQUIRED_AGREEMENT_CODES)).length(7),
+        signerName: z
+          .string()
+          .trim()
+          .min(2, "Tên người ký tối thiểu 2 ký tự"),
+        version: z.literal("2.1"),
+        signatureImageDataUrl: z
+          .string()
+          .min(100, "Chữ ký không hợp lệ")
+          .max(200000, "Dữ liệu chữ ký quá lớn (tối đa 200,000 ký tự)")
+          .regex(
+            /^data:image\/png;base64,[A-Za-z0-9+/=]+$/,
+            "Chữ ký phải là PNG data URL hợp lệ"
+          ),
+      })
+      .strict()
+      .refine(
+        (data) => {
+          const received = [...data.agreements].sort();
+          const required = [...REQUIRED_AGREEMENT_CODES].sort();
+          return (
+            received.length === required.length &&
+            received.every((code, index) => code === required[index])
+          );
+        },
+        {
+          message: "Phải có đúng 7 điều khoản cam kết bắt buộc",
+          path: ["agreements"],
+        }
+      ),
   })
   .strict()
   .superRefine((data, ctx) => {

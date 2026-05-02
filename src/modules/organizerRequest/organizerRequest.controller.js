@@ -12,7 +12,14 @@ class OrganizerRequestController {
 
       const requestDoc = await this.organizerRequestService.submitMyRequest(
         userId,
-        payload
+        payload,
+        {
+          userAgent: req.headers["user-agent"] || "",
+          ipAddress:
+            req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
+            req.ip ||
+            "",
+        }
       );
 
       const { microDepositAmount, ...safeResponse } = requestDoc;
