@@ -22,6 +22,7 @@ import {
 
 import disbursementRoutes from "../modules/disbursement/disbursement.routes.js";
 import aiRoutes from "../modules/ai/ai.routes.js";
+import verificationCheckAdminRouter from "../modules/verificationCheck/verificationCheck.routes.js";
 
 const API_PREFIX = "/api/v1";
 
@@ -49,6 +50,7 @@ export const configureRoutes = (app, { notificationModule }) => {
     { path: "/disbursement", handler: disbursementRoutes },
     { path: "/milestone-evidence", handler: milestoneEvidenceRoutes },
     { path: "/ai", handler: aiRoutes },
+    { path: "/admin/organizer-requests", handler: verificationCheckAdminRouter },
 
   ];
 

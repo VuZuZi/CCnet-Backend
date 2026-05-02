@@ -8,6 +8,7 @@ import CloudinaryProvider from "../core/CloudinaryProvider.js";
 import JobQueue from "../core/JobQueue.js";
 import TransactionManager from "../core/TransactionManager.js";
 import SepayProvider from "../core/payment/sepay-provider.js";
+import MockIdentityProvider from "../core/verification/MockIdentityProvider.js";
 
 import TransactionSSEService from "../modules/transaction/services/transaction-sse.service.js";
 import DisbursementSSEService from "../modules/disbursement/services/disbursement-sse.service.js";
@@ -49,6 +50,7 @@ export const initializeContainer = () => {
     googleAiProvider: asClass(GoogleAiProvider).scoped(),
     groqAiProvider: asClass(GroqAiProvider).scoped(),
     aiProviderFactory: asClass(AiProviderFactory).scoped(),
+    identityVerificationProvider: asClass(MockIdentityProvider).singleton(),
   });
 
   container.loadModules(
