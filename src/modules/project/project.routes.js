@@ -36,10 +36,13 @@ const resolveProjectController = (req) => {
   if (!req.scope) {
     throw new Error("Bắt buộc phải có req.scope. Kiểm tra lại di.middleware.");
   }
+
   const controller = req.scope.resolve("projectController");
+
   if (!controller) {
     throw new Error("Không resolve được projectController.");
   }
+
   return controller;
 };
 
@@ -101,27 +104,27 @@ router.get(
   "/explore",
   optionalAuthenticate,
   validateQuery(exploreQuerySchema),
-  execute("getExploreProjects")
+  execute("getExploreProjects"),
 );
 
 router.get(
   "/map",
   optionalAuthenticate,
   validateQuery(mapQuerySchema),
-  execute("getMapProjects")
+  execute("getMapProjects"),
 );
 
 router.get(
   "/organizer/stats",
   ...organizerOnly,
-  execute("getWorkspaceStats")
+  execute("getWorkspaceStats"),
 );
 
 router.get(
   "/organizer/my-projects",
   ...organizerOnly,
   validateQuery(workspaceQuerySchema),
-  execute("getWorkspaceProjects")
+  execute("getWorkspaceProjects"),
 );
 
 router.get("/:id/feed/posts", maybeAuthenticate, execute("getFeedPosts"));
@@ -130,31 +133,31 @@ router.post(
   "/:id/feed/posts",
   authenticate,
   uploadMedia.single("media"),
-  execute("createFeedPost")
+  execute("createFeedPost"),
 );
 
 router.get(
   "/:id/feed/posts/:postId/comments",
   maybeAuthenticate,
-  execute("listFeedComments")
+  execute("listFeedComments"),
 );
 
 router.post(
   "/:id/feed/posts/:postId/comments",
   authenticate,
-  execute("createFeedComment")
+  execute("createFeedComment"),
 );
 
 router.post(
   "/:id/feed/posts/:postId/like",
   authenticate,
-  execute("toggleFeedPostLike")
+  execute("toggleFeedPostLike"),
 );
 
 router.post(
   "/:id/feed/comments/:commentId/like",
   authenticate,
-  execute("toggleFeedCommentLike")
+  execute("toggleFeedCommentLike"),
 );
 
 router.get("/:id", optionalAuthenticate, execute("getDetail"));
@@ -163,71 +166,71 @@ router.post(
   "/",
   ...organizerKycTier1,
   validateBody(createDraftSchema),
-  execute("createDraft")
+  execute("createDraft"),
 );
 
 router.put(
   "/:id/draft",
   ...organizerKycTier1,
   validateBody(updateDraftSchema),
-  execute("updateDraft")
+  execute("updateDraft"),
 );
 
 router.get(
   "/:id/draft",
   ...organizerOnly,
-  execute("getDraftDetail")
+  execute("getDraftDetail"),
 );
 
 router.get(
   "/:id/revision",
   ...organizerOnly,
-  execute("getRevisionDetail")
+  execute("getRevisionDetail"),
 );
 
 router.put(
   "/:id/revision",
   ...organizerOnly,
   validateBody(updateDraftSchema),
-  execute("updateRevision")
+  execute("updateRevision"),
 );
 
 router.post(
   "/:id/resubmit",
   ...organizerSubmitGuards,
-  execute("resubmitRevision")
+  execute("resubmitRevision"),
 );
 
 router.get(
   "/:id/updating",
   ...organizerOnly,
-  execute("getUpdatingDetail")
+  execute("getUpdatingDetail"),
 );
 
 router.put(
   "/:id/updating",
   ...organizerOnly,
   validateBody(updateUpdatingProjectSchema),
-  execute("updateUpdatingProject")
+  execute("updateUpdatingProject"),
 );
 
 router.post(
   "/:id/updating/confirm",
   ...organizerOnly,
-  execute("confirmUpdatingProject")
+  execute("confirmUpdatingProject"),
 );
 
 router.post(
   "/:id/submit",
   ...organizerSubmitGuards,
-  execute("submitForApproval")
+  execute("submitForApproval"),
 );
 
 router.post(
   "/:id/report",
   authenticate,
   validateBody(reportProjectSchema),
-  execute("reportProject")
+  execute("reportProject"),
 );
 
 export default router;

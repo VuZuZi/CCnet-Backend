@@ -31,7 +31,7 @@ class ProjectController {
         req.body,
       );
 
-      return ApiResponse.created(res, result, "Đã lưu bản nháp dự án (Bước 1)");
+      return ApiResponse.created(res, result, "Đã lưu bản nháp dự án.");
     } catch (error) {
       next(error);
     }
@@ -48,7 +48,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Đã cập nhật bản nháp dự án (Bước 2)",
+        "Đã cập nhật bản nháp dự án.",
       );
     } catch (error) {
       next(error);
@@ -63,7 +63,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Lấy danh sách dự án nổi bật thành công",
+        "Lấy danh sách dự án nổi bật thành công.",
       );
     } catch (error) {
       next(error);
@@ -77,7 +77,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Lấy danh sách dự án cần tình nguyện viên thành công",
+        "Lấy danh sách dự án cần tình nguyện viên thành công.",
       );
     } catch (error) {
       next(error);
@@ -91,7 +91,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Láº¥y thá»‘ng kÃª landing page thÃ nh cÃ´ng",
+        "Lấy thống kê landing page thành công.",
       );
     } catch (error) {
       next(error);
@@ -109,7 +109,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Lấy danh sách dự án thành công",
+        "Lấy danh sách dự án thành công.",
       );
     } catch (error) {
       next(error);
@@ -124,7 +124,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Lấy dữ liệu bản đồ dự án thành công",
+        "Lấy dữ liệu bản đồ dự án thành công.",
       );
     } catch (error) {
       next(error);
@@ -141,7 +141,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Lấy chi tiết dự án thành công",
+        "Lấy chi tiết dự án thành công.",
       );
     } catch (error) {
       next(error);
@@ -158,7 +158,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Lấy chi tiết bản nháp dự án thành công",
+        "Lấy chi tiết bản nháp dự án thành công.",
       );
     } catch (error) {
       next(error);
@@ -175,7 +175,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Láº¥y chi tiáº¿t báº£n chá»‰nh sá»­a dá»± Ă¡n thĂ nh cĂ´ng",
+        "Lấy dữ liệu dự án cần chỉnh sửa thành công.",
       );
     } catch (error) {
       next(error);
@@ -193,7 +193,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "ÄĂ£ cáº­p nháº­t báº£n chá»‰nh sá»­a dá»± Ă¡n",
+        "Đã cập nhật nội dung chỉnh sửa dự án.",
       );
     } catch (error) {
       next(error);
@@ -210,7 +210,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "ÄĂ£ gá»­i láº¡i dá»± Ă¡n cho quáº£n trá»‹ viĂªn kiá»ƒm duyá»‡t",
+        "Đã gửi lại dự án cho Ban quản trị kiểm duyệt.",
       );
     } catch (error) {
       next(error);
@@ -227,7 +227,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Lấy chi tiết dự án đang cập nhật thành công",
+        "Lấy chi tiết dự án đang cập nhật thành công.",
       );
     } catch (error) {
       next(error);
@@ -245,7 +245,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Đã cập nhật milestone của dự án",
+        "Đã cập nhật milestone của dự án.",
       );
     } catch (error) {
       next(error);
@@ -262,7 +262,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Đã gửi xác nhận cập nhật dự án cho quản trị viên",
+        "Đã gửi xác nhận cập nhật dự án cho quản trị viên.",
       );
     } catch (error) {
       next(error);
@@ -276,7 +276,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Lấy thống kê Workspace thành công",
+        "Lấy thống kê Workspace thành công.",
       );
     } catch (error) {
       next(error);
@@ -293,7 +293,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Lấy danh sách dự án Workspace thành công",
+        "Lấy danh sách dự án Workspace thành công.",
       );
     } catch (error) {
       next(error);
@@ -310,7 +310,7 @@ class ProjectController {
       return ApiResponse.success(
         res,
         result,
-        "Dự án đã được gửi để Ban quản trị kiểm duyệt thành công",
+        "Dự án đã được gửi để Ban quản trị kiểm duyệt thành công.",
       );
     } catch (error) {
       next(error);
@@ -333,7 +333,7 @@ class ProjectController {
       return ApiResponse.created(
         res,
         report,
-        "Báo cáo dự án đã gửi thành công",
+        "Báo cáo dự án đã gửi thành công.",
       );
     } catch (error) {
       next(error);
@@ -348,7 +348,7 @@ class ProjectController {
         userId: getUserId(req),
       });
 
-      return ApiResponse.success(res, result, "Lấy bài viết dự án thành công");
+      return ApiResponse.success(res, result, "Lấy bài viết dự án thành công.");
     } catch (error) {
       next(error);
     }
@@ -362,7 +362,7 @@ class ProjectController {
         media: buildUploadedMedia(req.file),
       });
 
-      return ApiResponse.created(res, result, "Đăng bài thành công");
+      return ApiResponse.created(res, result, "Đăng bài thành công.");
     } catch (error) {
       next(error);
     }
@@ -380,7 +380,7 @@ class ProjectController {
         },
       );
 
-      return ApiResponse.success(res, result, "Lấy bình luận thành công");
+      return ApiResponse.success(res, result, "Lấy bình luận thành công.");
     } catch (error) {
       next(error);
     }
@@ -397,7 +397,7 @@ class ProjectController {
         },
       );
 
-      return ApiResponse.created(res, result, "Bình luận thành công");
+      return ApiResponse.created(res, result, "Bình luận thành công.");
     } catch (error) {
       next(error);
     }
@@ -411,7 +411,7 @@ class ProjectController {
         getUserId(req),
       );
 
-      return ApiResponse.success(res, result, "Cập nhật thả tim thành công");
+      return ApiResponse.success(res, result, "Cập nhật thả tim thành công.");
     } catch (error) {
       next(error);
     }
@@ -425,7 +425,7 @@ class ProjectController {
         getUserId(req),
       );
 
-      return ApiResponse.success(res, result, "Cập nhật thả tim thành công");
+      return ApiResponse.success(res, result, "Cập nhật thả tim thành công.");
     } catch (error) {
       next(error);
     }

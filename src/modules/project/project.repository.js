@@ -80,6 +80,11 @@ const ORGANIZER_CARD_POPULATE = {
   select: "fullName avatar",
 };
 
+const REVIEW_EDITABLE_STATUSES = [
+  PROJECT_STATUS.REVISION_REQUESTED,
+  PROJECT_STATUS.REJECTED,
+];
+
 const toObjectId = (value) =>
   value instanceof mongoose.Types.ObjectId
     ? value
@@ -639,7 +644,7 @@ class ProjectRepository {
       {
         _id: toObjectId(projectId),
         organizerId: toObjectId(organizerId),
-        status: PROJECT_STATUS.REVISION_REQUESTED,
+        status: { $in: REVIEW_EDITABLE_STATUSES },
       },
       { $set: updateData },
       { new: true, runValidators: true, session },
@@ -657,7 +662,7 @@ class ProjectRepository {
       {
         _id: toObjectId(projectId),
         organizerId: toObjectId(organizerId),
-        status: PROJECT_STATUS.REVISION_REQUESTED,
+        status: { $in: REVIEW_EDITABLE_STATUSES },
       },
       { $set: updateData },
       { new: true, runValidators: true, session },
@@ -830,12 +835,14 @@ class ProjectRepository {
   }
 
   async incrementMilestoneDisbursed(projectId, milestoneId, amount, session = null) {
-        return await Project.findOneAndUpdate(
-            { _id: projectId, "milestones.milestoneId": milestoneId },
-            { $inc: { "milestones.$.actualDisbursedAmount": amount } },
-            { new: true, session }
-        ).lean().exec();
-    }
+    return await Project.findOneAndUpdate(
+      { _id: projectId, "milestones.milestoneId": milestoneId },
+      { $inc: { "milestones.$.actualDisbursedAmount": amount } },
+      { new: true, session },
+    )
+      .lean()
+      .exec();
+  }
 }
 
 export default ProjectRepository;

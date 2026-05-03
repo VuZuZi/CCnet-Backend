@@ -1,5 +1,6 @@
 import AppError from "../../core/AppError.js";
 import { randomUUID } from "crypto";
+import { DOMAIN_EVENTS } from "../../config/notification.js";
 import { AGREEMENT_SUBJECT_TYPE } from "../agreementRecord/agreementRecord.constant.js";
 import {
   MANUAL_AI_BYPASS_WARNING_EXACT,
@@ -35,6 +36,7 @@ class ProjectReviewService {
     projectAIReviewRepository,
     projectReviewRecordRepository,
     agreementRecordRepository,
+    eventBus = null,
     winstonLogger,
   }) {
     this.adminProjectService = adminProjectService;
@@ -44,6 +46,7 @@ class ProjectReviewService {
     this.projectAIReviewRepository = projectAIReviewRepository;
     this.projectReviewRecordRepository = projectReviewRecordRepository;
     this.agreementRecordRepository = agreementRecordRepository;
+    this.eventBus = eventBus;
     this.logger = winstonLogger?.getLogger?.() || console;
   }
 
@@ -109,7 +112,10 @@ class ProjectReviewService {
     const organizerTrust = await this.buildOrganizerTrustContext(project);
     const snapshot = buildProjectReviewSnapshot(project, organizerTrust);
     const projectSnapshotHash = hashProjectReviewSnapshot(snapshot);
-    const submissionVersion = Math.max(1, Number(project.submissionVersion || 0) || 1);
+    const submissionVersion = Math.max(
+      1,
+      Number(project.submissionVersion || 0) || 1
+    );
 
     if (
       Number(project.submissionVersion || 0) !== submissionVersion ||
@@ -199,17 +205,124 @@ class ProjectReviewService {
     return PROJECT_REVIEW_AI_STATE_AT_DECISION.PENDING;
   }
 
+  _buildReviewRecordPayload({
+    projectId,
+    project,
+    adminId,
+    review,
+    parsed,
+    feedback,
+    currentStatus,
+    statusAfter,
+    transitionAuditStatus,
+    decidedAt,
+    selectedAIRun,
+    aiReviewSummarySnapshot,
+    aiStateAtDecision,
+    actorMetadata,
+    approvedSnapshot = null,
+    transitionErrorCode = null,
+    transitionErrorMessageSafe = null,
+  }) {
+    const decisionSnapshot = {
+      decision: parsed.decision,
+      statusBefore: currentStatus,
+      statusAfter: statusAfter || null,
+      transitionAuditStatus,
+      decidedAt: decidedAt.toISOString(),
+    };
+
+    if (transitionAuditStatus === PROJECT_REVIEW_TRANSITION_AUDIT_STATUS.APPLIED) {
+      decisionSnapshot.appliedAt = new Date().toISOString();
+    } else {
+      decisionSnapshot.failedAt = new Date().toISOString();
+    }
+
+    return {
+      projectId,
+      organizerId: normalizeId(project.organizerId),
+      adminId,
+      submissionVersion: review.submissionVersion,
+      decision: parsed.decision,
+      statusBefore: currentStatus,
+      statusAfter: statusAfter || null,
+      transitionAuditStatus,
+      transitionAttemptedAt: decidedAt,
+      transitionErrorCode,
+      transitionErrorMessageSafe,
+      checklistSnapshot: {
+        ...parsed.checklist,
+        manualAiBypassAcknowledged: parsed.manualAiBypassAcknowledged,
+        completedAt: decidedAt,
+      },
+      reason: parsed.reason,
+      feedback,
+      aiReviewRunId: selectedAIRun?._id || null,
+      aiReviewSummarySnapshot,
+      projectSnapshotHash: review.projectSnapshotHash,
+      approvedSnapshot,
+      decisionSnapshot,
+      manualAiBypassAcknowledged: parsed.manualAiBypassAcknowledged,
+      manualAiBypassReason: parsed.manualAiBypassReason,
+      aiStateAtDecision,
+      actorMetadata,
+    };
+  }
+
+  _emitReviewDecisionNotification({
+    projectId,
+    project,
+    updatedProject,
+    parsed,
+    feedback,
+    adminId,
+    record,
+  }) {
+    if (!this.eventBus || typeof this.eventBus.emit !== "function") return;
+
+    const organizerId = normalizeId(project.organizerId);
+    if (!organizerId) return;
+
+    this.eventBus.emit(DOMAIN_EVENTS.PROJECT_REVIEW_DECIDED, {
+      recipientIds: [organizerId],
+      recipientId: organizerId,
+      organizerId,
+      actorId: adminId,
+      projectId,
+      projectName: updatedProject?.title || project?.title || "",
+      status: updatedProject?.status || parsed.decision,
+      decision: parsed.decision,
+      reason: parsed.reason || "",
+      feedback: feedback || "",
+      reviewRecordId: record?._id || null,
+      actionUrl: `/projects/${projectId}`,
+      metadata: {
+        projectId,
+        projectName: updatedProject?.title || project?.title || "",
+        status: updatedProject?.status || parsed.decision,
+        decision: parsed.decision,
+        reason: parsed.reason || "",
+        feedback: feedback || "",
+        reviewRecordId: record?._id || null,
+      },
+    });
+  }
+
   async decideProject(projectId, payload, adminId, actorMetadata = {}) {
     const parsed = projectDecisionSchema.parse(payload || {});
     const feedback = parsed.feedback || parsed.reason || "";
 
     if (
-      [PROJECT_REVIEW_DECISION.REVISION_REQUESTED, PROJECT_REVIEW_DECISION.REJECTED].includes(
-        parsed.decision
-      ) &&
+      [
+        PROJECT_REVIEW_DECISION.REVISION_REQUESTED,
+        PROJECT_REVIEW_DECISION.REJECTED,
+      ].includes(parsed.decision) &&
       !feedback.trim()
     ) {
-      throw new AppError("Reason or feedback is required for this decision.", 400);
+      throw new AppError(
+        "Reason or feedback is required for this decision.",
+        400
+      );
     }
 
     if (parsed.decision === PROJECT_REVIEW_DECISION.APPROVED) {
@@ -222,7 +335,8 @@ class ProjectReviewService {
 
     if (
       currentStatus !== String(parsed.expectedStatus || "").toUpperCase() ||
-      Number(review.submissionVersion) !== Number(parsed.expectedSubmissionVersion) ||
+      Number(review.submissionVersion) !==
+        Number(parsed.expectedSubmissionVersion) ||
       review.projectSnapshotHash !== parsed.expectedProjectSnapshotHash
     ) {
       throw new AppError(
@@ -250,6 +364,7 @@ class ProjectReviewService {
     }
 
     const decisionLockId = randomUUID();
+
     const lockedProject = await this.projectRepository.acquireReviewDecisionLock(
       projectId,
       {
@@ -276,9 +391,10 @@ class ProjectReviewService {
         ? "APPROVED"
         : parsed.decision;
 
-    let updatedProject;
-    let record;
+    let updatedProject = null;
+    let record = null;
     const decidedAt = new Date();
+
     const aiReviewSummarySnapshot = selectedAIRun
       ? {
           runId: selectedAIRun._id,
@@ -290,92 +406,40 @@ class ProjectReviewService {
         }
       : null;
 
-    record = await this.projectReviewRecordRepository.create({
-      projectId,
-      organizerId: normalizeId(project.organizerId),
-      adminId,
-      submissionVersion: review.submissionVersion,
-      decision: parsed.decision,
-      statusBefore: currentStatus,
-      statusAfter: null,
-      transitionAuditStatus: PROJECT_REVIEW_TRANSITION_AUDIT_STATUS.PENDING,
-      transitionAttemptedAt: decidedAt,
-      checklistSnapshot: {
-        ...parsed.checklist,
-        manualAiBypassAcknowledged: parsed.manualAiBypassAcknowledged,
-        completedAt: decidedAt,
-      },
-      reason: parsed.reason,
-      feedback,
-      aiReviewRunId: selectedAIRun?._id || null,
-      aiReviewSummarySnapshot,
-      projectSnapshotHash: review.projectSnapshotHash,
-      approvedSnapshot: null,
-      decisionSnapshot: {
-        decision: parsed.decision,
-        statusBefore: currentStatus,
-        statusAfter: null,
-        transitionAuditStatus: PROJECT_REVIEW_TRANSITION_AUDIT_STATUS.PENDING,
-        decidedAt: decidedAt.toISOString(),
-      },
-      manualAiBypassAcknowledged: parsed.manualAiBypassAcknowledged,
-      manualAiBypassReason: parsed.manualAiBypassReason,
-      aiStateAtDecision,
-      actorMetadata,
-    });
-
     try {
-      try {
-        updatedProject = await this.adminProjectService.updateProjectStatus(
-          projectId,
-          targetStatus,
-          feedback,
-          adminId,
-          {
-            expectedStatus: parsed.expectedStatus,
-            expectedSubmissionVersion: parsed.expectedSubmissionVersion,
-            expectedProjectSnapshotHash: parsed.expectedProjectSnapshotHash,
-            expectedReviewDecisionLockId: decisionLockId,
-            conflictOnNoop: true,
-          }
-        );
-      } catch (error) {
-        const transitionAuditStatus =
-          Number(error?.statusCode || error?.status) === 409
-            ? PROJECT_REVIEW_TRANSITION_AUDIT_STATUS.CONFLICT
-            : PROJECT_REVIEW_TRANSITION_AUDIT_STATUS.FAILED;
-
-        await this.projectReviewRecordRepository.markTransitionFailed(record._id, {
-          transitionAuditStatus,
-          transitionErrorCode: String(error?.statusCode || error?.status || "ERROR"),
-          transitionErrorMessageSafe: safeAuditErrorMessage(error?.message),
-          decisionSnapshot: {
-            decision: parsed.decision,
-            statusBefore: currentStatus,
-            statusAfter: null,
-            transitionAuditStatus,
-            decidedAt: decidedAt.toISOString(),
-            failedAt: new Date().toISOString(),
-          },
-        });
-
-        throw error;
-      }
+      updatedProject = await this.adminProjectService.updateProjectStatus(
+        projectId,
+        targetStatus,
+        feedback,
+        adminId,
+        {
+          expectedStatus: parsed.expectedStatus,
+          expectedSubmissionVersion: parsed.expectedSubmissionVersion,
+          expectedProjectSnapshotHash: parsed.expectedProjectSnapshotHash,
+          expectedReviewDecisionLockId: decisionLockId,
+          conflictOnNoop: true,
+        }
+      );
 
       const statusAfter = String(updatedProject.status || "").toUpperCase();
-      const decisionSnapshot = {
-        decision: parsed.decision,
-        statusBefore: currentStatus,
-        statusAfter,
-        transitionAuditStatus: PROJECT_REVIEW_TRANSITION_AUDIT_STATUS.APPLIED,
-        decidedAt: decidedAt.toISOString(),
-        appliedAt: new Date().toISOString(),
-      };
 
-      record = await this.projectReviewRecordRepository.markTransitionApplied(
-        record._id,
-        {
+      record = await this.projectReviewRecordRepository.create(
+        this._buildReviewRecordPayload({
+          projectId,
+          project,
+          adminId,
+          review,
+          parsed,
+          feedback,
+          currentStatus,
           statusAfter,
+          transitionAuditStatus:
+            PROJECT_REVIEW_TRANSITION_AUDIT_STATUS.APPLIED,
+          decidedAt,
+          selectedAIRun,
+          aiReviewSummarySnapshot,
+          aiStateAtDecision,
+          actorMetadata,
           approvedSnapshot:
             parsed.decision === PROJECT_REVIEW_DECISION.APPROVED
               ? {
@@ -386,9 +450,58 @@ class ProjectReviewService {
                   approvedAt: updatedProject.approvedAt,
                 }
               : null,
-          decisionSnapshot,
-        }
+        })
       );
+
+      this._emitReviewDecisionNotification({
+        projectId,
+        project,
+        updatedProject,
+        parsed,
+        feedback,
+        adminId,
+        record,
+      });
+
+      return { project: updatedProject, reviewRecord: record };
+    } catch (error) {
+      const transitionAuditStatus =
+        Number(error?.statusCode || error?.status) === 409
+          ? PROJECT_REVIEW_TRANSITION_AUDIT_STATUS.CONFLICT
+          : PROJECT_REVIEW_TRANSITION_AUDIT_STATUS.FAILED;
+
+      try {
+        record = await this.projectReviewRecordRepository.create(
+          this._buildReviewRecordPayload({
+            projectId,
+            project,
+            adminId,
+            review,
+            parsed,
+            feedback,
+            currentStatus,
+            statusAfter: null,
+            transitionAuditStatus,
+            decidedAt,
+            selectedAIRun,
+            aiReviewSummarySnapshot,
+            aiStateAtDecision,
+            actorMetadata,
+            transitionErrorCode: String(
+              error?.statusCode || error?.status || "ERROR"
+            ),
+            transitionErrorMessageSafe: safeAuditErrorMessage(error?.message),
+          })
+        );
+      } catch (auditError) {
+        this.logger?.warn?.("Failed to create failed project review record", {
+          projectId: String(projectId),
+          errorName: auditError?.name || "Error",
+          errorMessage: auditError?.message || "",
+        });
+      }
+
+      throw error;
     } finally {
       try {
         await this.projectRepository.releaseReviewDecisionLock(
@@ -402,8 +515,6 @@ class ProjectReviewService {
         });
       }
     }
-
-    return { project: updatedProject, reviewRecord: record };
   }
 }
 
