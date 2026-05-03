@@ -10,15 +10,22 @@ class GoogleAiProvider extends BaseAiProvider {
         this.logger = appLogger;
         this.providerName = AI_PROVIDERS.GEMINI;
 
-        if (!this.config.geminiFlashKey || !this.config.geminiProKey) {
-            throw new AppError('Google AI Keys (Flash/Pro) missing in configuration', 500);
+        if (!this.config.geminiFlashKey && !this.config.geminiProKey) {
+            throw new AppError('Google AI key missing in configuration', 500);
         }
     }
 
     _getApiKey(modelId = '') {
         const modelStr = modelId.toLowerCase();
         if (modelStr.includes('pro') || modelStr.includes('thinking') || modelStr.includes('research')) {
+            if (!this.config.geminiProKey) {
+                throw new AppError('Google AI key for selected model is missing in configuration', 500);
+            }
             return this.config.geminiProKey;
+        }
+
+        if (!this.config.geminiFlashKey) {
+            throw new AppError('Google AI key for selected model is missing in configuration', 500);
         }
         return this.config.geminiFlashKey;
     }

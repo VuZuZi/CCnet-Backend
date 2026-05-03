@@ -57,7 +57,9 @@ class ProjectService {
     disbursementRequestRepository,
     milestoneEvidenceRepository,
     transactionRepository,
-    systemFinancialRepository
+    systemFinancialRepository,
+    projectAIReviewService,
+    winstonLogger,
   }) {
     this.projectRepository = projectRepository;
     this.escrowRepository = escrowRepository;
@@ -76,6 +78,23 @@ class ProjectService {
     this.milestoneEvidenceRepository = milestoneEvidenceRepository;
     this.transactionRepository = transactionRepository;
     this.systemFinancialRepository = systemFinancialRepository;
+    this.projectAIReviewService = projectAIReviewService;
+    this.logger = winstonLogger?.getLogger?.() || console;
+  }
+
+  async _createProjectAIReviewRunNonFatal(project, action) {
+    if (!this.projectAIReviewService) return null;
+
+    try {
+      return await this.projectAIReviewService.createRunForProject(project);
+    } catch (error) {
+      this.logger?.warn?.("Project AI review run creation failed after submission", {
+        projectId: String(project?._id || ""),
+        action,
+        errorName: error?.name || "Error",
+      });
+      return null;
+    }
   }
 
   _normalizeText(value) {
@@ -879,20 +898,19 @@ class ProjectService {
       );
     }
 
-    this.jobQueue
-      .addJob("project-ai-scan", "scan-risk", {
-        projectId: updatedProject._id,
-        title: updatedProject.title,
-        description: updatedProject.description,
-      })
-      .catch((err) =>
-        console.error(
-          `[Queue Error] AI Scan failed for ${projectId}:`,
-          err.message,
-        ),
-      );
+    await this._createProjectAIReviewRunNonFatal(
+      updatedProject,
+      "submitForApproval"
+    );
 
     if (this.eventBus) {
+      this.eventBus.emit(DOMAIN_EVENTS.PROJECT_REVIEW_SUBMITTED_TO_ADMINS, {
+        projectId: updatedProject._id,
+        organizerId,
+        projectType: updatedProject.projectType,
+        title: updatedProject.title,
+        actionUrl: `/admin/projects/${updatedProject._id}/review`,
+      });
       this.eventBus.emit(DOMAIN_EVENTS.PROJECT_SUBMITTED_FOR_APPROVAL, {
         projectId: updatedProject._id,
         organizerId,
@@ -1356,6 +1374,192 @@ class ProjectService {
     }
 
     return project;
+  }
+
+  async getRevisionDetail(projectId, organizerId) {
+    const project = await this.projectRepository.findByIdWithDetails(projectId);
+    if (!project) throw new AppError("KhĂ´ng tĂ¬m tháº¥y dá»± Ă¡n.", 404);
+
+    if (toIdString(project.organizerId) !== toIdString(organizerId)) {
+      throw new AppError("Báº¡n khĂ´ng cĂ³ quyá»n", 403);
+    }
+
+    if (project.status === PROJECT_STATUS.REJECTED) {
+      throw new AppError("Dá»± Ă¡n Ä‘Ă£ bá»‹ tá»« chá»‘i, khĂ´ng thá»ƒ chá»‰nh sá»­a gá»­i láº¡i.", 400);
+    }
+
+    if (project.status !== PROJECT_STATUS.REVISION_REQUESTED) {
+      throw new AppError("Chá»‰ cĂ³ thá»ƒ má»Ÿ báº£n chá»‰nh sá»­a khi dá»± Ă¡n Ä‘ang Ä‘Æ°á»£c yĂªu cáº§u bá»• sung.", 400);
+    }
+
+    return project;
+  }
+
+  _assertRevisionWindowOpen(project) {
+    if (!project?.revisionRequestedAt) return;
+
+    const expiresAt = new Date(project.revisionRequestedAt);
+    expiresAt.setDate(expiresAt.getDate() + 14);
+
+    if (Date.now() > expiresAt.getTime()) {
+      throw new AppError("ÄĂ£ quĂ¡ háº¡n 14 ngĂ y Ä‘á»ƒ chá»‰nh sá»­a dá»± Ă¡n.", 400);
+    }
+  }
+
+  _prepareReviewEditableProjectData(existingProject, updateData = {}) {
+    const {
+      deletedDocumentIds,
+      coverMedia,
+      documents,
+      status,
+      approvedBy,
+      approvedAt,
+      submittedAt,
+      resubmittedAt,
+      submissionVersion,
+      projectSnapshotHash,
+      ...finalUpdateData
+    } = updateData;
+
+    if (
+      finalUpdateData.projectType === PROJECT_TYPE.VOLUNTEER_ONLY ||
+      (!finalUpdateData.projectType &&
+        existingProject.projectType === PROJECT_TYPE.VOLUNTEER_ONLY)
+    ) {
+      finalUpdateData.targetAmount = 0;
+    }
+
+    if (
+      finalUpdateData.needsVolunteers &&
+      finalUpdateData.volunteerRoles?.length > 0
+    ) {
+      finalUpdateData["stats.targetVolunteers"] =
+        finalUpdateData.volunteerRoles.reduce(
+          (acc, curr) => acc + (Number(curr.quantity) || 0),
+          0,
+        );
+    } else if (finalUpdateData.needsVolunteers === false) {
+      finalUpdateData.volunteerRoles = [];
+      finalUpdateData["stats.targetVolunteers"] = 0;
+    }
+
+    const fallbackLocation = finalUpdateData.location || existingProject.location;
+    if (finalUpdateData.milestones) {
+      finalUpdateData.milestones = this._applyMilestoneSmartDefaults(
+        finalUpdateData.milestones,
+        fallbackLocation,
+      );
+    }
+
+    return finalUpdateData;
+  }
+
+  async updateRevisionProject(projectId, organizerId, updateData) {
+    const existingProject = await this.projectRepository.findById(projectId);
+    if (!existingProject) throw new AppError("KhĂ´ng tĂ¬m tháº¥y dá»± Ă¡n.", 404);
+
+    if (toIdString(existingProject.organizerId) !== toIdString(organizerId)) {
+      throw new AppError("Báº¡n khĂ´ng cĂ³ quyá»n", 403);
+    }
+
+    if (existingProject.status === PROJECT_STATUS.REJECTED) {
+      throw new AppError("Dá»± Ă¡n Ä‘Ă£ bá»‹ tá»« chá»‘i, khĂ´ng thá»ƒ chá»‰nh sá»­a gá»­i láº¡i.", 400);
+    }
+
+    if (existingProject.status !== PROJECT_STATUS.REVISION_REQUESTED) {
+      throw new AppError("Chá»‰ cĂ³ thá»ƒ chá»‰nh sá»­a dá»± Ă¡n Ä‘ang Ä‘Æ°á»£c yĂªu cáº§u bá»• sung.", 400);
+    }
+
+    this._assertRevisionWindowOpen(existingProject);
+
+    const finalUpdateData = this._prepareReviewEditableProjectData(
+      existingProject,
+      updateData,
+    );
+
+    const updatedProject = await this.projectRepository.updateRevisionAtomic(
+      projectId,
+      organizerId,
+      finalUpdateData,
+    );
+
+    if (!updatedProject) {
+      throw new AppError("Xung Ä‘á»™t há»‡ thá»‘ng: Dá»± Ă¡n Ä‘Ă£ Ä‘á»•i tráº¡ng thĂ¡i.", 409);
+    }
+
+    return updatedProject;
+  }
+
+  async resubmitRevisionProject(projectId, organizerId) {
+    const existingProject = await this.projectRepository.findById(projectId);
+    if (!existingProject) throw new AppError("KhĂ´ng tĂ¬m tháº¥y dá»± Ă¡n.", 404);
+
+    if (toIdString(existingProject.organizerId) !== toIdString(organizerId)) {
+      throw new AppError("Báº¡n khĂ´ng cĂ³ quyá»n", 403);
+    }
+
+    if (existingProject.status === PROJECT_STATUS.REJECTED) {
+      throw new AppError("Dá»± Ă¡n Ä‘Ă£ bá»‹ tá»« chá»‘i, khĂ´ng thá»ƒ gá»­i láº¡i.", 400);
+    }
+
+    if (existingProject.status !== PROJECT_STATUS.REVISION_REQUESTED) {
+      throw new AppError("Chá»‰ cĂ³ thá»ƒ gá»­i láº¡i dá»± Ă¡n Ä‘ang Ä‘Æ°á»£c yĂªu cáº§u bá»• sung.", 400);
+    }
+
+    this._assertRevisionWindowOpen(existingProject);
+
+    const validationResult = projectCompleteSchema.safeParse(existingProject);
+    if (!validationResult.success) {
+      const issues =
+        validationResult.error.issues || validationResult.error.errors;
+      const firstError =
+        issues && issues.length > 0 ? issues[0].message : "Dá»¯ liá»‡u khĂ´ng há»£p lá»‡";
+      throw new AppError(
+        `Dá»± Ă¡n chÆ°a Ä‘á»§ Ä‘iá»u kiá»‡n gá»­i láº¡i: ${firstError}`,
+        400,
+      );
+    }
+
+    await this._enforceKycTierCaps(existingProject, organizerId);
+
+    const now = new Date();
+    const nextSubmissionVersion = Math.max(
+      2,
+      Number(existingProject.submissionVersion || 1) + 1,
+    );
+
+    const updatedProject = await this.projectRepository.resubmitRevisionAtomic(
+      projectId,
+      organizerId,
+      {
+        status: PROJECT_STATUS.PENDING_APPROVAL,
+        submittedAt: now,
+        resubmittedAt: now,
+        revisionRequestedAt: null,
+        rejectionReason: null,
+        submissionVersion: nextSubmissionVersion,
+        projectSnapshotHash: null,
+      },
+    );
+
+    if (!updatedProject) {
+      throw new AppError("Xung Ä‘á»™t há»‡ thá»‘ng: Dá»± Ă¡n Ä‘Ă£ Ä‘á»•i tráº¡ng thĂ¡i.", 409);
+    }
+
+    await this._createProjectAIReviewRunNonFatal(
+      updatedProject,
+      "resubmitRevisionProject"
+    );
+
+    this.eventBus?.emit?.(DOMAIN_EVENTS.PROJECT_RESUBMITTED_FOR_APPROVAL, {
+      projectId: updatedProject._id,
+      organizerId,
+      projectType: updatedProject.projectType,
+      title: updatedProject.title,
+      actionUrl: `/admin/projects/${updatedProject._id}/review`,
+    });
+
+    return updatedProject;
   }
 
   async getUpdatingProjectDetail(projectId, organizerId) {

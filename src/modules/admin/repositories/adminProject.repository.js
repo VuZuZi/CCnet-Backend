@@ -8,7 +8,7 @@ const ADMIN_VISIBLE_PROJECT_STATUS_FILTER = {
 };
 
 const ADMIN_PROJECT_POPULATE =
-  "fullName email avatar phone isVerified role status";
+  "fullName email avatar phone isVerified role status kyc organization";
 
 class AdminProjectRepository {
   async findProjects({

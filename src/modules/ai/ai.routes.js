@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { validateBody } from '../../middlewares/validate.middleware.js';
 import { testChatSchema } from './ai.validation.js';
-import { authenticate, authorize } from '../../middlewares/auth.middleware.js';
+import { authenticate } from '../../middlewares/auth.middleware.js';
+import { adminMiddleware } from '../../middlewares/admin.middleware.js';
 import { scopePerRequest } from '../../middlewares/di.middleware.js';
 
 const router = Router();
 
-router.use(scopePerRequest);
+router.use(authenticate, adminMiddleware, scopePerRequest);
 
 const invoke = (methodName) => (req, res, next) => {
     return req.scope.resolve('aiController')[methodName](req, res, next);

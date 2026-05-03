@@ -8,6 +8,7 @@ import { NotificationController } from "./notification.controller.js";
 import { createNotificationRouter } from "./notification.routes.js";
 import { registerFollowNotificationListener } from "./listeners/follow.notification.listener.js";
 import { registerProjectNotificationListener } from "./listeners/project.notification.listener.js";
+import { registerProjectReviewNotificationListener } from "./listeners/projectReview.notification.listener.js";
 import { registerOrganizerRequestSubmittedNotificationListener } from "./listeners/organizerRequestSubmitted.notification.listener.js";
 import { registerOrganizerRequestNotificationListener } from "./listeners/organizerRequest.notification.listener.js";
 import { registerSystemNotificationListener } from "./listeners/system.notification.listener.js";
@@ -129,6 +130,13 @@ function registerDomainListeners({
     notificationService,
     mailProvider,
     userRepository,
+    logger,
+  });
+
+  logger?.info?.("[NotificationModule] Registering project review notification listener");
+  registerProjectReviewNotificationListener({
+    eventBus,
+    notificationBroadcastService,
     logger,
   });
 

@@ -48,13 +48,17 @@ const envSchema = Joi.object({
   PAYOS_API_KEY: Joi.string().optional(),
   PAYOS_CHECKSUM_KEY: Joi.string().optional(),
 
-  GEMINI_FLASH_KEY: Joi.string().required().description('Key for fast operations (Flash)'),
-  GEMINI_PRO_KEY: Joi.string().required().description('Key for deep logic (Pro)'),
-  GROQ_API_KEY: Joi.string().required().description('Groq Fallback Key'),
+  GEMINI_FLASH_KEY: Joi.string().allow('', null).optional().description('Key for fast operations (Flash)'),
+  GEMINI_PRO_KEY: Joi.string().allow('', null).optional().description('Key for deep logic (Pro)'),
+  GROQ_API_KEY: Joi.string().allow('', null).optional().description('Groq Fallback Key'),
 
   DEFAULT_GEMINI_FLASH_MODEL: Joi.string().default('gemini-2.5-flash'),
   DEFAULT_GEMINI_PRO_MODEL: Joi.string().default('gemini-2.5-flash'),
   DEFAULT_GROQ_MODEL: Joi.string().default('llama-3.1-8b-instant'),
+  PROJECT_REVIEW_AI_PROVIDER: Joi.string().allow('', null).optional(),
+  PROJECT_REVIEW_AI_MODEL: Joi.string().allow('', null).optional(),
+  PROJECT_REVIEW_AI_TIMEOUT_MS: Joi.number().min(1000).default(90000),
+  PROJECT_REVIEW_AI_PROMPT_VERSION: Joi.string().default('project-review-v1'),
 
 }).unknown();
 
@@ -146,12 +150,16 @@ export const config = {
   },
 
   ai: {
-    geminiFlashKey: envVars.GEMINI_FLASH_KEY,
-    geminiProKey: envVars.GEMINI_PRO_KEY,
-    groqKey: envVars.GROQ_API_KEY,
+    geminiFlashKey: envVars.GEMINI_FLASH_KEY || null,
+    geminiProKey: envVars.GEMINI_PRO_KEY || null,
+    groqKey: envVars.GROQ_API_KEY || null,
     defaultFlashModel: envVars.DEFAULT_GEMINI_FLASH_MODEL,
     defaultProModel: envVars.DEFAULT_GEMINI_PRO_MODEL,
     defaultGroqModel: envVars.DEFAULT_GROQ_MODEL,
+    projectReviewProvider: envVars.PROJECT_REVIEW_AI_PROVIDER || null,
+    projectReviewModel: envVars.PROJECT_REVIEW_AI_MODEL || null,
+    projectReviewTimeoutMs: envVars.PROJECT_REVIEW_AI_TIMEOUT_MS,
+    projectReviewPromptVersion: envVars.PROJECT_REVIEW_AI_PROMPT_VERSION,
   },
 
   platformFeePercent: envVars.PLATFORM_FEE_PERCENT,

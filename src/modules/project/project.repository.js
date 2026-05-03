@@ -106,6 +106,24 @@ const VOLUNTEER_ONLY_SYNCABLE_STATUSES = new Set([
   PROJECT_STATUS.EXECUTING,
 ]);
 
+const TRUST_POSITIVE_PROJECT_STATUSES = [
+  PROJECT_STATUS.FUNDING,
+  PROJECT_STATUS.RECRUITING,
+  PROJECT_STATUS.EXECUTING,
+  PROJECT_STATUS.UPDATING,
+  PROJECT_STATUS.PAUSED,
+  PROJECT_STATUS.COMPLETED_SUCCESSFULLY,
+  PROJECT_STATUS.COMPLETED_PARTIAL,
+  PROJECT_STATUS.COMPLETED,
+];
+
+const CANCELLED_PROJECT_STATUSES = [
+  PROJECT_STATUS.CANCELLED_BY_PLATFORM,
+  PROJECT_STATUS.CANCELLED_BY_ORGANIZER,
+  PROJECT_STATUS.CANCELLED_FRAUD,
+  PROJECT_STATUS.CANCELLED,
+];
+
 function escapeRegex(value = "") {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -155,6 +173,97 @@ class ProjectRepository {
     return await Project.findByIdAndUpdate(
       projectId,
       { $set: updateData },
+      { new: true, runValidators: true, session },
+    )
+      .lean()
+      .exec();
+  }
+
+  async updateByIdWithExpected(projectId, updateData, expected = {}, session = null) {
+    if (!isValidObjectId(projectId)) return null;
+
+    const filter = { _id: toObjectId(projectId) };
+    if (expected.status) filter.status = expected.status;
+    if (expected.submissionVersion !== undefined) {
+      filter.submissionVersion = Number(expected.submissionVersion);
+    }
+    if (expected.projectSnapshotHash !== undefined) {
+      filter.projectSnapshotHash = expected.projectSnapshotHash;
+    }
+    if (expected.reviewDecisionLockId !== undefined) {
+      filter.reviewDecisionLockId = expected.reviewDecisionLockId;
+    }
+
+    return await Project.findOneAndUpdate(
+      filter,
+      { $set: updateData },
+      { new: true, runValidators: true, session },
+    )
+      .lean()
+      .exec();
+  }
+
+  async acquireReviewDecisionLock(projectId, expected = {}, lock = {}) {
+    if (!isValidObjectId(projectId)) return null;
+
+    const filter = {
+      _id: toObjectId(projectId),
+      $or: [
+        { reviewDecisionLockId: null },
+        { reviewDecisionLockId: { $exists: false } },
+      ],
+    };
+
+    if (expected.status) filter.status = expected.status;
+    if (expected.submissionVersion !== undefined) {
+      filter.submissionVersion = Number(expected.submissionVersion);
+    }
+    if (expected.projectSnapshotHash !== undefined) {
+      filter.projectSnapshotHash = expected.projectSnapshotHash;
+    }
+
+    return await Project.findOneAndUpdate(
+      filter,
+      {
+        $set: {
+          reviewDecisionLockId: lock.lockId,
+          reviewDecisionLockedAt: lock.lockedAt || new Date(),
+          reviewDecisionLockedBy: lock.lockedBy,
+        },
+      },
+      { new: true, runValidators: true },
+    )
+      .lean()
+      .exec();
+  }
+
+  async releaseReviewDecisionLock(projectId, lockId) {
+    if (!isValidObjectId(projectId) || !lockId) return null;
+
+    return await Project.findOneAndUpdate(
+      {
+        _id: toObjectId(projectId),
+        reviewDecisionLockId: lockId,
+      },
+      {
+        $set: {
+          reviewDecisionLockId: null,
+          reviewDecisionLockedAt: null,
+          reviewDecisionLockedBy: null,
+        },
+      },
+      { new: true, runValidators: true },
+    )
+      .lean()
+      .exec();
+  }
+
+  async updateReviewMetadata(projectId, metadata, session = null) {
+    if (!isValidObjectId(projectId)) return null;
+
+    return await Project.findByIdAndUpdate(
+      projectId,
+      { $set: metadata },
       { new: true, runValidators: true, session },
     )
       .lean()
@@ -519,6 +628,110 @@ class ProjectRepository {
     )
       .lean()
       .exec();
+  }
+
+  async updateRevisionAtomic(projectId, organizerId, updateData, session = null) {
+    if (!isValidObjectId(projectId) || !isValidObjectId(organizerId)) {
+      return null;
+    }
+
+    return await Project.findOneAndUpdate(
+      {
+        _id: toObjectId(projectId),
+        organizerId: toObjectId(organizerId),
+        status: PROJECT_STATUS.REVISION_REQUESTED,
+      },
+      { $set: updateData },
+      { new: true, runValidators: true, session },
+    )
+      .lean()
+      .exec();
+  }
+
+  async resubmitRevisionAtomic(projectId, organizerId, updateData, session = null) {
+    if (!isValidObjectId(projectId) || !isValidObjectId(organizerId)) {
+      return null;
+    }
+
+    return await Project.findOneAndUpdate(
+      {
+        _id: toObjectId(projectId),
+        organizerId: toObjectId(organizerId),
+        status: PROJECT_STATUS.REVISION_REQUESTED,
+      },
+      { $set: updateData },
+      { new: true, runValidators: true, session },
+    )
+      .lean()
+      .exec();
+  }
+
+  async getOrganizerReviewContext(organizerId, excludeProjectId = null) {
+    if (!isValidObjectId(organizerId)) {
+      return {
+        totalProjects: 0,
+        meaningfulProjectHistory: 0,
+        approvedProjects: 0,
+        rejectedProjects: 0,
+        revisionRequestedProjects: 0,
+        cancelledProjects: 0,
+      };
+    }
+
+    const match = { organizerId: toObjectId(organizerId) };
+    if (excludeProjectId && isValidObjectId(excludeProjectId)) {
+      match._id = { $ne: toObjectId(excludeProjectId) };
+    }
+
+    const [result] = await Project.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          totalProjects: { $sum: 1 },
+          meaningfulProjectHistory: {
+            $sum: {
+              $cond: [{ $in: ["$status", TRUST_POSITIVE_PROJECT_STATUSES] }, 1, 0],
+            },
+          },
+          approvedProjects: {
+            $sum: {
+              $cond: [{ $in: ["$status", PUBLIC_PROJECT_STATUSES] }, 1, 0],
+            },
+          },
+          rejectedProjects: {
+            $sum: {
+              $cond: [{ $eq: ["$status", PROJECT_STATUS.REJECTED] }, 1, 0],
+            },
+          },
+          revisionRequestedProjects: {
+            $sum: {
+              $cond: [
+                { $eq: ["$status", PROJECT_STATUS.REVISION_REQUESTED] },
+                1,
+                0,
+              ],
+            },
+          },
+          cancelledProjects: {
+            $sum: {
+              $cond: [{ $in: ["$status", CANCELLED_PROJECT_STATUSES] }, 1, 0],
+            },
+          },
+        },
+      },
+    ]).exec();
+
+    return (
+      result || {
+        totalProjects: 0,
+        meaningfulProjectHistory: 0,
+        approvedProjects: 0,
+        rejectedProjects: 0,
+        revisionRequestedProjects: 0,
+        cancelledProjects: 0,
+      }
+    );
   }
 
   async updateUpdatingProjectAtomic(

@@ -165,6 +165,58 @@ class ProjectController {
     }
   };
 
+  getRevisionDetail = async (req, res, next) => {
+    try {
+      const result = await this.projectService.getRevisionDetail(
+        req.params.id,
+        getUserId(req),
+      );
+
+      return ApiResponse.success(
+        res,
+        result,
+        "Láº¥y chi tiáº¿t báº£n chá»‰nh sá»­a dá»± Ă¡n thĂ nh cĂ´ng",
+      );
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  updateRevision = async (req, res, next) => {
+    try {
+      const result = await this.projectService.updateRevisionProject(
+        req.params.id,
+        getUserId(req),
+        req.body,
+      );
+
+      return ApiResponse.success(
+        res,
+        result,
+        "ÄĂ£ cáº­p nháº­t báº£n chá»‰nh sá»­a dá»± Ă¡n",
+      );
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  resubmitRevision = async (req, res, next) => {
+    try {
+      const result = await this.projectService.resubmitRevisionProject(
+        req.params.id,
+        getUserId(req),
+      );
+
+      return ApiResponse.success(
+        res,
+        result,
+        "ÄĂ£ gá»­i láº¡i dá»± Ă¡n cho quáº£n trá»‹ viĂªn kiá»ƒm duyá»‡t",
+      );
+    } catch (error) {
+      next(error);
+    }
+  };
+
   getUpdatingDetail = async (req, res, next) => {
     try {
       const result = await this.projectService.getUpdatingProjectDetail(

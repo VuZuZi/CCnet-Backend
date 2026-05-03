@@ -69,7 +69,10 @@ export async function createConfiguredNotificationModule({
       return users.map((user) => String(user._id));
     },
     resolveUserIdsByRole: async (role) => {
-      const users = await User.find({ role }, { _id: 1 }).lean();
+      const users = await User.find(
+        { role, isActive: true, status: "active" },
+        { _id: 1 }
+      ).lean();
       return users.map((user) => String(user._id));
     },
     resolveUsersByIds: async (ids = []) => {

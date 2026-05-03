@@ -180,6 +180,25 @@ router.get(
 );
 
 router.get(
+  "/:id/revision",
+  ...organizerOnly,
+  execute("getRevisionDetail")
+);
+
+router.put(
+  "/:id/revision",
+  ...organizerOnly,
+  validateBody(updateDraftSchema),
+  execute("updateRevision")
+);
+
+router.post(
+  "/:id/resubmit",
+  ...organizerSubmitGuards,
+  execute("resubmitRevision")
+);
+
+router.get(
   "/:id/updating",
   ...organizerOnly,
   execute("getUpdatingDetail")
