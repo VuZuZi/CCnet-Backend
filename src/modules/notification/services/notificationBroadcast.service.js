@@ -202,6 +202,22 @@ export class NotificationBroadcastService {
     });
   }
 
+  async sendToRole({
+    role,
+    actorId = null,
+    type,
+    payload,
+    excludeActorFromRecipients = true,
+  }) {
+    return this.sendToRoleSelections({
+      roleSelections: [{ role }],
+      actorId,
+      type,
+      payload,
+      excludeActorFromRecipients,
+    });
+  }
+
   async resolveUsersInRoleByIds(role, userIds = []) {
     const snapshots = await this.resolveRecipientSnapshots(userIds);
     const normalizedRole = String(role || "").trim().toLowerCase();

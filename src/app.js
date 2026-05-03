@@ -17,6 +17,7 @@ import { createConfiguredNotificationModule } from "./config/notification.js";
 import { initPostWorkers } from "./modules/communitypost/post.worker.js";
 import { initFollowWorkers } from "./modules/follow/follow.worker.js";
 import { initProjectWorkers } from "./modules/project/project.worker.js";
+import { initProjectAIReviewWorker } from "./modules/projectAIReview/project-ai-review.worker.js";
 import { initVolunteerWorkers } from "./modules/volunteer/volunteer.worker.js";
 import { initUserWorkers } from "./modules/user/user.worker.js";
 import { initTransactionWorkers } from "./modules/transaction/transaction.worker.js";
@@ -101,6 +102,7 @@ export const createApp = async () => {
   initPostWorkers();
   initFollowWorkers();
   initProjectWorkers();
+  initProjectAIReviewWorker();
   initVolunteerWorkers();
   initUserWorkers();
   initTransactionWorkers();

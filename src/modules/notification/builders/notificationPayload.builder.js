@@ -55,6 +55,63 @@ export function buildNotificationPayload(input) {
         },
       };
 
+    case NOTIFICATION_TYPES.PROJECT_REVIEW_SUBMITTED_TO_ADMINS:
+      return {
+        title: ensureText(input.title, 'Dự án mới cần kiểm duyệt'),
+        message: ensureText(
+          input.message,
+          `Dự án "${ensureText(input.projectName, 'không tên')}" đã được gửi đến cockpit kiểm duyệt.`
+        ),
+        actionUrl: ensureText(input.actionUrl, `/admin/projects/${input.entityId || ''}/review`),
+        entityType: 'project_review',
+        entityId: input.entityId || null,
+        metadata: {
+          projectName: input.projectName || null,
+          status: input.status || null,
+        },
+      };
+
+    case NOTIFICATION_TYPES.PROJECT_RESUBMITTED_FOR_APPROVAL:
+      return {
+        title: ensureText(input.title, 'Dự án đã được gửi lại'),
+        message: ensureText(
+          input.message,
+          `Organizer đã gửi lại dự án "${ensureText(input.projectName, 'không tên')}" sau yêu cầu bổ sung.`
+        ),
+        actionUrl: ensureText(input.actionUrl, `/admin/projects/${input.entityId || ''}/review`),
+        entityType: 'project_review',
+        entityId: input.entityId || null,
+        metadata: {
+          projectName: input.projectName || null,
+          status: input.status || null,
+        },
+      };
+
+    case NOTIFICATION_TYPES.PROJECT_AI_REVIEW_COMPLETED:
+    case NOTIFICATION_TYPES.PROJECT_AI_REVIEW_FAILED:
+      return {
+        title: ensureText(
+          input.title,
+          type === NOTIFICATION_TYPES.PROJECT_AI_REVIEW_COMPLETED
+            ? 'Báo cáo phân tích sơ bộ đã sẵn sàng'
+            : 'Báo cáo phân tích sơ bộ thất bại'
+        ),
+        message: ensureText(
+          input.message,
+          type === NOTIFICATION_TYPES.PROJECT_AI_REVIEW_COMPLETED
+            ? `Báo cáo AI sơ bộ cho dự án "${ensureText(input.projectName, 'không tên')}" đã hoàn tất.`
+            : `Báo cáo AI sơ bộ cho dự án "${ensureText(input.projectName, 'không tên')}" không hoàn tất. Admin vẫn có thể kiểm duyệt thủ công.`
+        ),
+        actionUrl: ensureText(input.actionUrl, `/admin/projects/${input.entityId || ''}/review`),
+        entityType: 'project_ai_review',
+        entityId: input.entityId || null,
+        metadata: {
+          projectName: input.projectName || null,
+          runId: input.runId || null,
+          errorCode: input.errorCode || null,
+        },
+      };
+
     case NOTIFICATION_TYPES.VOLUNTEER_WITHDRAW_REQUESTED:
       return {
         title: ensureText(input.title, 'Yêu cầu xin rút tình nguyện viên'),

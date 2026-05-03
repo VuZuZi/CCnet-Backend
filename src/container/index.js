@@ -23,6 +23,9 @@ import AppLogger from "../core/app-logger.js";
 import AiProviderFactory from "../modules/ai/ai-provider.factory.js";
 import GroqAiProvider from "../modules/ai/providers/groq-ai.provider.js";
 import GoogleAiProvider from "../modules/ai/providers/google-ai.provider.js";
+import ProjectAIReviewProcessor from "../modules/projectAIReview/project-ai-review.processor.js";
+import ProjectAIReviewRepository from "../modules/projectAIReview/project-ai-review.repository.js";
+import ProjectAIReviewService from "../modules/projectAIReview/project-ai-review.service.js";
 
 let container;
 
@@ -50,6 +53,9 @@ export const initializeContainer = () => {
     googleAiProvider: asClass(GoogleAiProvider).scoped(),
     groqAiProvider: asClass(GroqAiProvider).scoped(),
     aiProviderFactory: asClass(AiProviderFactory).scoped(),
+    projectAIReviewRepository: asClass(ProjectAIReviewRepository).scoped(),
+    projectAIReviewService: asClass(ProjectAIReviewService).scoped(),
+    projectAIReviewProcessor: asClass(ProjectAIReviewProcessor).scoped(),
     identityVerificationProvider: asClass(MockIdentityProvider).singleton(),
   });
 

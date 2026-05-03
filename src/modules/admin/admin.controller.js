@@ -157,6 +157,68 @@ class AdminController {
     }
   };
 
+  getProjectReview = async (req, res, next) => {
+    try {
+      const review = await this.adminService.getProjectReview(req.params.id);
+      res.json({ status: "success", data: review });
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  getProjectAIReviewRuns = async (req, res, next) => {
+    try {
+      const runs = await this.adminService.listProjectAIReviewRuns(req.params.id);
+      res.json({ status: "success", data: runs });
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  getLatestProjectAIReviewRun = async (req, res, next) => {
+    try {
+      const run = await this.adminService.getLatestProjectAIReviewRun(req.params.id);
+      res.json({ status: "success", data: run });
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  retryProjectAIReview = async (req, res, next) => {
+    try {
+      const run = await this.adminService.retryProjectAIReview(req.params.id);
+      res.status(202).json({ status: "success", data: run });
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  getProjectReviewRecords = async (req, res, next) => {
+    try {
+      const records = await this.adminService.listProjectReviewRecords(req.params.id);
+      res.json({ status: "success", data: records });
+    } catch (e) {
+      next(e);
+    }
+  };
+
+  decideProject = async (req, res, next) => {
+    try {
+      const result = await this.adminService.decideProject(
+        req.params.id,
+        req.body || {},
+        req.user?.userId || req.user?._id || null,
+        {
+          ip: req.ip,
+          userAgent: req.get?.("user-agent") || "",
+        }
+      );
+      res.json({ status: "success", data: result });
+    } catch (e) {
+      next(e);
+    }
+  };
+
   updateProjectStatus = async (req, res, next) => {
     try {
       const { status, feedback, reason } = req.body || {};

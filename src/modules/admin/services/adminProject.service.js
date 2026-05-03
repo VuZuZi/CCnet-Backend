@@ -212,7 +212,7 @@ class AdminProjectService {
     return project;
   }
 
-  async updateProjectStatus(projectId, targetStatus, feedback, adminId) {
+  async updateProjectStatus(projectId, targetStatus, feedback, adminId, options = {}) {
     if (!targetStatus) {
       throw new AppError("Project status is required.", 400);
     }
@@ -229,7 +229,39 @@ class AdminProjectService {
       const allowedTransitions = getAllowedProjectTransitions(project);
 
       if (currentStatus === finalStatus) {
+        if (options.conflictOnNoop) {
+          throw new AppError("Project status has already changed. Please reload.", 409);
+        }
         return project;
+      }
+
+      if (
+        options.expectedStatus &&
+        currentStatus !== normalizeProjectStatus(options.expectedStatus)
+      ) {
+        throw new AppError("Project review data is stale. Please reload.", 409);
+      }
+
+      if (
+        options.expectedSubmissionVersion !== undefined &&
+        Number(project.submissionVersion || 0) !==
+          Number(options.expectedSubmissionVersion)
+      ) {
+        throw new AppError("Project review data is stale. Please reload.", 409);
+      }
+
+      if (
+        options.expectedProjectSnapshotHash !== undefined &&
+        project.projectSnapshotHash !== options.expectedProjectSnapshotHash
+      ) {
+        throw new AppError("Project review data is stale. Please reload.", 409);
+      }
+
+      if (
+        options.expectedReviewDecisionLockId !== undefined &&
+        project.reviewDecisionLockId !== options.expectedReviewDecisionLockId
+      ) {
+        throw new AppError("Project review decision is already in progress. Please reload.", 409);
       }
 
       if (!allowedTransitions.includes(finalStatus)) {
@@ -317,20 +349,34 @@ class AdminProjectService {
         ];
       }
 
-      await this._ensureEscrowForFundedProject(
-        projectId,
-        project.projectType,
-        session
-      );
+      if (approveAction) {
+        await this._ensureEscrowForFundedProject(
+          projectId,
+          project.projectType,
+          session
+        );
+      }
 
-      const updatedProject = await this.projectRepository.updateById(
-        projectId,
-        updateData,
-        session
-      );
+      const updatedProject = options.expectedStatus
+        ? await this.projectRepository.updateByIdWithExpected(
+            projectId,
+            updateData,
+            {
+              status: currentStatus,
+              submissionVersion: options.expectedSubmissionVersion,
+              projectSnapshotHash: options.expectedProjectSnapshotHash,
+              reviewDecisionLockId: options.expectedReviewDecisionLockId,
+            },
+            session
+          )
+        : await this.projectRepository.updateById(
+            projectId,
+            updateData,
+            session
+          );
 
       if (!updatedProject) {
-        throw new AppError("Failed to update project status.", 500);
+        throw new AppError("Project review data is stale. Please reload.", 409);
       }
 
       if (userUpdate) {

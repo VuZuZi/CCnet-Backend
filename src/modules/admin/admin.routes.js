@@ -44,6 +44,30 @@ router.get("/projects", (req, res, next) =>
   getController().getProjects(req, res, next)
 );
 
+router.get("/projects/:id/review", (req, res, next) =>
+  getController().getProjectReview(req, res, next)
+);
+
+router.get("/projects/:id/ai-review-runs", (req, res, next) =>
+  getController().getProjectAIReviewRuns(req, res, next)
+);
+
+router.get("/projects/:id/ai-review-runs/latest", (req, res, next) =>
+  getController().getLatestProjectAIReviewRun(req, res, next)
+);
+
+router.post("/projects/:id/ai-review-runs/retry", (req, res, next) =>
+  getController().retryProjectAIReview(req, res, next)
+);
+
+router.get("/projects/:id/review-records", (req, res, next) =>
+  getController().getProjectReviewRecords(req, res, next)
+);
+
+router.post("/projects/:id/decision", (req, res, next) =>
+  getController().decideProject(req, res, next)
+);
+
 router.get("/projects/:id", (req, res, next) =>
   getController().getProjectDetail(req, res, next)
 );
