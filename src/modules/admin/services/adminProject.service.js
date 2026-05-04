@@ -49,6 +49,16 @@ class AdminProjectService {
     return normalizedReason;
   }
 
+  _getProjectCoverUrl(project) {
+    return (
+      project?.coverMedia?.url ||
+      project?.coverMedia?.secureUrl ||
+      project?.thumbnail ||
+      project?.image ||
+      ""
+    );
+  }
+
   async _logAdminAction({
     actorId,
     actorRole = "admin",
@@ -163,13 +173,26 @@ class AdminProjectService {
       .map((item) => String(item?.volunteerId?._id || item?.volunteerId || ""))
       .filter(Boolean);
 
-    return this.conversationService.ensureProjectGroupConversation({
-      projectId: project._id,
-      organizerId,
-      participantIds: approvedVolunteerIds,
-      groupName: project.title,
-      actorId: adminId,
-    });
+    const conversation =
+      await this.conversationService.ensureProjectGroupConversation({
+        projectId: project._id,
+        organizerId,
+        participantIds: approvedVolunteerIds,
+        groupName: project.title,
+        groupAvatar: this._getProjectCoverUrl(project),
+      });
+
+    if (
+      conversation &&
+      typeof this.conversationService.publishConversationUpdate === "function"
+    ) {
+      await this.conversationService.publishConversationUpdate(conversation, [
+        organizerId,
+        ...approvedVolunteerIds,
+      ]);
+    }
+
+    return conversation;
   }
 
   async _ensureEscrowForFundedProject(projectId, projectType, session) {

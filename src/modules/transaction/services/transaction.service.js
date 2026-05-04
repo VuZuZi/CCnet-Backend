@@ -137,71 +137,141 @@ class TransactionService {
     }
 
     async initiateDonation(donorId, payload) {
-        const { projectId, amount, paymentMethod, isAnonymous, message } = payload;
-        const safeAmount = MoneyMath.toIntegerAmount(amount);
+    const { projectId, amount, paymentMethod, isAnonymous, message } = payload;
+    const safeAmount = MoneyMath.toIntegerAmount(amount);
+    const safeMessage = String(message || '').trim().slice(0, 500);
 
-        const project = await this.projectRepository.findById(projectId);
-        if (!project) throw new AppError("Không tìm thấy dự án", 404);
+    const project = await this.projectRepository.findById(projectId);
+    if (!project) throw new AppError("Không tìm thấy dự án", 404);
 
-        const escrow = await this.escrowRepository.findByProjectId(projectId);
-        const fundedAmount = Number(escrow?.availableBalance ?? project.currentAmount ?? 0);
+    const escrow = await this.escrowRepository.findByProjectId(projectId);
+    const fundedAmount = Number(escrow?.availableBalance ?? project.currentAmount ?? 0);
 
-        this._checkFundingConstraints(project, fundedAmount);
-        this._validateDonationAmountAgainstTarget(project, fundedAmount, safeAmount);
+    this._checkFundingConstraints(project, fundedAmount);
+    this._validateDonationAmountAgainstTarget(project, fundedAmount, safeAmount);
 
-        if (paymentMethod === 'WALLET') {
-            const wallet = await this.walletRepository.findByUserId(donorId);
-            if (wallet.balance < safeAmount) throw new AppError(`Số dư Ví của bạn hiện không đủ để thực hiện giao dịch. Bạn vui lòng nạp thêm để tiếp tục nhé!`, 400);
+    if (paymentMethod === 'WALLET') {
+        const wallet = await this.walletRepository.findByUserId(donorId);
 
-            const result = await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
-                await this.walletRepository.incrementBalance(donorId, -safeAmount, session);
+        if (wallet.balance < safeAmount) {
+            throw new AppError(
+                `Số dư Ví của bạn hiện không đủ để thực hiện giao dịch. Bạn vui lòng nạp thêm để tiếp tục nhé!`,
+                400
+            );
+        }
 
-                const transaction = await this.transactionRepository.create({
-                    type: 'DONATION_FROM_WALLET', amount: safeAmount, grossAmount: safeAmount,
-                    netAmount: safeAmount, platformFee: 0, projectId, donorRef: donorId,
-                    status: 'COMPLETED', isAnonymous
-                }, session);
+        const result = await this.transactionManager.runInTransaction(
+            async (session, dispatchEvent) => {
+                await this.walletRepository.incrementBalance(
+                    donorId,
+                    -safeAmount,
+                    session
+                );
 
-                const updatedEscrow = await this.escrowRepository.incrementBalance(projectId, safeAmount, session);
-                const updatedProject = await this.projectRepository.incrementFunding(projectId, safeAmount, session);
+                const transaction = await this.transactionRepository.create(
+                    {
+                        type: 'DONATION_FROM_WALLET',
+                        amount: safeAmount,
+                        grossAmount: safeAmount,
+                        netAmount: safeAmount,
+                        platformFee: 0,
+                        projectId,
+                        donorRef: donorId,
+                        status: 'COMPLETED',
+                        isAnonymous,
+                        message: safeMessage,
+                    },
+                    session
+                );
 
-                const isHardCapped = await this._checkAndFinalizeFundingGoal(updatedProject, session, dispatchEvent);
+                const updatedEscrow = await this.escrowRepository.incrementBalance(
+                    projectId,
+                    safeAmount,
+                    session
+                );
+
+                const updatedProject = await this.projectRepository.incrementFunding(
+                    projectId,
+                    safeAmount,
+                    session
+                );
+
+                const isHardCapped = await this._checkAndFinalizeFundingGoal(
+                    updatedProject,
+                    session,
+                    dispatchEvent
+                );
 
                 let donorName = "Nhà hảo tâm ẩn danh";
+
                 if (!isAnonymous) {
                     const donor = await this.userRepository.findById(donorId);
                     if (donor) donorName = donor.fullName || "Nhà hảo tâm";
                 }
 
                 dispatchEvent(DOMAIN_EVENTS.DONATION_SUCCESSFUL, {
-                    transactionId: String(transaction._id), projectId: String(projectId), projectName: updatedProject.title,
-                    organizerId: String(updatedProject.organizerId), donorId: String(donorId), donorName: donorName,
-                    amount: safeAmount, currentEscrowBalance: updatedEscrow.availableBalance
+                    transactionId: String(transaction._id),
+                    projectId: String(projectId),
+                    projectName: updatedProject.title,
+                    organizerId: String(updatedProject.organizerId),
+                    donorId: String(donorId),
+                    donorName,
+                    amount: safeAmount,
+                    currentEscrowBalance: updatedEscrow.availableBalance,
+                    message: safeMessage,
                 });
 
                 return { tx: transaction, isHardCapped };
-            });
-
-            return { transactionId: result.tx._id, paymentMethod: 'WALLET', status: 'COMPLETED', message: 'Tuyệt vời! Bạn đã quyên góp thành công qua Ví CCNet.' };
-        }
-
-        const gatewayTransactionId = await this._reserveGatewayTransactionId();
-
-        const transaction = await this.transactionRepository.create({
-            type: 'DONATION', amount: safeAmount, grossAmount: safeAmount, netAmount: safeAmount,
-            platformFee: 0, projectId, donorRef: donorId, gatewayTransactionId: gatewayTransactionId,
-            status: 'PENDING', isAnonymous, message
-        });
-
-        const transferMemo = `SEVQR DONATE ${gatewayTransactionId}`;
-        const paymentData = await this.paymentProvider.createPaymentLink({ orderCode: gatewayTransactionId, amount: safeAmount, description: transferMemo });
+            }
+        );
 
         return {
-            transactionId: transaction._id, paymentLinkId: paymentData.paymentLinkId, qrCode: paymentData.qrCode,
-            transferMemo: paymentData.transferMemo, paymentMethod: 'BANK_TRANSFER',
-            breakdown: { baseAmount: safeAmount, fee: 0, totalRequired: safeAmount }
+            transactionId: result.tx._id,
+            paymentMethod: 'WALLET',
+            status: 'COMPLETED',
+            message: 'Tuyệt vời! Bạn đã quyên góp thành công qua Ví CCNet.',
+            donationMessage: safeMessage,
         };
     }
+
+    const gatewayTransactionId = await this._reserveGatewayTransactionId();
+
+    const transaction = await this.transactionRepository.create({
+        type: 'DONATION',
+        amount: safeAmount,
+        grossAmount: safeAmount,
+        netAmount: safeAmount,
+        platformFee: 0,
+        projectId,
+        donorRef: donorId,
+        gatewayTransactionId,
+        status: 'PENDING',
+        isAnonymous,
+        message: safeMessage,
+    });
+
+    const transferMemo = `SEVQR DONATE ${gatewayTransactionId}`;
+
+    const paymentData = await this.paymentProvider.createPaymentLink({
+        orderCode: gatewayTransactionId,
+        amount: safeAmount,
+        description: transferMemo,
+    });
+
+    return {
+        transactionId: transaction._id,
+        paymentLinkId: paymentData.paymentLinkId,
+        qrCode: paymentData.qrCode,
+        transferMemo: paymentData.transferMemo,
+        paymentMethod: 'BANK_TRANSFER',
+        donationMessage: safeMessage,
+        breakdown: {
+            baseAmount: safeAmount,
+            fee: 0,
+            totalRequired: safeAmount,
+        },
+    };
+}
 
     async initiateSupportDonation(donorId = null, payload = {}) {
         const { amount, message } = payload;

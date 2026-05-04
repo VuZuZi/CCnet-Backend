@@ -86,7 +86,7 @@ export default class ConversationService {
 
     const result = await this.cloudinaryProvider.uploadImage(
       groupAvatarFile.buffer,
-      CHAT_CLOUDINARY_FOLDERS.groupAvatars
+      CHAT_CLOUDINARY_FOLDERS.groupAvatars,
     );
 
     return result?.secure_url || result?.url || "";
@@ -121,7 +121,7 @@ export default class ConversationService {
     const promotedAdmin =
       participantLookup?.get(String(promotedAdminId)) ||
       (await this.reloadConversation(conversation._id))?.participants?.find(
-        (item) => String(item?._id || item) === String(promotedAdminId)
+        (item) => String(item?._id || item) === String(promotedAdminId),
       );
 
     if (!promotedAdmin) return;
@@ -166,7 +166,7 @@ export default class ConversationService {
 
       const existing =
         await this.conversationRepository.findDirectConversationBetweenUsers(
-          directParticipants
+          directParticipants,
         );
 
       if (existing) return existing;
@@ -181,10 +181,16 @@ export default class ConversationService {
       return this.reloadConversation(created._id);
     }
 
-    const normalizedParticipants = uniqueIds([currentUserId, ...(participantIds || [])]);
+    const normalizedParticipants = uniqueIds([
+      currentUserId,
+      ...(participantIds || []),
+    ]);
 
     if (normalizedParticipants.length < 1) {
-      throw new AppError("A group conversation must have at least 1 participant", 400);
+      throw new AppError(
+        "A group conversation must have at least 1 participant",
+        400,
+      );
     }
 
     const groupAvatar = await this.uploadGroupAvatar(groupAvatarFile);
@@ -208,6 +214,7 @@ export default class ConversationService {
     organizerId,
     participantIds = [],
     groupName = "",
+    groupAvatar = "",
   }) {
     if (!projectId) {
       throw new AppError("projectId is required", 400);
@@ -217,21 +224,32 @@ export default class ConversationService {
       throw new AppError("organizerId is required", 400);
     }
 
-    const normalizedParticipants = uniqueIds([organizerId, ...(participantIds || [])]);
+    const normalizedParticipants = uniqueIds([
+      organizerId,
+      ...(participantIds || []),
+    ]);
 
     if (normalizedParticipants.length < 1) {
-      throw new AppError("A project group conversation must have at least 1 participant", 400);
+      throw new AppError(
+        "A project group conversation must have at least 1 participant",
+        400,
+      );
     }
 
+    const safeGroupName = String(groupName || "").trim();
+    const safeGroupAvatar = String(groupAvatar || "").trim();
+
     const existing =
-      await this.conversationRepository.findGroupConversationByProjectId(projectId);
+      await this.conversationRepository.findGroupConversationByProjectId(
+        projectId,
+      );
 
     if (!existing) {
       const created = await this.conversationRepository.create({
         type: "group",
         projectId,
-        groupName: String(groupName || "").trim(),
-        groupAvatar: "",
+        groupName: safeGroupName,
+        groupAvatar: safeGroupAvatar,
         participants: normalizedParticipants,
         groupAdmins: [organizerId],
         createdBy: organizerId,
@@ -246,12 +264,18 @@ export default class ConversationService {
       throw new AppError("Conversation not found", 404);
     }
 
-    const currentParticipants = normalizeParticipantIds(conversation.participants || []);
-    const mergedParticipants = uniqueIds([...currentParticipants, ...normalizedParticipants]);
+    const currentParticipants = normalizeParticipantIds(
+      conversation.participants || [],
+    );
+
+    const mergedParticipants = uniqueIds([
+      ...currentParticipants,
+      ...normalizedParticipants,
+    ]);
 
     const currentAdmins = normalizeParticipantIds(conversation.groupAdmins || []);
     const mergedAdmins = uniqueIds(
-      currentAdmins.length > 0 ? currentAdmins : [organizerId]
+      currentAdmins.length > 0 ? currentAdmins : [organizerId],
     );
 
     let shouldSave = false;
@@ -269,9 +293,19 @@ export default class ConversationService {
       shouldSave = true;
     }
 
-    const safeGroupName = String(groupName || "").trim();
-    if (safeGroupName && safeGroupName !== String(conversation.groupName || "").trim()) {
+    if (
+      safeGroupName &&
+      safeGroupName !== String(conversation.groupName || "").trim()
+    ) {
       conversation.groupName = safeGroupName;
+      shouldSave = true;
+    }
+
+    if (
+      safeGroupAvatar &&
+      safeGroupAvatar !== String(conversation.groupAvatar || "").trim()
+    ) {
+      conversation.groupAvatar = safeGroupAvatar;
       shouldSave = true;
     }
 
@@ -294,7 +328,9 @@ export default class ConversationService {
     if (!projectId) return null;
 
     const existing =
-      await this.conversationRepository.findGroupConversationByProjectId(projectId);
+      await this.conversationRepository.findGroupConversationByProjectId(
+        projectId,
+      );
 
     if (!existing?._id) return null;
 
@@ -321,7 +357,9 @@ export default class ConversationService {
     }
 
     const existing =
-      await this.conversationRepository.findGroupConversationByProjectId(projectId);
+      await this.conversationRepository.findGroupConversationByProjectId(
+        projectId,
+      );
 
     if (!existing) {
       const createdConversation = await this.ensureProjectGroupConversation({
@@ -338,18 +376,26 @@ export default class ConversationService {
         return createdConversation;
       }
 
-      const rawConversation = await this.conversationRepository.findById(createdConversationId);
+      const rawConversation =
+        await this.conversationRepository.findById(createdConversationId);
+
       if (!rawConversation) {
-        const fallbackConversation = await this.reloadConversation(createdConversationId);
-        await this.publishConversationUpdate(fallbackConversation, [String(volunteerId)]);
+        const fallbackConversation =
+          await this.reloadConversation(createdConversationId);
+
+        await this.publishConversationUpdate(fallbackConversation, [
+          String(volunteerId),
+        ]);
+
         return fallbackConversation;
       }
 
-      const populatedConversation = await this.reloadConversation(createdConversationId);
+      const populatedConversation =
+        await this.reloadConversation(createdConversationId);
 
       const addedUser = (populatedConversation?.participants || []).find(
         (participant) =>
-          String(participant?._id || participant) === String(volunteerId)
+          String(participant?._id || participant) === String(volunteerId),
       );
 
       await this.emitSystemMessage({
@@ -363,8 +409,13 @@ export default class ConversationService {
         extraParticipantIds: [String(volunteerId)],
       });
 
-      const latestConversation = await this.reloadConversation(createdConversationId);
-      await this.publishConversationUpdate(latestConversation, [String(volunteerId)]);
+      const latestConversation =
+        await this.reloadConversation(createdConversationId);
+
+      await this.publishConversationUpdate(latestConversation, [
+        String(volunteerId),
+      ]);
+
       return latestConversation;
     }
 
@@ -385,7 +436,9 @@ export default class ConversationService {
     }
 
     const existing =
-      await this.conversationRepository.findGroupConversationByProjectId(projectId);
+      await this.conversationRepository.findGroupConversationByProjectId(
+        projectId,
+      );
 
     if (!existing) return null;
 
@@ -417,7 +470,7 @@ export default class ConversationService {
     const updated = await this.reloadConversation(conversation._id);
 
     const addedUser = (updated?.participants || []).find(
-      (participant) => String(participant?._id || participant) === targetId
+      (participant) => String(participant?._id || participant) === targetId,
     );
 
     await this.emitSystemMessage({
@@ -460,18 +513,20 @@ export default class ConversationService {
     if (existingIds.length <= 1) {
       throw new AppError(
         "Cannot remove member from a group with only 1 participant left",
-        400
+        400,
       );
     }
 
     const populatedBefore = await this.reloadConversation(conversation._id);
-    const participantLookup = buildParticipantLookup(populatedBefore?.participants || []);
+    const participantLookup = buildParticipantLookup(
+      populatedBefore?.participants || [],
+    );
     const removedUser = participantLookup.get(targetUserId);
 
     conversation.participants = existingIds.filter((uid) => uid !== targetUserId);
-    conversation.groupAdmins = normalizeParticipantIds(conversation.groupAdmins || []).filter(
-      (uid) => uid !== targetUserId
-    );
+    conversation.groupAdmins = normalizeParticipantIds(
+      conversation.groupAdmins || [],
+    ).filter((uid) => uid !== targetUserId);
 
     const unreadCounts = getConversationUnreadCountsMap(conversation);
     unreadCounts.delete(targetUserId);
@@ -512,7 +567,7 @@ export default class ConversationService {
     const conversation = await requireConversationParticipant(
       this.conversationRepository,
       id,
-      currentUserId
+      currentUserId,
     );
 
     requireGroupConversation(conversation);
@@ -548,7 +603,7 @@ export default class ConversationService {
     if (hasGroupNameChanged) {
       const actor =
         (updatedConversation?.participants || []).find(
-          (item) => String(item?._id || item) === String(currentUserId)
+          (item) => String(item?._id || item) === String(currentUserId),
         ) || null;
 
       const actorName = actor ? getDisplayName(actor) : "Thành viên";
@@ -567,7 +622,9 @@ export default class ConversationService {
 
     await this.publishService.publishConversationUpdated({
       conversation: latestConversation,
-      participantIds: normalizeParticipantIds(latestConversation?.participants || []),
+      participantIds: normalizeParticipantIds(
+        latestConversation?.participants || [],
+      ),
     });
 
     return latestConversation;
@@ -579,7 +636,7 @@ export default class ConversationService {
     const conversation = await requireConversationParticipant(
       this.conversationRepository,
       id,
-      currentUserId
+      currentUserId,
     );
 
     requireGroupConversation(conversation);
@@ -587,7 +644,9 @@ export default class ConversationService {
 
     const incomingIds = normalizeParticipantIds(participantIds);
     const existingIds = normalizeParticipantIds(conversation.participants || []);
-    const actuallyAdded = incomingIds.filter((uid) => !existingIds.includes(String(uid)));
+    const actuallyAdded = incomingIds.filter(
+      (uid) => !existingIds.includes(String(uid)),
+    );
 
     if (!actuallyAdded.length) {
       const latestConversation = await this.reloadConversation(conversation._id);
@@ -611,7 +670,7 @@ export default class ConversationService {
     const updated = await this.reloadConversation(conversation._id);
 
     const addedUsers = (updated?.participants || []).filter((participant) =>
-      actuallyAdded.includes(String(participant?._id || participant))
+      actuallyAdded.includes(String(participant?._id || participant)),
     );
 
     const addedNames = addedUsers.map((user) => getDisplayName(user)).join(", ");
@@ -643,7 +702,7 @@ export default class ConversationService {
     const conversation = await requireConversationParticipant(
       this.conversationRepository,
       id,
-      currentUserId
+      currentUserId,
     );
 
     requireGroupConversation(conversation);
@@ -657,18 +716,20 @@ export default class ConversationService {
     if (existingIds.length <= 1) {
       throw new AppError(
         "Cannot remove member from a group with only 1 participant left",
-        400
+        400,
       );
     }
 
     const populatedBefore = await this.reloadConversation(conversation._id);
-    const participantLookup = buildParticipantLookup(populatedBefore?.participants || []);
+    const participantLookup = buildParticipantLookup(
+      populatedBefore?.participants || [],
+    );
     const removedUser = participantLookup.get(targetUserId);
 
     conversation.participants = existingIds.filter((uid) => uid !== targetUserId);
-    conversation.groupAdmins = normalizeParticipantIds(conversation.groupAdmins || []).filter(
-      (uid) => uid !== targetUserId
-    );
+    conversation.groupAdmins = normalizeParticipantIds(
+      conversation.groupAdmins || [],
+    ).filter((uid) => uid !== targetUserId);
 
     const unreadCounts = getConversationUnreadCountsMap(conversation);
     unreadCounts.delete(targetUserId);
@@ -709,7 +770,7 @@ export default class ConversationService {
     const conversation = await requireConversationParticipant(
       this.conversationRepository,
       id,
-      currentUserId
+      currentUserId,
     );
 
     requireGroupConversation(conversation);
@@ -720,19 +781,24 @@ export default class ConversationService {
     }
 
     if (existingIds.length <= 1) {
-      throw new AppError("Cannot leave a group when you are the last participant", 400);
+      throw new AppError(
+        "Cannot leave a group when you are the last participant",
+        400,
+      );
     }
 
     const populatedBefore = await this.reloadConversation(conversation._id);
-    const participantLookup = buildParticipantLookup(populatedBefore?.participants || []);
+    const participantLookup = buildParticipantLookup(
+      populatedBefore?.participants || [],
+    );
     const leavingUser = participantLookup.get(String(currentUserId));
 
     conversation.participants = existingIds.filter(
-      (uid) => uid !== String(currentUserId)
+      (uid) => uid !== String(currentUserId),
     );
-    conversation.groupAdmins = normalizeParticipantIds(conversation.groupAdmins || []).filter(
-      (uid) => uid !== String(currentUserId)
-    );
+    conversation.groupAdmins = normalizeParticipantIds(
+      conversation.groupAdmins || [],
+    ).filter((uid) => uid !== String(currentUserId));
 
     const unreadCounts = getConversationUnreadCountsMap(conversation);
     unreadCounts.delete(String(currentUserId));
@@ -763,7 +829,9 @@ export default class ConversationService {
     });
 
     const latestConversation = await this.reloadConversation(conversation._id);
-    await this.publishConversationUpdate(latestConversation, [String(currentUserId)]);
+    await this.publishConversationUpdate(latestConversation, [
+      String(currentUserId),
+    ]);
     return latestConversation;
   }
 }
