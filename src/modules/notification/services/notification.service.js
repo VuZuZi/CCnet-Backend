@@ -60,30 +60,47 @@ export default class NotificationService {
   async emitToUser(recipientId, event, payload) {
     if (!recipientId || !event) return false;
 
+    const userId = String(recipientId);
+    let emitted = false;
+
+    /*
+      Quan trọng:
+      - Luôn emit trực tiếp vào SSE local trước.
+      - Sau đó mới publish qua realtime gateway nếu có.
+      - Không return sớm ở gateway, vì nếu Redis/pubsub không loop về đúng process
+        thì client đang mở SSE trên process hiện tại sẽ không nhận realtime.
+    */
     try {
-      if (this.notificationRealtimeGateway) {
-        await this.notificationRealtimeGateway.publishToUser?.({
-          userId: String(recipientId),
-          eventName: event,
-          payload,
-        });
-        return true;
-      }
-
       if (this.notificationSSEService) {
-        this.notificationSSEService.emitToUser(String(recipientId), event, payload);
-        return true;
+        this.notificationSSEService.emitToUser(userId, event, payload);
+        emitted = true;
       }
-
-      return false;
     } catch (error) {
-      this.logger?.error?.('[NotificationService] emitToUser failed', {
-        recipientId,
+      this.logger?.error?.('[NotificationService] local SSE emit failed', {
+        recipientId: userId,
         event,
         error,
       });
-      return false;
     }
+
+    try {
+      if (this.notificationRealtimeGateway) {
+        await this.notificationRealtimeGateway.publishToUser?.({
+          userId,
+          eventName: event,
+          payload,
+        });
+        emitted = true;
+      }
+    } catch (error) {
+      this.logger?.error?.('[NotificationService] realtime gateway publish failed', {
+        recipientId: userId,
+        event,
+        error,
+      });
+    }
+
+    return emitted;
   }
 
   async emitUnreadCount(recipientId, unreadCount = null) {
@@ -176,7 +193,11 @@ export default class NotificationService {
   }
 
   async markAsRead({ id, recipientId }) {
-    const updated = await this.notificationRepository.markAsRead({ id, recipientId });
+    const updated = await this.notificationRepository.markAsRead({
+      id,
+      recipientId,
+    });
+
     const serialized = this.serializeNotification(updated);
     const unreadCount = await this.getUnreadCountValue(recipientId);
 
@@ -225,7 +246,11 @@ export default class NotificationService {
   }
 
   async deleteNotification({ id, recipientId }) {
-    const deleted = await this.notificationRepository.deleteById({ id, recipientId });
+    const deleted = await this.notificationRepository.deleteById({
+      id,
+      recipientId,
+    });
+
     const serialized = this.serializeNotification(deleted);
     const unreadCount = await this.getUnreadCountValue(recipientId);
 

@@ -1,5 +1,6 @@
 import AppError from '../../core/AppError.js';
 import User from '../user/user.model.js';
+import { getContainer } from '../../container/index.js';
 
 const toRadians = (value) => (value * Math.PI) / 180;
 const normalizeRole = (role = '') => role.toString().trim().toLowerCase();
@@ -257,7 +258,7 @@ const buildMapSummary = ({ mode, zoom, items, clusters }) => ({
 });
 
 export default class HelpRequestService {
-    constructor({
+  constructor({
     helprequestRepository,
     cloudinaryProvider,
     transactionManager,
@@ -302,6 +303,142 @@ export default class HelpRequestService {
     });
   }
 
+  resolveNotificationService() {
+    if (this.notificationService?.createNotification) {
+      return this.notificationService;
+    }
+
+    try {
+      const container = getContainer();
+
+      const resolved =
+        container.resolve?.('notificationService') ||
+        container.resolve?.('NotificationService');
+
+      if (resolved?.createNotification) {
+        this.notificationService = resolved;
+        return resolved;
+      }
+    } catch (error) {
+      console.warn('[NOTIFY] notificationService is unavailable for realtime emit', {
+        error: error?.message || error,
+      });
+    }
+
+    return null;
+  }
+
+  async createRealtimeNotification(payload) {
+    const notificationService = this.resolveNotificationService();
+
+    if (notificationService?.createNotification) {
+      return notificationService.createNotification(payload);
+    }
+
+    if (!this.notificationRepository) {
+      return null;
+    }
+
+    const created = await this.notificationRepository.create(payload);
+
+    console.warn(
+      '[NOTIFY] Created notification without realtime because notificationService is unavailable',
+      {
+        type: payload?.type,
+        recipientId: String(payload?.recipientId || ''),
+      },
+    );
+
+    return created;
+  }
+
+  async notifyAdminsAboutNewHelpRequest(helpRequest, senderId) {
+    if (!helpRequest?._id) {
+      return null;
+    }
+
+    let admins = [];
+
+    try {
+      if (this.userRepository?.findAdmins) {
+        admins = await this.userRepository.findAdmins();
+      }
+
+      if (!admins || admins.length === 0) {
+        admins = await User.find(
+          {
+            role: { $in: ['admin', 'manager', 'ADMIN', 'MANAGER'] },
+            isActive: { $ne: false },
+            status: { $ne: 'banned' },
+          },
+          { _id: 1, fullName: 1, email: 1, role: 1 },
+        )
+          .lean()
+          .exec();
+      }
+    } catch (error) {
+      console.error('[NOTIFY] Failed to resolve admins for new help request:', error.message);
+      return null;
+    }
+
+    const adminIds = (admins || [])
+      .map((admin) => admin?._id || admin?.id || admin)
+      .filter(Boolean);
+
+    if (!adminIds.length) {
+      console.warn('[NOTIFY] No admin recipients found for new help request notification', {
+        helpRequestId: String(helpRequest._id),
+      });
+      return null;
+    }
+
+    const requesterName =
+      helpRequest.requesterId?.fullName ||
+      helpRequest.requester?.fullName ||
+      helpRequest.requesterName ||
+      'Người dùng';
+
+    const title = 'Có yêu cầu trợ giúp mới';
+    const message = `${requesterName} vừa gửi yêu cầu trợ giúp: ${
+      helpRequest.title || 'Không có tiêu đề'
+    }`;
+
+    const results = await Promise.allSettled(
+      adminIds.map((adminId) =>
+        this.createHelpRequestNotification({
+          type: 'HELP_REQUEST_ASSIGNMENT_RESPONDED',
+          title,
+          message,
+          recipientId: adminId,
+          senderId,
+          link: `/admin/need-help/${helpRequest._id}`,
+          metadata: {
+            helpRequestId: helpRequest._id.toString(),
+            action: 'created',
+            requesterId: String(
+              senderId ||
+                helpRequest.requesterId?._id ||
+                helpRequest.requesterId ||
+                '',
+            ),
+          },
+        }),
+      ),
+    );
+
+    const successCount = results.filter(
+      (result) => result.status === 'fulfilled' && result.value,
+    ).length;
+
+    console.log('[NOTIFY] New help request admin notifications created', {
+      helpRequestId: String(helpRequest._id),
+      adminCount: adminIds.length,
+      successCount,
+    });
+
+    return successCount > 0;
+  }
+
   async createHelpRequest(userId, data) {
     const helpRequestData = {
       ...data,
@@ -318,9 +455,19 @@ export default class HelpRequestService {
 
     const helpRequest = await this.helpRequestRepository.create(helpRequestData);
 
-    return this.helpRequestRepository.findById(helpRequest._id, {
-      populate: ['requester'],
-    });
+    const populatedHelpRequest = await this.helpRequestRepository.findById(
+      helpRequest._id,
+      {
+        populate: ['requester'],
+      },
+    );
+
+    await this.notifyAdminsAboutNewHelpRequest(
+      populatedHelpRequest || helpRequest,
+      userId,
+    );
+
+    return populatedHelpRequest || helpRequest;
   }
 
   async getHelpRequests(filters = {}, options = {}) {
@@ -535,6 +682,15 @@ export default class HelpRequestService {
       throw new AppError('Selected user is not an organizer', 400);
     }
 
+    const requesterId = helpRequest.requesterId?._id || helpRequest.requesterId;
+
+    if (String(requesterId) === String(organizerId)) {
+      throw new AppError(
+        'Không thể gợi ý yêu cầu trợ giúp cho chính người đã tạo yêu cầu.',
+        400,
+      );
+    }
+
     const wasAssignedBefore = Boolean(helpRequest.assignedOrganizerId);
 
     const previousState = {
@@ -579,11 +735,11 @@ export default class HelpRequestService {
     await this.createHelpRequestNotification({
       type: wasAssignedBefore ? 'HELP_REQUEST_REASSIGNED' : 'HELP_REQUEST_ASSIGNED',
       title: wasAssignedBefore
-        ? 'NeedHelp assignment updated'
-        : 'New NeedHelp assignment',
+        ? 'Cập nhật gợi ý yêu cầu trợ giúp'
+        : 'Yêu cầu trợ giúp mới được gợi ý',
       message: wasAssignedBefore
-        ? `You were reassigned to request: ${helpRequest.title}`
-        : `You were assigned to request: ${helpRequest.title}`,
+        ? `Bạn được gợi ý lại để xử lý yêu cầu: ${helpRequest.title}`
+        : `Bạn được gợi ý xử lý yêu cầu: ${helpRequest.title}`,
       recipientId: organizerId,
       senderId: adminId,
       link: `/organizer/need-help?highlight=${helpRequest._id}`,
@@ -678,6 +834,7 @@ export default class HelpRequestService {
     }
 
     const organizer = await this.userRepository.findById(organizerId);
+    const organizerName = organizer?.fullName || 'Tổ chức';
     const isAccept = action === 'accept';
 
     const updateData = isAccept
@@ -692,11 +849,11 @@ export default class HelpRequestService {
       await this.createHelpRequestNotification({
         type: 'HELP_REQUEST_ASSIGNMENT_RESPONDED',
         title: isAccept
-          ? 'Organizer accepted assignment'
-          : 'Organizer declined assignment',
+          ? 'Tổ chức đã chấp nhận gợi ý'
+          : 'Tổ chức đã từ chối gợi ý',
         message: isAccept
-          ? `${organizer?.fullName || 'Organizer'} accepted the assignment for: ${helpRequest.title}`
-          : `${organizer?.fullName || 'Organizer'} declined the assignment for: ${helpRequest.title}`,
+          ? `${organizerName} đã chấp nhận xử lý yêu cầu: ${helpRequest.title}`
+          : `${organizerName} đã từ chối xử lý yêu cầu: ${helpRequest.title}`,
         recipientId: adminRecipientId,
         senderId: organizerId,
         link: `/admin/need-help/${helpRequest._id}`,
@@ -712,11 +869,11 @@ export default class HelpRequestService {
       await this.createHelpRequestNotification({
         type: 'HELP_REQUEST_ASSIGNMENT_RESPONDED',
         title: isAccept
-          ? `${organizer?.fullName || 'Organizer'} accepted your NeedHelp request`
-          : `${organizer?.fullName || 'Organizer'} could not take your NeedHelp request`,
+          ? `${organizerName} đã chấp nhận yêu cầu của bạn`
+          : `${organizerName} chưa thể xử lý yêu cầu của bạn`,
         message: isAccept
-          ? `Your request "${helpRequest.title}" is now being handled.`
-          : `Your request "${helpRequest.title}" is waiting for a new organizer assignment.`,
+          ? `Yêu cầu "${helpRequest.title}" của bạn đang được xử lý.`
+          : `Yêu cầu "${helpRequest.title}" của bạn đang chờ được gợi ý cho tổ chức khác.`,
         recipientId: helpRequest.requesterId,
         senderId: organizerId,
         link: `/need-help/${helpRequest._id}`,
@@ -759,8 +916,8 @@ export default class HelpRequestService {
     if (requesterId && String(requesterId) !== String(userId)) {
       await this.createHelpRequestNotification({
         type: 'HELP_REQUEST_COMPLETED',
-        title: 'NeedHelp request completed',
-        message: `Your request "${helpRequest.title}" has been marked as completed.`,
+        title: 'Yêu cầu trợ giúp đã hoàn thành',
+        message: `Yêu cầu "${helpRequest.title}" của bạn đã được đánh dấu là hoàn thành.`,
         recipientId: requesterId,
         senderId: userId,
         link: `/need-help/${helpRequest._id}`,
@@ -774,8 +931,8 @@ export default class HelpRequestService {
     if (organizerId && String(organizerId) !== String(userId)) {
       await this.createHelpRequestNotification({
         type: 'HELP_REQUEST_COMPLETED',
-        title: 'NeedHelp request completed',
-        message: `The request "${helpRequest.title}" has been marked as completed.`,
+        title: 'Yêu cầu trợ giúp đã hoàn thành',
+        message: `Yêu cầu "${helpRequest.title}" đã được đánh dấu là hoàn thành.`,
         recipientId: organizerId,
         senderId: userId,
         link: `/organizer/need-help?highlight=${helpRequest._id}`,
@@ -1128,7 +1285,7 @@ export default class HelpRequestService {
     };
   }
 
-     async createHelpRequestNotification({
+  async createHelpRequestNotification({
     type,
     title,
     message,
@@ -1158,23 +1315,14 @@ export default class HelpRequestService {
     };
 
     try {
-      if (this.notificationService?.createNotification) {
-        return await this.notificationService.createNotification(payload);
-      }
+      const created = await this.createRealtimeNotification(payload);
 
-      if (!this.notificationRepository) {
-        return null;
-      }
-
-      const created = await this.notificationRepository.create(payload);
-
-      console.warn(
-        '[NOTIFY] Created help request notification without realtime because notificationService is unavailable',
-        {
+      if (!created) {
+        console.warn('[NOTIFY] Notification was not created', {
           type: typeValue,
           recipientId: String(recipientId),
-        }
-      );
+        });
+      }
 
       return created;
     } catch (error) {

@@ -1891,19 +1891,19 @@ class ProjectService {
                   organizerId,
                 );
                 await this.notificationRepository.create({
-                  recipientId: linkedHelpRequest.requesterId,
-                  actorId: organizerId,
-                  type: "help_request_assignment_responded",
-                  title: `${organizerUser?.fullName || "Organizer"} đã đồng ý host yêu cầu của bạn`,
-                  message: `Yêu cầu "${linkedHelpRequest.title}" đã được chấp nhận và chuyển thành dự án.`,
-                  actionUrl: `/projects/${createdProject._id}`,
-                  metadata: {
-                    helpRequestId: String(linkedHelpRequest._id),
-                    projectId: String(createdProject._id),
-                    organizerId: String(organizerId),
-                    action: "hosted",
-                  },
-                });
+  recipientId: linkedHelpRequest.requesterId,
+  actorId: organizerId,
+  type: "help_request_assignment_responded",
+  title: `${organizerUser?.fullName || "Organizer"} đã đồng ý host yêu cầu của bạn`,
+  message: `Yêu cầu "${linkedHelpRequest.title}" đã được chấp nhận và chuyển thành dự án.`,
+  actionUrl: `/projects/create/${createdProject._id}/edit`,
+  metadata: {
+    helpRequestId: String(linkedHelpRequest._id),
+    projectId: String(createdProject._id),
+    organizerId: String(organizerId),
+    action: "hosted",
+  },
+});
               }
             } catch (err) {
               console.error(

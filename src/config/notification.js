@@ -1,3 +1,5 @@
+import { asValue } from "awilix";
+
 import { config } from "./index.js";
 import ApiResponse from "../core/Response.js";
 import AppError from "../core/AppError.js";
@@ -42,12 +44,47 @@ function resolveUserRepository() {
   }
 }
 
+function registerNotificationModuleInContainer(notificationModule) {
+  if (!notificationModule) return;
+
+  try {
+    const container = getContainer();
+
+    const services = notificationModule.services || {};
+    const repositories = notificationModule.repositories || {};
+
+    container.register({
+      notificationModule: asValue(notificationModule),
+
+      notificationService: asValue(services.notificationService),
+      notificationSettingService: asValue(services.notificationSettingService),
+      notificationSSEService: asValue(services.notificationSSEService),
+      notificationBroadcastService: asValue(services.notificationBroadcastService),
+      notificationRealtimeGateway: asValue(services.notificationRealtimeGateway),
+
+      notificationRepository: asValue(repositories.notificationRepository),
+      notificationSettingRepository: asValue(
+        repositories.notificationSettingRepository
+      ),
+    });
+
+    console.log(
+      "[NotificationConfig] Notification services registered in DI container"
+    );
+  } catch (error) {
+    console.error(
+      "[NotificationConfig] Failed to register notification services in DI container",
+      error
+    );
+  }
+}
+
 export const eventBus = getSharedEventBus();
 
 export async function createConfiguredNotificationModule({
   eventBus: customEventBus = eventBus,
 } = {}) {
-  return createNotificationModule({
+  const notificationModule = await createNotificationModule({
     authenticate,
     eventBus: customEventBus,
     redis: resolveRedisInstance(),
@@ -73,10 +110,12 @@ export async function createConfiguredNotificationModule({
         { role, isActive: true, status: "active" },
         { _id: 1 }
       ).lean();
+
       return users.map((user) => String(user._id));
     },
     resolveUsersByIds: async (ids = []) => {
       const normalizedIds = [...new Set((ids || []).map(String).filter(Boolean))];
+
       if (!normalizedIds.length) return [];
 
       return User.find(
@@ -85,6 +124,10 @@ export async function createConfiguredNotificationModule({
       ).lean();
     },
   });
+
+  registerNotificationModuleInContainer(notificationModule);
+
+  return notificationModule;
 }
 
 export { DOMAIN_EVENTS };
