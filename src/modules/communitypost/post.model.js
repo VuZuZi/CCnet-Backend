@@ -34,46 +34,106 @@ const commentShortSchema = new mongoose.Schema(
 
 const sharedEntitySchema = new mongoose.Schema(
   {
-    entityId: { type: mongoose.Schema.Types.ObjectId, required: true },
+    entityId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+    },
+
     entityModel: {
       type: String,
       enum: ["Project", "NeedHelp"],
       required: true,
     },
-    title: { type: String, required: true },
-    thumbnail: { type: String }, // Link ảnh cover của project
-    description: { type: String, maxlength: 500 },
-    
-    // 👇 CÁC TRƯỜNG BỔ SUNG ĐỂ ĐỒNG BỘ VỚI FRONTEND 👇
-    ownerName: { type: String }, // Tên người đăng/tổ chức
-    location: { type: String }, // Địa điểm thực hiện
-    endDateText: { type: String }, // Text hiển thị thời gian (VD: "Còn 5 ngày")
-    fundingPercent: { type: Number, default: 0 }, // Phần trăm gây quỹ
-    isFunded: { type: Boolean, default: false }, // Cờ đánh dấu có gây quỹ không
-    isUrgent: { type: Boolean, default: false } // Cờ khẩn cấp
+
+    title: {
+      type: String,
+      required: true,
+      maxlength: 200,
+      set: (value) => String(value || "").slice(0, 200),
+    },
+
+    thumbnail: {
+      type: String,
+      default: "",
+    },
+
+    description: {
+      type: String,
+      maxlength: 500,
+      default: "",
+      set: (value) => String(value || "").slice(0, 500),
+    },
+
+    ownerName: {
+      type: String,
+      maxlength: 100,
+      default: "",
+      set: (value) => String(value || "").slice(0, 100),
+    },
+
+    location: {
+      type: String,
+      maxlength: 200,
+      default: "",
+      set: (value) => String(value || "").slice(0, 200),
+    },
+
+    endDateText: {
+      type: String,
+      maxlength: 100,
+      default: "",
+      set: (value) => String(value || "").slice(0, 100),
+    },
+
+    fundingPercent: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+
+    isFunded: {
+      type: Boolean,
+      default: false,
+    },
+
+    isUrgent: {
+      type: Boolean,
+      default: false,
+    },
   },
   { _id: false },
 );
 
 const postSchema = new mongoose.Schema(
   {
-    content: { type: String, trim: true, maxlength: 5000 },
+    content: {
+      type: String,
+      trim: true,
+      maxlength: 5000,
+      default: "",
+    },
+
     images: {
       type: [imageSchema],
+      default: [],
       validate: [
         (val) => val.length <= 10,
         "Hệ thống chỉ cho phép tối đa 10 ảnh mỗi bài viết",
       ],
     },
 
-    author: { type: authorShortSchema, required: true },
+    author: {
+      type: authorShortSchema,
+      required: true,
+    },
 
-    // 👇 2 TRƯỜNG MỚI ĐỂ QUẢN LÝ BÀI SHARE
     type: {
       type: String,
       enum: ["normal", "share_project", "need_help"],
       default: "normal",
     },
+
     sharedEntity: {
       type: sharedEntitySchema,
       default: null,
@@ -84,6 +144,7 @@ const postSchema = new mongoose.Schema(
       enum: ["public", "friends", "private"],
       default: "public",
     },
+
     status: {
       type: String,
       enum: ["active", "banned", "hidden"],
@@ -92,6 +153,7 @@ const postSchema = new mongoose.Schema(
 
     latestComments: {
       type: [commentShortSchema],
+      default: [],
       validate: [
         (val) => val.length <= 3,
         "Latest comments cannot exceed 3 items",
@@ -99,21 +161,49 @@ const postSchema = new mongoose.Schema(
     },
 
     stats: {
-      likes: { type: Number, default: 0, min: 0 },
-      comments: { type: Number, default: 0, min: 0 },
-      shares: { type: Number, default: 0, min: 0 },
-      views: { type: Number, default: 0, min: 0 },
+      likes: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      comments: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      shares: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      views: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
     },
 
     hashtags: {
       type: [{ type: String, lowercase: true, trim: true }],
+      default: [],
       validate: [(val) => val.length <= 30, "Tối đa 30 hashtags"],
     },
 
-    isEdited: { type: Boolean, default: false },
+    isEdited: {
+      type: Boolean,
+      default: false,
+    },
 
-    isDeleted: { type: Boolean, default: false, select: false },
-    deletedAt: { type: Date, select: false },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      select: false,
+    },
+
+    deletedAt: {
+      type: Date,
+      select: false,
+    },
   },
   {
     timestamps: true,
