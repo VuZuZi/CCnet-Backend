@@ -27,12 +27,38 @@ class ProjectAIReviewRepository {
   }
 
   async findLatestCurrent(projectId, submissionVersion, projectSnapshotHash) {
-    return ProjectAIReviewRun.findOne({
+    const filter = {
       projectId,
       submissionVersion,
       projectSnapshotHash,
       status: { $ne: PROJECT_AI_REVIEW_STATUS.STALE },
+    };
+
+    const activeRun = await ProjectAIReviewRun.findOne({
+      ...filter,
+      status: { $in: [PROJECT_AI_REVIEW_STATUS.RUNNING, PROJECT_AI_REVIEW_STATUS.PENDING] },
     })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec();
+
+    if (activeRun) {
+      return activeRun;
+    }
+
+    const completedRun = await ProjectAIReviewRun.findOne({
+      ...filter,
+      status: PROJECT_AI_REVIEW_STATUS.COMPLETED,
+    })
+      .sort({ createdAt: -1 })
+      .lean()
+      .exec();
+
+    if (completedRun) {
+      return completedRun;
+    }
+
+    return ProjectAIReviewRun.findOne(filter)
       .sort({ createdAt: -1 })
       .lean()
       .exec();
@@ -49,6 +75,31 @@ class ProjectAIReviewRepository {
           PROJECT_AI_REVIEW_STATUS.FAILED,
         ],
       },
+    };
+
+    if (excludeRunId) {
+      filter._id = { $ne: excludeRunId };
+    }
+
+    return ProjectAIReviewRun.updateMany(
+      filter,
+      { $set: { status: PROJECT_AI_REVIEW_STATUS.STALE } },
+      session ? { session } : {}
+    ).exec();
+  }
+
+  async markStaleCurrentSnapshotRuns(
+    projectId,
+    submissionVersion,
+    projectSnapshotHash,
+    { excludeRunId = null } = {},
+    session = null
+  ) {
+    const filter = {
+      projectId,
+      submissionVersion,
+      projectSnapshotHash,
+      status: { $ne: PROJECT_AI_REVIEW_STATUS.STALE },
     };
 
     if (excludeRunId) {

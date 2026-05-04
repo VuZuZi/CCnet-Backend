@@ -548,10 +548,6 @@ class ProjectAIReviewService {
   async createRunForProject(projectOrId, { jobName = PROJECT_AI_REVIEW_JOB.RUN } = {}) {
     const snapshotState = await this.ensureProjectReviewSnapshot(projectOrId);
 
-    await this.projectAIReviewRepository.markStaleForProject(
-      snapshotState.project._id
-    );
-
     let providerConfig;
     let initialFailure = null;
 
@@ -875,6 +871,13 @@ class ProjectAIReviewService {
       const completed = await this.projectAIReviewRepository.markCompleted(
         run._id,
         normalizedOutput
+      );
+
+      await this.projectAIReviewRepository.markStaleCurrentSnapshotRuns(
+        run.projectId,
+        run.submissionVersion,
+        run.projectSnapshotHash,
+        { excludeRunId: run._id }
       );
 
       this.eventBus?.emit?.(DOMAIN_EVENTS.PROJECT_AI_REVIEW_COMPLETED, {
