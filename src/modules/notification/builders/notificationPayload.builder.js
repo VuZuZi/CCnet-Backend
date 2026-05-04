@@ -10,13 +10,9 @@ function ensureText(value, fallback) {
 function buildCommentPreview(value, maxLength = 80) {
   const text = ensureText(value, '');
 
-  if (!text) {
-    return '';
-  }
+  if (!text) return '';
 
-  if (text.length <= maxLength) {
-    return text;
-  }
+  if (text.length <= maxLength) return text;
 
   return `${text.slice(0, maxLength).trim()}...`;
 }
@@ -27,8 +23,8 @@ export function buildNotificationPayload(input) {
   switch (type) {
     case NOTIFICATION_TYPES.FOLLOW_CREATED:
       return {
-        title: 'New follower',
-        message: `${ensureText(input.actorName, 'Someone')} started following you.`,
+        title: 'Có người theo dõi mới',
+        message: `${ensureText(input.actorName, 'Một người dùng')} đã bắt đầu theo dõi bạn.`,
         actionUrl: ensureText(input.actionUrl, '/profile/followers'),
         entityType: 'follow',
         entityId: input.entityId || null,
@@ -40,10 +36,10 @@ export function buildNotificationPayload(input) {
 
     case NOTIFICATION_TYPES.PROJECT_UPDATED:
       return {
-        title: ensureText(input.title, 'Project updated'),
+        title: ensureText(input.title, 'Dự án đã được cập nhật'),
         message: ensureText(
           input.message,
-          `${ensureText(input.projectName, 'A project')} has a new update.`
+          `Dự án "${ensureText(input.projectName, 'không tên')}" có cập nhật mới.`
         ),
         actionUrl: ensureText(input.actionUrl, `/projects/${input.entityId || ''}`),
         entityType: 'project',
@@ -52,6 +48,69 @@ export function buildNotificationPayload(input) {
           projectName: input.projectName || null,
           status: input.status || null,
           actorName: input.actorName || null,
+          feedback: input.feedback || input.reason || null,
+          reason: input.reason || null,
+          decision: input.decision || null,
+        },
+      };
+
+    case NOTIFICATION_TYPES.PROJECT_APPROVED:
+      return {
+        title: ensureText(input.title, 'Dự án đã được phê duyệt'),
+        message: ensureText(
+          input.message,
+          `Dự án "${ensureText(input.projectName, 'không tên')}" đã được phê duyệt.`
+        ),
+        actionUrl: ensureText(input.actionUrl, `/projects/${input.entityId || ''}`),
+        entityType: 'project',
+        entityId: input.entityId || null,
+        metadata: {
+          projectName: input.projectName || null,
+          status: input.status || 'APPROVED',
+          actorName: input.actorName || null,
+          feedback: input.feedback || input.reason || null,
+          reason: input.reason || null,
+          decision: input.decision || 'APPROVED',
+        },
+      };
+
+    case NOTIFICATION_TYPES.PROJECT_REJECTED:
+      return {
+        title: ensureText(input.title, 'Dự án đã bị từ chối'),
+        message: ensureText(
+          input.message,
+          `Dự án "${ensureText(input.projectName, 'không tên')}" đã bị từ chối trong quá trình kiểm duyệt.`
+        ),
+        actionUrl: ensureText(input.actionUrl, `/projects/${input.entityId || ''}`),
+        entityType: 'project',
+        entityId: input.entityId || null,
+        metadata: {
+          projectName: input.projectName || null,
+          status: input.status || 'REJECTED',
+          actorName: input.actorName || null,
+          feedback: input.feedback || input.reason || null,
+          reason: input.reason || null,
+          decision: input.decision || 'REJECTED',
+        },
+      };
+
+    case NOTIFICATION_TYPES.PROJECT_REVISION_REQUESTED:
+      return {
+        title: ensureText(input.title, 'Dự án cần chỉnh sửa'),
+        message: ensureText(
+          input.message,
+          `Dự án "${ensureText(input.projectName, 'không tên')}" cần cập nhật thêm trước khi được phê duyệt.`
+        ),
+        actionUrl: ensureText(input.actionUrl, `/projects/${input.entityId || ''}`),
+        entityType: 'project',
+        entityId: input.entityId || null,
+        metadata: {
+          projectName: input.projectName || null,
+          status: input.status || 'REVISION_REQUESTED',
+          actorName: input.actorName || null,
+          feedback: input.feedback || input.reason || null,
+          reason: input.reason || null,
+          decision: input.decision || 'REVISION_REQUESTED',
         },
       };
 
@@ -168,10 +227,10 @@ export function buildNotificationPayload(input) {
 
     case NOTIFICATION_TYPES.ORGANIZER_REQUEST_SUBMITTED:
       return {
-        title: 'New organizer request',
+        title: 'Yêu cầu tổ chức mới',
         message: ensureText(
           input.message,
-          `${ensureText(input.applicantName, 'A user')} submitted an organizer request.`
+          `${ensureText(input.applicantName, 'Một người dùng')} đã gửi yêu cầu trở thành tổ chức.`
         ),
         actionUrl: ensureText(input.actionUrl, `/admin/organizers/${input.entityId || ''}`),
         entityType: 'organizer_request',
@@ -186,10 +245,10 @@ export function buildNotificationPayload(input) {
 
     case NOTIFICATION_TYPES.ORGANIZER_REQUEST_UPDATED:
       return {
-        title: 'Organizer request updated',
+        title: 'Yêu cầu tổ chức đã được cập nhật',
         message: ensureText(
           input.message,
-          'Your organizer request status has changed.'
+          'Trạng thái yêu cầu tổ chức của bạn đã thay đổi.'
         ),
         actionUrl: ensureText(input.actionUrl, '/organizer/request'),
         entityType: 'organizer_request',
@@ -202,8 +261,8 @@ export function buildNotificationPayload(input) {
 
     case NOTIFICATION_TYPES.SYSTEM_ANNOUNCEMENT:
       return {
-        title: ensureText(input.title, 'System announcement'),
-        message: ensureText(input.message, 'You have a new system notification.'),
+        title: ensureText(input.title, 'Thông báo hệ thống'),
+        message: ensureText(input.message, 'Bạn có một thông báo hệ thống mới.'),
         actionUrl: input.actionUrl ? String(input.actionUrl).trim() : null,
         entityType: 'system',
         entityId: input.entityId || null,
@@ -212,7 +271,6 @@ export function buildNotificationPayload(input) {
         },
       };
 
-    // --- Cases from feature/Hieu_Donate ---
     case NOTIFICATION_TYPES.DONATION_SUCCESSFUL:
       return {
         title: 'Nhận được khoản tài trợ mới',
@@ -249,13 +307,17 @@ export function buildNotificationPayload(input) {
 
     case NOTIFICATION_TYPES.TRANSACTION_REFUNDED: {
       const refundReason = input.isAutoRefund ? 'từ dự án đã hủy' : 'theo yêu cầu của bạn';
+
       return {
         title: 'Hoàn tiền thành công',
         message: `Số tiền ${input.amount ? input.amount.toLocaleString('vi-VN') : ''} VNĐ đã được hoàn vào ví nội bộ ${refundReason}.`,
         actionUrl: ensureText(input.actionUrl, '/profile?view=wallet&tab=wallet'),
         entityType: 'transaction',
         entityId: input.entityId || null,
-        metadata: { amount: input.amount || 0, isAutoRefund: input.isAutoRefund },
+        metadata: {
+          amount: input.amount || 0,
+          isAutoRefund: input.isAutoRefund,
+        },
       };
     }
 
@@ -285,24 +347,27 @@ export function buildNotificationPayload(input) {
         actionUrl: ensureText(input.actionUrl, '/wallet/history'),
         entityType: 'transaction',
         entityId: input.entityId || null,
-        metadata: { amount: input.amount || 0 },
+        metadata: {
+          amount: input.amount || 0,
+        },
       };
 
     case NOTIFICATION_TYPES.TRANSACTION_FAILED:
       return {
         title: 'Giao dịch thất bại',
-        message: 'Giao dịch ủng hộ của bạn không thành công (có thể do lỗi từ phía ngân hàng hoặc bạn đã chủ động hủy).',
+        message: 'Giao dịch ủng hộ của bạn không thành công. Có thể do lỗi từ phía ngân hàng hoặc bạn đã chủ động hủy.',
         actionUrl: ensureText(input.actionUrl, '/wallet/history'),
         entityType: 'transaction',
         entityId: input.entityId || null,
-        metadata: { amount: input.amount || 0 },
+        metadata: {
+          amount: input.amount || 0,
+        },
       };
 
-    // --- Cases from dev ---
     case NOTIFICATION_TYPES.POST_REACTED:
       return {
-        title: 'New reaction on your post',
-        message: `${ensureText(input.actorName, 'Someone')} liked your post.`,
+        title: 'Bài viết của bạn có tương tác mới',
+        message: `${ensureText(input.actorName, 'Một người dùng')} đã thích bài viết của bạn.`,
         actionUrl: ensureText(input.actionUrl, `/community/${input.postId || ''}`),
         entityType: 'post',
         entityId: input.postId || null,
@@ -315,14 +380,14 @@ export function buildNotificationPayload(input) {
       };
 
     case NOTIFICATION_TYPES.POST_COMMENTED: {
-      const actorName = ensureText(input.actorName, 'Someone');
+      const actorName = ensureText(input.actorName, 'Một người dùng');
       const previewContent = buildCommentPreview(input.previewContent);
 
       return {
-        title: 'New comment on your post',
+        title: 'Bài viết của bạn có bình luận mới',
         message: previewContent
-          ? `${actorName} commented on your post: "${previewContent}"`
-          : `${actorName} commented on your post.`,
+          ? `${actorName} đã bình luận về bài viết của bạn: "${previewContent}"`
+          : `${actorName} đã bình luận về bài viết của bạn.`,
         actionUrl: ensureText(
           input.actionUrl,
           `/community/${input.postId || ''}?commentId=${input.commentId || ''}`
@@ -340,7 +405,7 @@ export function buildNotificationPayload(input) {
     }
 
     case NOTIFICATION_TYPES.COMMENT_REPLIED: {
-      const actorName = ensureText(input.actorName, 'Someone');
+      const actorName = ensureText(input.actorName, 'Một người dùng');
       const previewContent = buildCommentPreview(input.previewContent);
 
       return {
@@ -366,7 +431,7 @@ export function buildNotificationPayload(input) {
     }
 
     case NOTIFICATION_TYPES.COMMENT_REACTED: {
-      const actorName = ensureText(input.actorName, 'Someone');
+      const actorName = ensureText(input.actorName, 'Một người dùng');
 
       return {
         title: 'Bình luận của bạn có tương tác mới',
@@ -388,7 +453,7 @@ export function buildNotificationPayload(input) {
     }
 
     case NOTIFICATION_TYPES.MESSAGE_REACTED: {
-      const actorName = ensureText(input.actorName, 'Someone');
+      const actorName = ensureText(input.actorName, 'Một người dùng');
 
       return {
         title: 'Tin nhắn của bạn có tương tác mới',

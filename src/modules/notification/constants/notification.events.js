@@ -1,35 +1,41 @@
 export const DOMAIN_EVENTS = Object.freeze({
-  FOLLOW_CREATED: 'follow.created',
-
   PROJECT_UPDATED: 'project.updated',
-  PROJECT_SUBMITTED_FOR_APPROVAL: 'project.submittedForApproval',
-  PROJECT_STATUS_UPDATED: 'project.statusUpdated',
-  PROJECT_REVIEW_SUBMITTED_TO_ADMINS: 'projectReview.submittedToAdmins',
-  PROJECT_RESUBMITTED_FOR_APPROVAL: 'projectReview.resubmittedForApproval',
-  PROJECT_AI_REVIEW_COMPLETED: 'projectReview.aiCompleted',
-  PROJECT_AI_REVIEW_FAILED: 'projectReview.aiFailed',
-  PROJECT_MILESTONE_COMPLETED: 'project.milestoneCompleted',
-  PROJECT_FUNDING_COMPLETED: 'project.fundingCompleted',
+  PROJECT_SUBMITTED_FOR_APPROVAL: 'project.submitted_for_approval',
+  PROJECT_STATUS_UPDATED: 'project.status_updated',
+  PROJECT_REVIEW_DECIDED: 'project.review_decided',
 
-  EVIDENCE_SUBMITTED_MANUAL: 'evidence.submittedManual',
+  PROJECT_REVIEW_SUBMITTED_TO_ADMINS: 'project.review_submitted_to_admins',
+  PROJECT_RESUBMITTED_FOR_APPROVAL: 'project.resubmitted_for_approval',
+  PROJECT_AI_REVIEW_COMPLETED: 'project.ai_review_completed',
+  PROJECT_AI_REVIEW_FAILED: 'project.ai_review_failed',
 
-  ORGANIZER_REQUEST_SUBMITTED: 'organizerRequest.submitted',
-  ORGANIZER_REQUEST_UPDATED: 'organizerRequest.updated',
+  ORGANIZER_REQUEST_SUBMITTED: 'organizer_request.submitted',
+  ORGANIZER_REQUEST_UPDATED: 'organizer_request.updated',
+  ORGANIZER_REQUEST_APPROVED: 'organizer_request.approved',
+  ORGANIZER_REQUEST_DECLINED: 'organizer_request.declined',
 
-  SYSTEM_ANNOUNCEMENT_CREATED: 'systemAnnouncement.created',
-  SYSTEM_NOTIFICATION: 'system.notification',
+  HELP_REQUEST_ASSIGNED: 'help_request.assigned',
+  HELP_REQUEST_REASSIGNED: 'help_request.reassigned',
+  HELP_REQUEST_VERIFIED: 'help_request.verified',
+  HELP_REQUEST_REJECTED: 'help_request.rejected',
+  HELP_REQUEST_COMPLETED: 'help_request.completed',
+  HELP_REQUEST_ASSIGNMENT_RESPONDED: 'help_request.assignment_responded',
 
   DONATION_SUCCESSFUL: 'donation.successful',
-  TRANSACTION_REFUND_REQUESTED: 'transaction.refundRequested',
+
+  REFUND_REQUEST_SUBMITTED: 'refund_request.submitted',
   TRANSACTION_REFUNDED: 'transaction.refunded',
-  TRANSACTION_REFUND_REJECTED: 'transaction.refundRejected',
-  TRANSACTION_WITHDRAWAL_REQUESTED: 'transaction.withdrawalRequested',
+  REFUND_REQUEST_REJECTED: 'refund_request.rejected',
   TRANSACTION_FAILED: 'transaction.failed',
-  REFUND_COMPLETED: "transaction.refundCompleted",
 
   POST_REACTED: 'post.reacted',
   POST_COMMENTED: 'post.commented',
-  COMMENT_REPLIED: 'comment.replied',
-  COMMENT_REACTED: 'comment.reacted',
-  MESSAGE_REACTED: 'message.reacted',
+
+  VOLUNTEER_APPLIED: 'volunteer.applied',
+  VOLUNTEER_APPLICATION_APPROVED: 'volunteer.application_approved',
+  VOLUNTEER_APPLICATION_REJECTED: 'volunteer.application_rejected',
+
+  VOLUNTEER_WITHDRAW_REQUESTED: 'volunteer.withdraw_requested',
+  VOLUNTEER_WITHDRAW_APPROVED: 'volunteer.withdraw_approved',
+  VOLUNTEER_WITHDRAW_REJECTED: 'volunteer.withdraw_rejected',
 });

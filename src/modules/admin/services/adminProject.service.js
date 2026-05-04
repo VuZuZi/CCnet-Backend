@@ -87,7 +87,7 @@ class AdminProjectService {
     const { title, message } = buildProjectStatusNotificationMessage(
       project.title,
       project.status,
-      feedback
+      feedback,
     );
 
     const actionUrl =
@@ -109,6 +109,7 @@ class AdminProjectService {
 
   _extractUserId(value) {
     if (!value) return "";
+
     if (typeof value === "object") {
       return String(value._id || "").trim();
     }
@@ -126,7 +127,7 @@ class AdminProjectService {
       ...new Set(
         (recipientIds || [])
           .map((id) => String(id || "").trim())
-          .filter(Boolean)
+          .filter(Boolean),
       ),
     ];
 
@@ -155,7 +156,7 @@ class AdminProjectService {
 
     const approvedApplications = await this.volunteerRepository.findByProject(
       project._id,
-      "APPROVED"
+      "APPROVED",
     );
 
     const approvedVolunteerIds = (approvedApplications || [])
@@ -182,7 +183,7 @@ class AdminProjectService {
 
     const existingEscrow = await this.escrowRepository.findByProjectId(
       projectId,
-      session
+      session,
     );
 
     if (existingEscrow) {
@@ -198,7 +199,7 @@ class AdminProjectService {
         completedRefunds: 0,
         totalDisbursed: 0,
       },
-      session
+      session,
     );
   }
 
@@ -230,8 +231,12 @@ class AdminProjectService {
 
       if (currentStatus === finalStatus) {
         if (options.conflictOnNoop) {
-          throw new AppError("Project status has already changed. Please reload.", 409);
+          throw new AppError(
+            "Project status has already changed. Please reload.",
+            409,
+          );
         }
+
         return project;
       }
 
@@ -261,13 +266,16 @@ class AdminProjectService {
         options.expectedReviewDecisionLockId !== undefined &&
         project.reviewDecisionLockId !== options.expectedReviewDecisionLockId
       ) {
-        throw new AppError("Project review decision is already in progress. Please reload.", 409);
+        throw new AppError(
+          "Project review decision is already in progress. Please reload.",
+          409,
+        );
       }
 
       if (!allowedTransitions.includes(finalStatus)) {
         throw new AppError(
           `Cannot transition project from ${currentStatus} to ${finalStatus}`,
-          400
+          400,
         );
       }
 
@@ -282,7 +290,7 @@ class AdminProjectService {
       ) {
         throw new AppError(
           "The project has exceeded the maximum of 2 revision requests.",
-          400
+          400,
         );
       }
 
@@ -290,7 +298,7 @@ class AdminProjectService {
         project,
         finalStatus,
         normalizedFeedback,
-        adminId
+        adminId,
       );
 
       let cancellationSummary = null;
@@ -310,7 +318,7 @@ class AdminProjectService {
             {
               session,
               actorId: adminId,
-            }
+            },
           );
 
         const totalRefunded = Number(cancellationSummary?.totalRefunded || 0);
@@ -318,8 +326,9 @@ class AdminProjectService {
 
         updateData.currentAmount = Math.max(
           0,
-          Number(project?.currentAmount || 0) - totalRefunded
+          Number(project?.currentAmount || 0) - totalRefunded,
         );
+
         updateData.refundSummary = {
           isRefunded: totalRefunded > 0,
           totalRefunded,
@@ -328,7 +337,7 @@ class AdminProjectService {
           message:
             totalRefunded > 0
               ? `Hệ thống đã tự động hoàn 100% tiền cho ${Number(
-                  cancellationSummary?.donorCount || 0
+                  cancellationSummary?.donorCount || 0,
                 )} người dùng quyên góp do dự án bị hủy.`
               : "Không có giao dịch quyên góp hợp lệ nào cần hoàn tiền cho dự án này.",
         };
@@ -341,10 +350,10 @@ class AdminProjectService {
         cancellationRecipientIds = [
           ...(cancellationSummary?.refundedUserIds || []),
           ...(approvedVolunteers || []).map((item) =>
-            this._extractUserId(item?.volunteerId)
+            this._extractUserId(item?.volunteerId),
           ),
           ...(pendingVolunteers || []).map((item) =>
-            this._extractUserId(item?.volunteerId)
+            this._extractUserId(item?.volunteerId),
           ),
         ];
       }
@@ -353,7 +362,7 @@ class AdminProjectService {
         await this._ensureEscrowForFundedProject(
           projectId,
           project.projectType,
-          session
+          session,
         );
       }
 
@@ -367,12 +376,12 @@ class AdminProjectService {
               projectSnapshotHash: options.expectedProjectSnapshotHash,
               reviewDecisionLockId: options.expectedReviewDecisionLockId,
             },
-            session
+            session,
           )
         : await this.projectRepository.updateById(
             projectId,
             updateData,
-            session
+            session,
           );
 
       if (!updatedProject) {
@@ -383,7 +392,7 @@ class AdminProjectService {
         await this.userRepository.updateById(
           extractObjectId(project.organizerId),
           userUpdate,
-          session
+          session,
         );
       }
 
@@ -393,13 +402,13 @@ class AdminProjectService {
             "project-maintenance",
             "check-revision-timeout",
             { projectId },
-            { delay: 14 * 24 * 60 * 60 * 1000 }
+            { delay: 14 * 24 * 60 * 60 * 1000 },
           )
           .catch((err) =>
             console.error(
               `[Queue] Failed to schedule timeout for ${projectId}`,
-              err.message
-            )
+              err.message,
+            ),
           );
       }
 
@@ -444,11 +453,17 @@ class AdminProjectService {
           ? updateData.updateRequestReason
           : updateData.rejectionReason;
 
-      this._emitProjectStatusUpdated({
-        project: updatedProject,
-        actorId: adminId,
-        feedback: notificationFeedback,
-      });
+      const isProjectReviewDecisionFlow = Boolean(
+        options.expectedReviewDecisionLockId,
+      );
+
+      if (!isProjectReviewDecisionFlow) {
+        this._emitProjectStatusUpdated({
+          project: updatedProject,
+          actorId: adminId,
+          feedback: notificationFeedback,
+        });
+      }
 
       if (finalStatus === PROJECT_STATUS.CANCELLED_BY_PLATFORM) {
         this._emitProjectCancellationSystemNotification({

@@ -1,10 +1,15 @@
 export const NOTIFICATION_TYPES = Object.freeze({
   FOLLOW_CREATED: 'follow_created',
+
   PROJECT_UPDATED: 'project_updated',
+  PROJECT_APPROVED: 'project_approved',
+  PROJECT_REJECTED: 'project_rejected',
+  PROJECT_REVISION_REQUESTED: 'project_revision_requested',
   PROJECT_REVIEW_SUBMITTED_TO_ADMINS: 'project_review_submitted_to_admins',
   PROJECT_RESUBMITTED_FOR_APPROVAL: 'project_resubmitted_for_approval',
   PROJECT_AI_REVIEW_COMPLETED: 'project_ai_review_completed',
   PROJECT_AI_REVIEW_FAILED: 'project_ai_review_failed',
+
   ORGANIZER_REQUEST_SUBMITTED: 'organizer_request_submitted',
   ORGANIZER_REQUEST_UPDATED: 'organizer_request_updated',
   SYSTEM_ANNOUNCEMENT: 'system_announcement',

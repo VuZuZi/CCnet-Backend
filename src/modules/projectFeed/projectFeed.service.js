@@ -84,7 +84,7 @@ class ProjectFeedService {
     const can = await this._canPost(project, userId);
     if (!can) {
       throw new AppError(
-        "Chỉ nhà tổ chức hoặc tình nguyện viên đã được duyệt mới có thể đăng bài.",
+        "Chỉ tổ chức hoặc tình nguyện viên đã được duyệt mới có thể đăng bài.",
         403,
       );
     }

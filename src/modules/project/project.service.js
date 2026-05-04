@@ -29,6 +29,11 @@ const toBoundNumber = (value, fallback = null) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const REVIEW_EDITABLE_STATUSES = new Set([
+  PROJECT_STATUS.REVISION_REQUESTED,
+  PROJECT_STATUS.REJECTED,
+]);
+
 const buildPagination = (totalItems, currentPage, pageSize) => {
   const totalPages = Math.ceil(totalItems / pageSize) || 1;
   return {
@@ -143,9 +148,9 @@ class ProjectService {
       Number(
         Array.isArray(project?.volunteerRoles)
           ? project.volunteerRoles.reduce(
-            (sum, role) => sum + Number(role?.quantity || 0),
-            0,
-          )
+              (sum, role) => sum + Number(role?.quantity || 0),
+              0,
+            )
           : 0,
       );
 
@@ -182,7 +187,7 @@ class ProjectService {
       String(project?.projectType || "").toUpperCase() === "FUNDED";
     const needsVolunteers = Boolean(
       project?.needsVolunteers ||
-      String(project?.projectType || "").toUpperCase() === "VOLUNTEER_ONLY",
+        String(project?.projectType || "").toUpperCase() === "VOLUNTEER_ONLY",
     );
 
     let score = 0;
@@ -655,7 +660,6 @@ class ProjectService {
     }
   }
 
-
   async _processMediaPayload(mediaArray, organizerId, context) {
     const validMediaIds = new Set();
     const newMediaToInsert = [];
@@ -707,10 +711,10 @@ class ProjectService {
             width: item.width || 0,
             height: item.height || 0,
             captureMetadata: {
-              source: 'NONE',
+              source: "NONE",
               lat: null,
               lng: null,
-              location: null
+              location: null,
             },
             uploadedBy: organizerId,
             context,
@@ -857,14 +861,14 @@ class ProjectService {
 
     if (project.status !== PROJECT_STATUS.DRAFT) {
       throw new AppError(
-        "Chỉ có thể Gửi duyệt dự án đang ở trạng thái Bản nháp (DRAFT).",
+        "Chỉ có thể gửi duyệt dự án đang ở trạng thái bản nháp.",
         400,
       );
     }
 
     if (!project.startDate || !project.endDate) {
       throw new AppError(
-        "Bắt buộc phải cấu hình Ngày bắt đầu và Ngày kết thúc.",
+        "Bắt buộc phải cấu hình ngày bắt đầu và ngày kết thúc.",
         400,
       );
     }
@@ -900,7 +904,7 @@ class ProjectService {
 
     await this._createProjectAIReviewRunNonFatal(
       updatedProject,
-      "submitForApproval"
+      "submitForApproval",
     );
 
     if (this.eventBus) {
@@ -1279,7 +1283,7 @@ class ProjectService {
     let project = await this.projectRepository.findByIdWithDetails(projectId);
     if (!project) throw new AppError("Không tìm thấy dự án hoặc dự án đã bị xóa", 404);
 
-    if (typeof this.syncVolunteerOnlyProjectStatus === 'function') {
+    if (typeof this.syncVolunteerOnlyProjectStatus === "function") {
       project = await this.syncVolunteerOnlyProjectStatus(project);
     }
 
@@ -1292,7 +1296,7 @@ class ProjectService {
     if (this.milestoneEvidenceRepository?.findAllByProject) {
       parallelTasks.push(
         this.milestoneEvidenceRepository.findAllByProject(projectId)
-          .then(res => evidences = res)
+          .then((res) => evidences = res),
       );
     }
 
@@ -1300,14 +1304,14 @@ class ProjectService {
       if (this.escrowRepository?.findByProjectId) {
         parallelTasks.push(
           this.escrowRepository.findByProjectId(projectId)
-            .then(res => escrow = res)
+            .then((res) => escrow = res),
         );
       }
 
       if (this.disbursementRequestRepository?.findAllByProject) {
         parallelTasks.push(
           this.disbursementRequestRepository.findAllByProject(projectId)
-            .then(res => requests = res)
+            .then((res) => requests = res),
         );
       }
     }
@@ -1316,8 +1320,8 @@ class ProjectService {
       await Promise.all(parallelTasks);
     }
 
-    if (this.redis && typeof this.redis.incr === 'function') {
-      this.redis.incr(`project:${projectId}:views`).catch(() => { });
+    if (this.redis && typeof this.redis.incr === "function") {
+      this.redis.incr(`project:${projectId}:views`).catch(() => {});
     }
 
     const orgId = project.organizerId?._id || project.organizerId;
@@ -1326,7 +1330,7 @@ class ProjectService {
 
     if (userId && this.followRepository) {
       const followTasks = [
-        this.followRepository.existsProjectFollow(userId, projectId)
+        this.followRepository.existsProjectFollow(userId, projectId),
       ];
       if (orgId) {
         followTasks.push(this.followRepository.exists(userId, orgId));
@@ -1343,18 +1347,23 @@ class ProjectService {
       ? isOrganizer
         ? ProjectDTO.toOrganizerDetail(project, escrow, evidences, requests)
         : ProjectDTO.toPublicDetail(project, escrow, evidences, requests)
-      : (typeof project.toObject === 'function' ? project.toObject() : project);
+      : (typeof project.toObject === "function" ? project.toObject() : project);
 
-    const decorated = typeof this._decorateProjectUrgency === 'function'
+    const decorated = typeof this._decorateProjectUrgency === "function"
       ? this._decorateProjectUrgency(safeProjectData)
       : safeProjectData;
 
     if (project.projectType === PROJECT_TYPE.FUNDED) {
-      const failedStatuses = ['FAILED_FUNDING', 'CANCELLED_FRAUD', 'CANCELLED_BY_PLATFORM', 'CANCELLED_BY_ORGANIZER'];
+      const failedStatuses = [
+        "FAILED_FUNDING",
+        "CANCELLED_FRAUD",
+        "CANCELLED_BY_PLATFORM",
+        "CANCELLED_BY_ORGANIZER",
+      ];
       if (failedStatuses.includes(project.status)) {
         decorated.refundBoard = project.refundSummary || {
           isRefunded: false,
-          message: "Dự án đã bị hủy/thất bại. Hệ thống đang tiến hành đối soát và hoàn trả tiền 100% về ví cho các Nhà hảo tâm."
+          message: "Dự án đã bị hủy/thất bại. Hệ thống đang tiến hành đối soát và hoàn trả tiền 100% về ví cho các Nhà hảo tâm.",
         };
       }
     }
@@ -1378,18 +1387,20 @@ class ProjectService {
 
   async getRevisionDetail(projectId, organizerId) {
     const project = await this.projectRepository.findByIdWithDetails(projectId);
-    if (!project) throw new AppError("KhĂ´ng tĂ¬m tháº¥y dá»± Ă¡n.", 404);
-
-    if (toIdString(project.organizerId) !== toIdString(organizerId)) {
-      throw new AppError("Báº¡n khĂ´ng cĂ³ quyá»n", 403);
+    if (!project) {
+      throw new AppError("Không tìm thấy dự án.", 404);
     }
 
-    if (project.status === PROJECT_STATUS.REJECTED) {
-      throw new AppError("Dá»± Ă¡n Ä‘Ă£ bá»‹ tá»« chá»‘i, khĂ´ng thá»ƒ chá»‰nh sá»­a gá»­i láº¡i.", 400);
+    const ownerId = project.organizerId?._id || project.organizerId;
+    if (toIdString(ownerId) !== toIdString(organizerId)) {
+      throw new AppError("Bạn không có quyền truy cập dự án này.", 403);
     }
 
-    if (project.status !== PROJECT_STATUS.REVISION_REQUESTED) {
-      throw new AppError("Chá»‰ cĂ³ thá»ƒ má»Ÿ báº£n chá»‰nh sá»­a khi dá»± Ă¡n Ä‘ang Ä‘Æ°á»£c yĂªu cáº§u bá»• sung.", 400);
+    if (!REVIEW_EDITABLE_STATUSES.has(project.status)) {
+      throw new AppError(
+        "Chỉ có thể mở bản chỉnh sửa khi dự án bị từ chối hoặc được yêu cầu bổ sung.",
+        400,
+      );
     }
 
     return project;
@@ -1402,7 +1413,7 @@ class ProjectService {
     expiresAt.setDate(expiresAt.getDate() + 14);
 
     if (Date.now() > expiresAt.getTime()) {
-      throw new AppError("ÄĂ£ quĂ¡ háº¡n 14 ngĂ y Ä‘á»ƒ chá»‰nh sá»­a dá»± Ă¡n.", 400);
+      throw new AppError("Đã quá hạn 14 ngày để chỉnh sửa dự án.", 400);
     }
   }
 
@@ -1418,6 +1429,14 @@ class ProjectService {
       resubmittedAt,
       submissionVersion,
       projectSnapshotHash,
+      currentAmount,
+      stats,
+      approvedStatus,
+      rejectionReason,
+      revisionRequestedAt,
+      reviewDecisionLockId,
+      reviewDecisionLockedAt,
+      reviewDecisionLockedBy,
       ...finalUpdateData
     } = updateData;
 
@@ -1456,18 +1475,19 @@ class ProjectService {
 
   async updateRevisionProject(projectId, organizerId, updateData) {
     const existingProject = await this.projectRepository.findById(projectId);
-    if (!existingProject) throw new AppError("KhĂ´ng tĂ¬m tháº¥y dá»± Ă¡n.", 404);
+    if (!existingProject) {
+      throw new AppError("Không tìm thấy dự án.", 404);
+    }
 
     if (toIdString(existingProject.organizerId) !== toIdString(organizerId)) {
-      throw new AppError("Báº¡n khĂ´ng cĂ³ quyá»n", 403);
+      throw new AppError("Bạn không có quyền chỉnh sửa dự án này.", 403);
     }
 
-    if (existingProject.status === PROJECT_STATUS.REJECTED) {
-      throw new AppError("Dá»± Ă¡n Ä‘Ă£ bá»‹ tá»« chá»‘i, khĂ´ng thá»ƒ chá»‰nh sá»­a gá»­i láº¡i.", 400);
-    }
-
-    if (existingProject.status !== PROJECT_STATUS.REVISION_REQUESTED) {
-      throw new AppError("Chá»‰ cĂ³ thá»ƒ chá»‰nh sá»­a dá»± Ă¡n Ä‘ang Ä‘Æ°á»£c yĂªu cáº§u bá»• sung.", 400);
+    if (!REVIEW_EDITABLE_STATUSES.has(existingProject.status)) {
+      throw new AppError(
+        "Chỉ có thể chỉnh sửa dự án bị từ chối hoặc dự án đang được yêu cầu bổ sung.",
+        400,
+      );
     }
 
     this._assertRevisionWindowOpen(existingProject);
@@ -1484,7 +1504,10 @@ class ProjectService {
     );
 
     if (!updatedProject) {
-      throw new AppError("Xung Ä‘á»™t há»‡ thá»‘ng: Dá»± Ă¡n Ä‘Ă£ Ä‘á»•i tráº¡ng thĂ¡i.", 409);
+      throw new AppError(
+        "Xung đột hệ thống: Dự án đã đổi trạng thái hoặc bạn không còn quyền chỉnh sửa.",
+        409,
+      );
     }
 
     return updatedProject;
@@ -1492,18 +1515,19 @@ class ProjectService {
 
   async resubmitRevisionProject(projectId, organizerId) {
     const existingProject = await this.projectRepository.findById(projectId);
-    if (!existingProject) throw new AppError("KhĂ´ng tĂ¬m tháº¥y dá»± Ă¡n.", 404);
+    if (!existingProject) {
+      throw new AppError("Không tìm thấy dự án.", 404);
+    }
 
     if (toIdString(existingProject.organizerId) !== toIdString(organizerId)) {
-      throw new AppError("Báº¡n khĂ´ng cĂ³ quyá»n", 403);
+      throw new AppError("Bạn không có quyền gửi lại dự án này.", 403);
     }
 
-    if (existingProject.status === PROJECT_STATUS.REJECTED) {
-      throw new AppError("Dá»± Ă¡n Ä‘Ă£ bá»‹ tá»« chá»‘i, khĂ´ng thá»ƒ gá»­i láº¡i.", 400);
-    }
-
-    if (existingProject.status !== PROJECT_STATUS.REVISION_REQUESTED) {
-      throw new AppError("Chá»‰ cĂ³ thá»ƒ gá»­i láº¡i dá»± Ă¡n Ä‘ang Ä‘Æ°á»£c yĂªu cáº§u bá»• sung.", 400);
+    if (!REVIEW_EDITABLE_STATUSES.has(existingProject.status)) {
+      throw new AppError(
+        "Chỉ có thể gửi lại dự án bị từ chối hoặc dự án đang được yêu cầu bổ sung.",
+        400,
+      );
     }
 
     this._assertRevisionWindowOpen(existingProject);
@@ -1513,9 +1537,9 @@ class ProjectService {
       const issues =
         validationResult.error.issues || validationResult.error.errors;
       const firstError =
-        issues && issues.length > 0 ? issues[0].message : "Dá»¯ liá»‡u khĂ´ng há»£p lá»‡";
+        issues && issues.length > 0 ? issues[0].message : "Dữ liệu không hợp lệ";
       throw new AppError(
-        `Dá»± Ă¡n chÆ°a Ä‘á»§ Ä‘iá»u kiá»‡n gá»­i láº¡i: ${firstError}`,
+        `Dự án chưa đủ điều kiện gửi lại: ${firstError}`,
         400,
       );
     }
@@ -1524,8 +1548,8 @@ class ProjectService {
 
     const now = new Date();
     const nextSubmissionVersion = Math.max(
-      2,
-      Number(existingProject.submissionVersion || 1) + 1,
+      1,
+      Number(existingProject.submissionVersion || 0) + 1,
     );
 
     const updatedProject = await this.projectRepository.resubmitRevisionAtomic(
@@ -1537,21 +1561,37 @@ class ProjectService {
         resubmittedAt: now,
         revisionRequestedAt: null,
         rejectionReason: null,
-        submissionVersion: nextSubmissionVersion,
+        updateRequestReason: null,
+        updateRequestedAt: null,
         projectSnapshotHash: null,
+        reviewDecisionLockId: null,
+        reviewDecisionLockedAt: null,
+        reviewDecisionLockedBy: null,
+        submissionVersion: nextSubmissionVersion,
       },
     );
 
     if (!updatedProject) {
-      throw new AppError("Xung Ä‘á»™t há»‡ thá»‘ng: Dá»± Ă¡n Ä‘Ă£ Ä‘á»•i tráº¡ng thĂ¡i.", 409);
+      throw new AppError(
+        "Xung đột hệ thống: Dự án đã đổi trạng thái hoặc bạn không còn quyền gửi lại.",
+        409,
+      );
     }
 
     await this._createProjectAIReviewRunNonFatal(
       updatedProject,
-      "resubmitRevisionProject"
+      "resubmitRevisionProject",
     );
 
     this.eventBus?.emit?.(DOMAIN_EVENTS.PROJECT_RESUBMITTED_FOR_APPROVAL, {
+      projectId: updatedProject._id,
+      organizerId,
+      projectType: updatedProject.projectType,
+      title: updatedProject.title,
+      actionUrl: `/admin/projects/${updatedProject._id}/review`,
+    });
+
+    this.eventBus?.emit?.(DOMAIN_EVENTS.PROJECT_REVIEW_SUBMITTED_TO_ADMINS, {
       projectId: updatedProject._id,
       organizerId,
       projectType: updatedProject.projectType,
@@ -1851,19 +1891,19 @@ class ProjectService {
                   organizerId,
                 );
                 await this.notificationRepository.create({
-                  recipientId: linkedHelpRequest.requesterId,
-                  actorId: organizerId,
-                  type: "help_request_assignment_responded",
-                  title: `${organizerUser?.fullName || "Organizer"} đã đồng ý host yêu cầu của bạn`,
-                  message: `Yêu cầu "${linkedHelpRequest.title}" đã được chấp nhận và chuyển thành dự án.`,
-                  actionUrl: `/projects/${createdProject._id}`,
-                  metadata: {
-                    helpRequestId: String(linkedHelpRequest._id),
-                    projectId: String(createdProject._id),
-                    organizerId: String(organizerId),
-                    action: "hosted",
-                  },
-                });
+  recipientId: linkedHelpRequest.requesterId,
+  actorId: organizerId,
+  type: "help_request_assignment_responded",
+  title: `${organizerUser?.fullName || "Organizer"} đã đồng ý host yêu cầu của bạn`,
+  message: `Yêu cầu "${linkedHelpRequest.title}" đã được chấp nhận và chuyển thành dự án.`,
+  actionUrl: `/projects/create/${createdProject._id}/edit`,
+  metadata: {
+    helpRequestId: String(linkedHelpRequest._id),
+    projectId: String(createdProject._id),
+    organizerId: String(organizerId),
+    action: "hosted",
+  },
+});
               }
             } catch (err) {
               console.error(
@@ -1895,7 +1935,7 @@ class ProjectService {
     }
   }
 
-async updateDraftProject(projectId, organizerId, updateData) {
+  async updateDraftProject(projectId, organizerId, updateData) {
     const existingProject = await this.projectRepository.findById(projectId);
     if (!existingProject) {
       throw new AppError("Không tìm thấy bản nháp dự án", 404);
@@ -1906,7 +1946,7 @@ async updateDraftProject(projectId, organizerId, updateData) {
     }
 
     if (existingProject.status !== PROJECT_STATUS.DRAFT) {
-      throw new AppError("Chỉ có thể chỉnh sửa dự án Nháp.", 400);
+      throw new AppError("Chỉ có thể chỉnh sửa dự án nháp.", 400);
     }
 
     let { deletedDocumentIds, coverMedia, documents, ...finalUpdateData } =
@@ -2020,7 +2060,7 @@ async updateDraftProject(projectId, organizerId, updateData) {
             const isChanged =
               finalUpdateData.coverMedia &&
               finalUpdateData.coverMedia.publicId !==
-              existingProject.coverMedia.publicId;
+                existingProject.coverMedia.publicId;
             const isDeleted =
               finalUpdateData.coverMedia &&
               finalUpdateData.coverMedia.url === null;
