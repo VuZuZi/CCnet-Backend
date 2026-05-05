@@ -50,8 +50,7 @@ class TransactionService {
                 await this.projectRepository.updateById(
                     project._id,
                     {
-                        status: PROJECT_STATUS.EXECUTING,
-                        endDate: new Date()
+                        status: PROJECT_STATUS.EXECUTING
                     },
                     session
                 );
