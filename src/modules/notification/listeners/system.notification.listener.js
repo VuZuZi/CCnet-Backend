@@ -96,8 +96,10 @@ export function registerSystemNotificationListener({
         title: event.title,
         message: event.message,
         actionUrl: event.actionUrl || null,
+        entityType: event.entityType || null,
         entityId: event.entityId || null,
         severity: event.severity,
+        metadata: event.metadata || {},
       };
 
       const actorId = event.actorId || null;
@@ -149,8 +151,10 @@ export function registerSystemNotificationListener({
         title: event.title,
         message: event.message,
         actionUrl: event.actionUrl || null,
+        entityType: event.entityType || null,
         entityId: event.entityId || null,
         severity: event.severity || "info",
+        metadata: event.metadata || {},
       };
       const actorId = event.actorId || null;
 

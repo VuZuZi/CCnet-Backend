@@ -9,7 +9,10 @@ const expenseItemSchema = z.object({
     receiptMediaId: objectIdSchema.optional()
 }).strict();
 
+const submissionModeSchema = z.enum(['GPS_CHECKIN', 'MANUAL_UPLOAD']).default('MANUAL_UPLOAD');
+
 export const createEvidenceSchema = z.object({
+    submissionMode: submissionModeSchema.optional(),
     projectId: z.string().regex(/^[0-9a-fA-F]{24}$/, 'ID Dự án không hợp lệ'),
     milestoneId: z.string().uuid('Milestone ID phải là định dạng UUID'),
     reportContent: z.string().min(10, 'Vui lòng mô tả ngắn gọn tiến độ công việc'),
@@ -53,6 +56,7 @@ export const listEvidenceQuerySchema = z.object({
 }).strict();
 
 export const patchEvidenceSchema = z.object({
+    submissionMode: submissionModeSchema.optional(),
     reportContent: z.string().min(50, 'Báo cáo nghiệm thu phải có ít nhất 50 ký tự').optional(),
     
     mediaIds: z.array(objectIdSchema).optional(),
