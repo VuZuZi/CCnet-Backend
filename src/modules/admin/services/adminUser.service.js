@@ -1,9 +1,21 @@
 import AppError from "../../../core/AppError.js";
+import {
+  AUTH_REALTIME_CHANNELS,
+  AUTH_REALTIME_EVENTS,
+  getAuthBannedUserKey,
+} from "../../auth/authRealtime.constants.js";
 
 class AdminUserService {
-  constructor({ adminUserRepository, adminActionLogRepository }) {
+  constructor({
+    adminUserRepository,
+    adminActionLogRepository,
+    redis,
+    tokenRepository,
+  }) {
     this.adminUserRepository = adminUserRepository;
     this.adminActionLogRepository = adminActionLogRepository;
+    this.redis = redis;
+    this.tokenRepository = tokenRepository;
   }
 
   _ensureReason(reason) {
@@ -42,6 +54,52 @@ class AdminUserService {
       nextState,
       metadata,
     });
+  }
+
+  async _syncRealtimeBanState({ userId, status, isActive }) {
+    const normalizedUserId = String(userId || "").trim();
+    if (!normalizedUserId) return;
+
+    const normalizedStatus = String(status || "").trim().toLowerCase();
+    const isBlocked =
+      normalizedStatus === "banned" || isActive === false;
+    const occurredAt = new Date().toISOString();
+
+    if (isBlocked) {
+      try {
+        await this.tokenRepository?.deleteAllByUserId?.(normalizedUserId);
+      } catch (error) {
+        console.error(
+          "[AdminUserService] Failed to revoke refresh tokens:",
+          error?.message || error
+        );
+      }
+    }
+
+    if (!this.redis) return;
+
+    try {
+      if (isBlocked) {
+        await this.redis.set(getAuthBannedUserKey(normalizedUserId), "1");
+      } else {
+        await this.redis.del(getAuthBannedUserKey(normalizedUserId));
+      }
+
+      await this.redis.publish(AUTH_REALTIME_CHANNELS.USER_STATUS_CHANGED, {
+        userId: normalizedUserId,
+        status: normalizedStatus || (isBlocked ? "banned" : "active"),
+        isActive,
+        event: isBlocked
+          ? AUTH_REALTIME_EVENTS.USER_BANNED
+          : AUTH_REALTIME_EVENTS.USER_STATUS_CHANGED,
+        occurredAt,
+      });
+    } catch (error) {
+      console.error(
+        "[AdminUserService] Failed to publish user status socket event:",
+        error?.message || error
+      );
+    }
   }
 
   async getUserDetail(userId) {
@@ -93,6 +151,12 @@ class AdminUserService {
         email: updatedUser.email,
         fullName: updatedUser.fullName,
       },
+    });
+
+    await this._syncRealtimeBanState({
+      userId: updatedUser._id,
+      status: updatedUser.status,
+      isActive: updatedUser.isActive,
     });
 
     return updatedUser;
@@ -147,6 +211,12 @@ class AdminUserService {
         email: updatedUser.email,
         fullName: updatedUser.fullName,
       },
+    });
+
+    await this._syncRealtimeBanState({
+      userId: updatedUser._id,
+      status: updatedUser.status,
+      isActive: updatedUser.isActive,
     });
 
     return updatedUser;

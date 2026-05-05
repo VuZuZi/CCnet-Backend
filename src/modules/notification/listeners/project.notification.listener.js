@@ -174,7 +174,7 @@ async function handleProjectEvent({
     )
   );
 
-  if (event.status && mailProvider && userRepository) {
+  if (event.status && !event.skipEmail && mailProvider && userRepository) {
     try {
       for (const recipientId of recipientIds) {
         const user = await userRepository.findById(recipientId);
