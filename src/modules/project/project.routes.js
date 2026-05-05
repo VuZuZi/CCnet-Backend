@@ -16,7 +16,12 @@ import {
   validateBody,
   validateQuery,
 } from "../../middlewares/validate.middleware.js";
-import { uploadFiles, uploadMedia } from "../../middlewares/upload.middleware.js";
+import {
+  uploadFiles,
+  uploadMedia,
+  validateMagicBytes,
+} from "../../middlewares/upload.middleware.js";
+import { autoCleanupTempFiles } from "../../middlewares/cleanup.middleware.js";
 import { scopePerRequest } from "../../middlewares/di.middleware.js";
 
 import {
@@ -133,6 +138,8 @@ router.post(
   "/:id/feed/posts",
   authenticate,
   uploadMedia.single("media"),
+  autoCleanupTempFiles,
+  validateMagicBytes,
   execute("createFeedPost"),
 );
 

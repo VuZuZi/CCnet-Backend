@@ -89,6 +89,19 @@ const errorHandler = (err, req, res, next) => {
 
   /**
    * =========================
+   * MULTER UPLOAD ERRORS
+   * =========================
+   */
+  else if (err.name === 'MulterError') {
+    statusCode = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    message =
+      err.code === 'LIMIT_FILE_SIZE'
+        ? 'Tệp quá lớn. Vui lòng chọn tệp trong giới hạn cho phép.'
+        : 'Tệp tải lên không hợp lệ. Vui lòng kiểm tra lại file và thử lại.';
+  }
+
+  /**
+   * =========================
    * APPERROR FALLBACK
    * =========================
    */
