@@ -5,7 +5,6 @@ import { requireConversationParticipant } from "./helpers/conversation-access.he
 import { CHAT_CLOUDINARY_FOLDERS } from "../chat.upload.constants.js";
 import { mapCloudinaryAttachment } from "../mappers/cloudinary-attachment.mapper.js";
 import PinnedMessageRepository from "../domain/pinned-message.repository.js";
-import { DOMAIN_EVENTS } from "../../notification/constants/notification.events.js";
 
 const MAX_PINNED_MESSAGES_PER_CONVERSATION = 5;
 
@@ -27,13 +26,11 @@ export default class MessageService {
     publishService,
     cloudinaryProvider,
     pinnedMessageRepository,
-    eventBus,
   }) {
     this.conversationRepository = conversationRepository;
     this.messageRepository = messageRepository;
     this.publishService = publishService;
     this.cloudinaryProvider = cloudinaryProvider;
-    this.eventBus = eventBus;
     this.pinnedMessageRepository =
       pinnedMessageRepository || new PinnedMessageRepository();
   }
@@ -213,31 +210,6 @@ export default class MessageService {
       message: updatedMessage,
       participantIds: normalizeParticipantIds(conversation.participants || []),
     });
-
-    if (
-      isAddingReaction &&
-      this.eventBus &&
-      message.senderId &&
-      String(message.senderId) !== String(currentUserId)
-    ) {
-      const actorReaction = (updatedMessage.reactions || []).find(
-        (item) =>
-          String(item?.userId?._id || item?.userId || "") ===
-            String(currentUserId) &&
-          String(item?.emoji || "") === String(emoji || ""),
-      );
-      const actor = actorReaction?.userId;
-
-      await this.eventBus.emit(DOMAIN_EVENTS.MESSAGE_REACTED, {
-        recipientId: String(message.senderId),
-        actorId: String(currentUserId),
-        actorName: actor?.fullName || actor?.username || "Someone",
-        actorAvatar: actor?.avatar || null,
-        conversationId: String(message.conversationId),
-        messageId: String(message._id),
-        emoji: String(emoji || "").trim(),
-      });
-    }
 
     return updatedMessage;
   }

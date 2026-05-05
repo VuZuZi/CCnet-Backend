@@ -308,6 +308,7 @@ class PostService {
           postId: String(postId),
           commentId: String(newComment._id),
           parentCommentId: String(normalizedParentCommentId),
+          postOwnerId,
           previewContent: newComment.content,
         });
       }
@@ -736,6 +737,7 @@ class PostService {
         actorAvatar: actor?.avatar || null,
         postId: String(postId),
         commentId: String(commentId),
+        postOwnerId,
         reactionType: type,
       });
     }
