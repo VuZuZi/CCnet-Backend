@@ -14,16 +14,12 @@ export const DOMAIN_EVENTS = Object.freeze({
   PROJECT_RESUBMITTED_FOR_APPROVAL: 'project.resubmitted_for_approval',
   PROJECT_AI_REVIEW_COMPLETED: 'project.ai_review_completed',
   PROJECT_AI_REVIEW_FAILED: 'project.ai_review_failed',
-  PROJECT_MILESTONE_COMPLETED: 'project.milestone_completed',
   EVIDENCE_SUBMITTED_MANUAL: 'evidence.submitted_manual',
 
   ORGANIZER_REQUEST_SUBMITTED: 'organizer_request.submitted',
   ORGANIZER_REQUEST_UPDATED: 'organizer_request.updated',
   ORGANIZER_REQUEST_APPROVED: 'organizer_request.approved',
   ORGANIZER_REQUEST_DECLINED: 'organizer_request.declined',
-
-  SYSTEM_ANNOUNCEMENT_CREATED: 'system.announcement_created',
-  SYSTEM_NOTIFICATION: 'system.notification',
 
   HELP_REQUEST_ASSIGNED: 'help_request.assigned',
   HELP_REQUEST_REASSIGNED: 'help_request.reassigned',
@@ -37,8 +33,6 @@ export const DOMAIN_EVENTS = Object.freeze({
   KYC_GRACE_PERIOD_ENDED: 'kyc.gracePeriodEnded',
 
   DONATION_SUCCESSFUL: 'donation.successful',
-
-  EVIDENCE_SUBMITTED_MANUAL: 'evidence.submitted_manual',
   EVIDENCE_AUTO_APPROVED_GPS: 'evidence.auto_approved_gps',
   EVIDENCE_REVIEWED: 'evidence.reviewed',
 
