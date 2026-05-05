@@ -18,7 +18,8 @@ class MilestoneEvidenceService {
         mediaRepository,
         transactionManager,
         escrowRepository, // [NEW]: Inject thÃªm Repo nÃ y qua DI
-        eventBus = null
+        eventBus = null,
+        volunteerEngagementService = null
     }) {
         this.milestoneEvidenceRepository = milestoneEvidenceRepository;
         this.projectRepository = projectRepository;
@@ -27,6 +28,7 @@ class MilestoneEvidenceService {
         this.transactionManager = transactionManager;
         this.escrowRepository = escrowRepository;
         this.eventBus = eventBus;
+        this.volunteerEngagementService = volunteerEngagementService;
     }
 
     async _calculateFinancialContext(projectId) {
@@ -194,6 +196,19 @@ class MilestoneEvidenceService {
             entityId: String(projectId),
             metadata
         });
+    }
+
+    async _initializeVolunteerReviewsIfCompleted(projectId) {
+        if (!this.volunteerEngagementService || !projectId) return;
+
+        try {
+            await this.volunteerEngagementService.onProjectCompleted(projectId);
+        } catch (error) {
+            console.error('[MilestoneEvidenceService] Failed to initialize volunteer reviews for completed project', {
+                projectId: String(projectId),
+                error: error?.message || error
+            });
+        }
     }
 
     _extractReceiptMediaIds(expenseItems = []) {
@@ -774,6 +789,7 @@ class MilestoneEvidenceService {
         });
 
         await this._emitSystemNotifications(notificationEvents);
+        await this._initializeVolunteerReviewsIfCompleted(reviewedEvidence?.projectId);
 
         return reviewedEvidence;
     }
