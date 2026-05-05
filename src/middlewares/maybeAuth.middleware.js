@@ -1,4 +1,8 @@
 import { getContainer } from "../container/index.js";
+import {
+  assertActiveAuthenticatedUser,
+  buildRequestUser,
+} from "./authUserStatus.helper.js";
 
 export const maybeAuthenticate = async (req, res, next) => {
   try {
@@ -20,14 +24,12 @@ export const maybeAuthenticate = async (req, res, next) => {
     }
 
     const decoded = authService.verifyAccessToken(token);
-    req.user = {
-      userId: decoded.userId,
-      email: decoded.email,
-      role: decoded.role,
-      fullName: decoded.fullName,
-      avatar: decoded.avatar,
-      username: decoded.username || decoded.email.split("@")[0],
-    };
+    const activeUser = await assertActiveAuthenticatedUser({
+      container,
+      redis,
+      decoded,
+    });
+    req.user = buildRequestUser(decoded, activeUser);
     next();
   } catch {
     next();

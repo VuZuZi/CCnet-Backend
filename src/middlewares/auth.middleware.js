@@ -1,5 +1,9 @@
 import AppError from "../core/AppError.js";
 import { getContainer } from "../container/index.js";
+import {
+  assertActiveAuthenticatedUser,
+  buildRequestUser,
+} from "./authUserStatus.helper.js";
 
 export const authenticate = async (req, res, next) => {
   try {
@@ -35,15 +39,13 @@ export const authenticate = async (req, res, next) => {
     }
 
     const decoded = authService.verifyAccessToken(token);
+    const activeUser = await assertActiveAuthenticatedUser({
+      container,
+      redis,
+      decoded,
+    });
 
-    req.user = {
-      userId: decoded.userId,
-      email: decoded.email,
-      role: decoded.role,
-      fullName: decoded.fullName,
-      avatar: decoded.avatar,
-      username: decoded.username || decoded.email.split("@")[0],
-    };
+    req.user = buildRequestUser(decoded, activeUser);
 
     next();
   } catch (error) {
@@ -79,15 +81,13 @@ export const optionalAuthenticate = async (req, res, next) => {
     }
 
     const decoded = authService.verifyAccessToken(token);
+    const activeUser = await assertActiveAuthenticatedUser({
+      container,
+      redis,
+      decoded,
+    });
 
-    req.user = {
-      userId: decoded.userId,
-      email: decoded.email,
-      role: decoded.role,
-      fullName: decoded.fullName,
-      avatar: decoded.avatar,
-      username: decoded.username || decoded.email.split("@")[0],
-    };
+    req.user = buildRequestUser(decoded, activeUser);
 
     next();
   } catch (error) {

@@ -919,7 +919,12 @@ class ProjectService {
         projectId: updatedProject._id,
         organizerId,
         projectType: updatedProject.projectType,
-        title: updatedProject.title,
+        projectName: updatedProject.title,
+        status: PROJECT_STATUS.PENDING_APPROVAL,
+        title: "Dự án đã được gửi đi thành công",
+        message: `Dự án "${updatedProject.title}" đã được gửi đi thành công và đang chờ kiểm duyệt.`,
+        actionUrl: `/projects/${updatedProject._id}`,
+        skipEmail: true,
       });
     }
 
