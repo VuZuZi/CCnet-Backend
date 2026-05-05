@@ -40,13 +40,53 @@ class PostService {
     aspectRatio: m.height ? m.width / m.height : 1,
   });
 
+  _getUserId(user) {
+    return user?.userId || user?._id || user?.id || null;
+  }
+
   _formatUserMini(user) {
+    if (!user) return null;
+
     return {
-      _id: user.userId || user._id,
-      fullName: user.fullName,
-      avatar: user.avatar,
-      username: user.username,
+      _id: this._getUserId(user),
+      fullName: user.fullName || user.name || user.email || "Người dùng",
+      avatar: user.avatar || "",
+      username: user.username || "",
     };
+  }
+
+  async _getFreshUserMini(user) {
+    const userId = this._getUserId(user);
+
+    if (!userId) {
+      return this._formatUserMini(user);
+    }
+
+    try {
+      const freshUser = await this.userRepository.findById(userId);
+
+      if (freshUser) {
+        return {
+          _id: freshUser._id || freshUser.id || userId,
+          fullName:
+            freshUser.fullName ||
+            freshUser.name ||
+            user?.fullName ||
+            user?.email ||
+            "Người dùng",
+          avatar: freshUser.avatar || user?.avatar || "",
+          username: freshUser.username || user?.username || "",
+        };
+      }
+    } catch (error) {
+      console.error("[PostService] Cannot load fresh user mini:", error);
+    }
+
+    return this._formatUserMini(user);
+  }
+
+  _normalizePostObject(post) {
+    return post?.toObject?.() || post;
   }
 
   _resolvePostOwnerId(post) {
@@ -57,6 +97,62 @@ class PostService {
     }
 
     return String(post.author);
+  }
+
+  async _hydratePostAuthors(posts) {
+    if (!posts?.length) return posts || [];
+
+    const normalizedPosts = posts.map((post) => this._normalizePostObject(post));
+
+    const authorIds = [
+      ...new Set(
+        normalizedPosts
+          .map((post) => post?.author?._id || post?.author?.id)
+          .filter(Boolean)
+          .map(String),
+      ),
+    ];
+
+    if (!authorIds.length) return normalizedPosts;
+
+    const usersMap = new Map();
+
+    await Promise.all(
+      authorIds.map(async (authorId) => {
+        try {
+          const user = await this.userRepository.findById(authorId);
+          if (user) {
+            usersMap.set(String(authorId), user);
+          }
+        } catch {
+          // Không chặn feed nếu 1 user lỗi
+        }
+      }),
+    );
+
+    return normalizedPosts.map((post) => {
+      const authorId = post?.author?._id || post?.author?.id;
+      const freshUser = authorId ? usersMap.get(String(authorId)) : null;
+
+      if (!freshUser) return post;
+
+      return {
+        ...post,
+        author: {
+          _id: post.author?._id || freshUser._id || authorId,
+          fullName:
+            freshUser.fullName ||
+            post.author?.fullName ||
+            post.author?.username ||
+            "Người dùng",
+          avatar: freshUser.avatar || post.author?.avatar || "",
+          username: freshUser.username || post.author?.username || "",
+        },
+        latestComments: Array.isArray(post.latestComments)
+          ? post.latestComments.map((comment) => comment)
+          : [],
+      };
+    });
   }
 
   async _canViewerSeePost(post, viewerId) {
@@ -85,11 +181,17 @@ class PostService {
   }
 
   async createPost({ user, content, files, privacy, type, sharedEntity }) {
+    const authorMini = await this._getFreshUserMini(user);
+
+    if (!authorMini?._id) {
+      throw new AppError("Không xác định được người đăng bài.", 401);
+    }
+
     let images = [];
     if (files?.length) {
       const uploaded = await this.mediaService.uploadMultiple(
         files,
-        user.userId,
+        authorMini._id,
         "post",
       );
       images = uploaded.map(this._formatImage);
@@ -97,11 +199,14 @@ class PostService {
 
     const cleanContent = content?.trim();
     if (!cleanContent && !images.length && !sharedEntity) {
-      throw new AppError("Bạn ơi, nội dung bài viết không được để trống đâu nè.", 400);
+      throw new AppError(
+        "Bạn ơi, nội dung bài viết không được để trống đâu nè.",
+        400,
+      );
     }
 
     const newPost = await this.postRepository.create({
-      author: this._formatUserMini(user),
+      author: authorMini,
       content: cleanContent,
       hashtags: this._extractHashtags(cleanContent),
       images,
@@ -111,7 +216,7 @@ class PostService {
       stats: { likes: 0, comments: 0, shares: 0, views: 0 },
     });
 
-    this.redis.del(this._getFeedKey(null, 10)).catch(() => null);
+    await this._invalidateCache(newPost?._id);
     return newPost;
   }
 
@@ -153,7 +258,12 @@ class PostService {
       images.push(...uploaded.map(this._formatImage));
     }
 
-    if (images.length > 10) throw new AppError("Bạn chỉ có thể đăng tối đa 10 ảnh trong mỗi bài viết thôi nhé.", 400);
+    if (images.length > 10) {
+      throw new AppError(
+        "Bạn chỉ có thể đăng tối đa 10 ảnh trong mỗi bài viết thôi nhé.",
+        400,
+      );
+    }
 
     const updateData = {
       images,
@@ -210,7 +320,10 @@ class PostService {
   async addComment({ postId, user, content, parentCommentId = null }) {
     const targetPost = await this.postRepository.findById(postId);
     if (!targetPost) {
-      throw new AppError("Rất tiếc, bài viết này không còn tồn tại hoặc đã bị xóa.", 404);
+      throw new AppError(
+        "Rất tiếc, bài viết này không còn tồn tại hoặc đã bị xóa.",
+        404,
+      );
     }
 
     const trimmedContent = content?.trim();
@@ -218,12 +331,20 @@ class PostService {
       throw new AppError("Nội dung bình luận không được để trống bạn nhé.", 400);
     }
 
+    const authorMini = await this._getFreshUserMini(user);
+
     let normalizedParentCommentId = null;
     if (parentCommentId) {
-      const parentComment = await this.postRepository.findCommentById(parentCommentId);
+      const parentComment =
+        await this.postRepository.findCommentById(parentCommentId);
+
       if (!parentComment || String(parentComment.postId) !== String(postId)) {
-        throw new AppError("BÃ¬nh luáº­n báº¡n Ä‘ang tráº£ lá»i khÃ´ng cÃ²n tá»“n táº¡i.", 404);
+        throw new AppError(
+          "Bình luận bạn đang trả lời không còn tồn tại.",
+          404,
+        );
       }
+
       normalizedParentCommentId =
         parentComment.parentCommentId || parentComment._id;
     }
@@ -233,7 +354,7 @@ class PostService {
         const createdComment = await this.postRepository.createComment(
           {
             postId,
-            author: user.userId,
+            author: authorMini._id,
             content: trimmedContent,
             parentCommentId: normalizedParentCommentId,
           },
@@ -254,7 +375,7 @@ class PostService {
               _id: createdComment._id,
               content: createdComment.content,
               createdAt: createdComment.createdAt || new Date(),
-              author: this._formatUserMini(user),
+              author: authorMini,
               likesCount: 0,
               parentCommentId: null,
             },
@@ -268,7 +389,7 @@ class PostService {
     );
 
     const postOwnerId = this._resolvePostOwnerId(targetPost);
-    const actorId = String(user.userId);
+    const actorId = String(authorMini._id);
 
     console.log("[POST COMMENT] owner/actor", {
       postId: String(postId),
@@ -283,12 +404,12 @@ class PostService {
       await this.eventBus.emit(DOMAIN_EVENTS.POST_COMMENTED, {
         recipientId: postOwnerId,
         actorId,
-        actorName: user.fullName || user.username || "Someone",
-        actorAvatar: user.avatar || null,
+        actorName: authorMini.fullName || authorMini.username || "Someone",
+        actorAvatar: authorMini.avatar || null,
         postId: String(postId),
         commentId: String(newComment._id),
         previewContent: newComment.content,
-        message: `${user.fullName || user.username || "Ai đó"} đã bình luận về bài viết của bạn.`,
+        message: `${authorMini.fullName || authorMini.username || "Ai đó"} đã bình luận về bài viết của bạn.`,
       });
     }
 
@@ -303,8 +424,8 @@ class PostService {
         await this.eventBus.emit(DOMAIN_EVENTS.COMMENT_REPLIED, {
           recipientId: String(parentAuthorId),
           actorId,
-          actorName: user.fullName || user.username || "Someone",
-          actorAvatar: user.avatar || null,
+          actorName: authorMini.fullName || authorMini.username || "Someone",
+          actorAvatar: authorMini.avatar || null,
           postId: String(postId),
           commentId: String(newComment._id),
           parentCommentId: String(normalizedParentCommentId),
@@ -316,7 +437,7 @@ class PostService {
 
     return this._shapeComment({
       ...(newComment.toObject?.() || newComment),
-      author: this._formatUserMini(user),
+      author: authorMini,
       likesCount: 0,
       likedByMe: false,
       userReaction: null,
@@ -443,7 +564,12 @@ class PostService {
     let useCache = false;
 
     if (type === "following") {
-      if (!userId) throw new AppError("Bạn vui lòng đăng nhập để xem nội dung từ những người đang theo dõi nhé.", 401);
+      if (!userId) {
+        throw new AppError(
+          "Bạn vui lòng đăng nhập để xem nội dung từ những người đang theo dõi nhé.",
+          401,
+        );
+      }
 
       const followingIds = await this._getFollowingIds(userId);
 
@@ -511,6 +637,8 @@ class PostService {
     if (!posts?.length) {
       return { data: [], paging: { nextCursor: null, hasMore: false } };
     }
+
+    posts = await this._hydratePostAuthors(posts);
 
     let data = await this._attachUserReactions(posts, userId);
     data = await this._attachUserSavedState(data, userId);
@@ -586,10 +714,17 @@ class PostService {
     const canView = await this._canViewerSeePost(post, viewerId);
     if (!canView) return null;
 
-    return post;
+    const hydratedPosts = await this._hydratePostAuthors([post]);
+    return hydratedPosts[0] || post;
   }
 
-  async getComments({ postId, page = 1, limit = 10, sort = "relevant", viewerId = null }) {
+  async getComments({
+    postId,
+    page = 1,
+    limit = 10,
+    sort = "relevant",
+    viewerId = null,
+  }) {
     const post = await this.postRepository.findById(postId);
     if (!post) {
       throw new AppError("Post not found", 404);
@@ -597,7 +732,10 @@ class PostService {
 
     const canView = await this._canViewerSeePost(post, viewerId);
     if (!canView) {
-      throw new AppError("Rất tiếc, bài viết này ở chế độ riêng tư nên bạn không thể xem được.", 403);
+      throw new AppError(
+        "Rất tiếc, bài viết này ở chế độ riêng tư nên bạn không thể xem được.",
+        403,
+      );
     }
 
     const skip = (page - 1) * limit;
@@ -653,12 +791,18 @@ class PostService {
   async toggleCommentReaction({ postId, commentId, userId, type }) {
     const targetPost = await this.postRepository.findById(postId);
     if (!targetPost) {
-      throw new AppError("KhÃ´ng tÃ¬m tháº¥y bÃ i viáº¿t Ä‘á»ƒ thá»±c hiá»‡n tÆ°Æ¡ng tÃ¡c.", 404);
+      throw new AppError(
+        "Không tìm thấy bài viết để thực hiện tương tác.",
+        404,
+      );
     }
 
     const targetComment = await this.postRepository.findCommentById(commentId);
     if (!targetComment || String(targetComment.postId) !== String(postId)) {
-      throw new AppError("KhÃ´ng tÃ¬m tháº¥y bÃ¬nh luáº­n Ä‘á»ƒ tÆ°Æ¡ng tÃ¡c.", 404);
+      throw new AppError(
+        "Không tìm thấy bình luận để tương tác.",
+        404,
+      );
     }
 
     const result = await mongoose.connection.transaction(async (session) => {
@@ -687,7 +831,7 @@ class PostService {
         if (oldType === "like") likeChange = -1;
       } else {
         await this.postRepository.updateReaction(
-          { userId, commentId, targetType: "Comment", type },
+          { userId, commentId, targetType: "Comment" },
           session,
         );
         nextResult.action = "switched";
@@ -767,7 +911,12 @@ class PostService {
   }
 
   async getSavedPosts({ cursor, limit = 10, userId }) {
-    if (!userId) throw new AppError("Bạn vui lòng đăng nhập để xem danh sách bài viết đã lưu nhé.", 401);
+    if (!userId) {
+      throw new AppError(
+        "Bạn vui lòng đăng nhập để xem danh sách bài viết đã lưu nhé.",
+        401,
+      );
+    }
 
     const user = await this.userRepository.findById(userId);
     const savedPostIds = user?.savedPosts || [];
@@ -798,6 +947,8 @@ class PostService {
     if (!posts?.length) {
       return { data: [], paging: { nextCursor: null, hasMore: false } };
     }
+
+    posts = await this._hydratePostAuthors(posts);
 
     let data = await this._attachUserReactions(posts, userId);
     data = data.map((p) => ({ ...p, isSaved: true }));

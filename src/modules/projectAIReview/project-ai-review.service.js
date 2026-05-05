@@ -209,6 +209,16 @@ const SECTION_ALIAS_MAP = {
   risk_signals: "policy"
 };
 
+const LENS_ALIAS_MAP = {
+  location: "feasibility",
+  schedule: "feasibility",
+  dates: "feasibility",
+  timeframe: "feasibility",
+  timeline: "feasibility",
+  timeline_location: "feasibility",
+  time_location: "feasibility",
+};
+
 const CHECKLIST_ALIAS_MAP = {
   beneficiary_clarity: "beneficiary_clear",
   budget_reasonable: "budget_clear",
@@ -234,6 +244,16 @@ const ALLOWED_CHECKLIST_KEYS = [
   "approval_consequences_acknowledged",
 ];
 
+const DEFAULT_FINDING_TITLE = "Phát hiện cần quản trị viên rà soát";
+const DEFAULT_FINDING_DETAIL =
+  "AI không cung cấp mô tả chi tiết cho phát hiện này. Quản trị viên cần rà soát thủ công.";
+const DEFAULT_SUGGESTED_ADMIN_QUESTION =
+  "Quản trị viên cần kiểm tra thêm thông tin liên quan đến phát hiện này.";
+
+function normalizeRequiredFindingString(value, fallback) {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
 /**
  * Normalize enum casing: if a known enum field has a value whose lowercase
  * matches an allowed enum value, normalize it. Unknown values pass through
@@ -251,6 +271,8 @@ function normalizeEnumCasing(obj) {
         result[field] = SEVERITY_ALIAS_MAP[lower];
       } else if (field === "section" && SECTION_ALIAS_MAP[lower]) {
         result[field] = SECTION_ALIAS_MAP[lower];
+      } else if (field === "lens" && LENS_ALIAS_MAP[lower]) {
+        result[field] = LENS_ALIAS_MAP[lower];
       } else if (allowed.includes(lower)) {
         result[field] = lower;
       }
@@ -294,7 +316,7 @@ function normalizeEnumCasing(obj) {
 
 /**
  * Normalize nullable/optional fields with safe defaults.
- * Does not invent core required fields (summary, title, detail, etc.).
+ * Preserves schema validation while handling common nullable AI fields.
  */
 function normalizeOptionalFields(obj) {
   if (!obj || typeof obj !== "object") return obj;
@@ -312,8 +334,24 @@ function normalizeOptionalFields(obj) {
 
   // Normalize nested findings
   if (Array.isArray(result.findings)) {
-    result.findings = result.findings.map((f) => {
+    result.findings = result.findings.map((f, index) => {
       const finding = { ...f };
+      finding.id = normalizeRequiredFindingString(
+        finding.id,
+        `finding_${index + 1}`
+      );
+      finding.title = normalizeRequiredFindingString(
+        finding.title,
+        DEFAULT_FINDING_TITLE
+      );
+      finding.detail = normalizeRequiredFindingString(
+        finding.detail,
+        DEFAULT_FINDING_DETAIL
+      );
+      finding.suggestedAdminQuestion = normalizeRequiredFindingString(
+        finding.suggestedAdminQuestion,
+        DEFAULT_SUGGESTED_ADMIN_QUESTION
+      );
       if (!("targetId" in finding) || finding.targetId === undefined) {
         finding.targetId = null;
       }
@@ -346,7 +384,7 @@ function normalizeOptionalFields(obj) {
  * Returns { parsed, rawContent, parseStage } on success.
  * Throws with .code, .parseStage, and optionally .validationIssues on failure.
  */
-function parseAndNormalizeAIOutput(rawContent) {
+export function parseAndNormalizeAIOutput(rawContent) {
   const content = String(rawContent || "").trim();
 
   if (!content) {
@@ -547,10 +585,6 @@ class ProjectAIReviewService {
 
   async createRunForProject(projectOrId, { jobName = PROJECT_AI_REVIEW_JOB.RUN } = {}) {
     const snapshotState = await this.ensureProjectReviewSnapshot(projectOrId);
-
-    await this.projectAIReviewRepository.markStaleForProject(
-      snapshotState.project._id
-    );
 
     let providerConfig;
     let initialFailure = null;
@@ -875,6 +909,13 @@ class ProjectAIReviewService {
       const completed = await this.projectAIReviewRepository.markCompleted(
         run._id,
         normalizedOutput
+      );
+
+      await this.projectAIReviewRepository.markStaleCurrentSnapshotRuns(
+        run.projectId,
+        run.submissionVersion,
+        run.projectSnapshotHash,
+        { excludeRunId: run._id }
       );
 
       this.eventBus?.emit?.(DOMAIN_EVENTS.PROJECT_AI_REVIEW_COMPLETED, {
