@@ -11,6 +11,7 @@ class DisbursementService {
         projectRepository,
         escrowRepository,
         bankAccountRepository,
+        organizerRequestRepository,
         transactionRepository,
         milestoneEvidenceRepository,
         transactionManager,
@@ -21,6 +22,7 @@ class DisbursementService {
         this.projectRepository = projectRepository;
         this.escrowRepository = escrowRepository;
         this.bankAccountRepository = bankAccountRepository;
+        this.organizerRequestRepository = organizerRequestRepository;
         this.transactionRepository = transactionRepository;
         this.milestoneEvidenceRepository = milestoneEvidenceRepository;
         this.transactionManager = transactionManager;
@@ -224,26 +226,40 @@ class DisbursementService {
         const escrow = await this.escrowRepository.findByProjectId(projectId);
         if (!escrow || escrow.availableBalance < requestedAmount) throw new AppError(`Sá»‘ dÆ° kháº£ dá»¥ng trong Escrow (${escrow?.availableBalance || 0}Ä‘) khÃ´ng Ä‘á»§ Ä‘á»ƒ giáº£i ngÃ¢n`, 400);
 
-        const accounts = await this.bankAccountRepository.findVerifiedByUserId(organizerId);
-        if (!accounts || accounts.length === 0) throw new AppError('Báº¡n chÆ°a cÃ³ tÃ i khoáº£n ngÃ¢n hÃ ng nÃ o Ä‘Æ°á»£c xÃ¡c thá»±c vÃ  Ä‘ang ACTIVE', 400);
+        const approvedOrganizerRequest = await this.organizerRequestRepository.findLatestApprovedByUserId(organizerId);
+        if (!approvedOrganizerRequest) {
+            throw new AppError('Không tìm thấy hồ sơ tổ chức đã được duyệt để xác định tài khoản nhận giải ngân.', 400);
+        }
 
-        const activeBank = accounts[0];
+        const bankName = String(approvedOrganizerRequest.bankName || '').trim();
+        const accountNumber = String(approvedOrganizerRequest.bankAccountNumber || '').trim();
+        const accountName = String(approvedOrganizerRequest.bankAccountName || '').trim();
 
-        let bin = activeBank.bin;
+        if (!bankName || !accountNumber || !accountName) {
+            throw new AppError('Hồ sơ tổ chức đã được duyệt nhưng thiếu thông tin tài khoản nhận giải ngân. Vui lòng liên hệ quản trị viên để cập nhật hồ sơ.', 400);
+        }
+
+        let bin = null;
+        if (approvedOrganizerRequest.bankAccountId) {
+            const bankAccount = await this.bankAccountRepository.findById(approvedOrganizerRequest.bankAccountId);
+            bin = bankAccount?.bin || null;
+        }
+
         if (!bin) {
-            const bankInfo = getBankByShortName(activeBank.bankName);
-            if (!bankInfo) {
-                throw new AppError(`TÃ i khoáº£n ngÃ¢n hÃ ng (${activeBank.bankName}) khÃ´ng Ä‘Æ°á»£c há»— trá»£. Vui lÃ²ng thÃªm tÃ i khoáº£n ngÃ¢n hÃ ng má»›i.`, 400);
-            }
-            bin = bankInfo.bin;
+            const bankInfo = getBankByShortName(bankName);
+            bin = bankInfo?.bin || null;
+        }
+
+        if (!bin) {
+            throw new AppError('Ngân hàng trong hồ sơ tổ chức chưa được hỗ trợ tạo VietQR.', 400);
         }
 
         const requiredApprovals = 1;
 
         const snapshot = {
-            bankName: activeBank.bankName,
-            accountNumber: activeBank.accountNumber,
-            accountName: activeBank.accountName,
+            bankName,
+            accountNumber,
+            accountName,
             bin: bin
         };
 
