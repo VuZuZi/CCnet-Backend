@@ -3,6 +3,13 @@ import MoneyMath from '../../../core/MoneyMath.js';
 import { MILESTONE_STATUS, PROJECT_STATUS, PROJECT_TYPE } from '../project.constant.js';
 import { DOMAIN_EVENTS } from '../../../config/notification.js';
 
+const SUBMISSION_MODES = Object.freeze({
+    GPS_CHECKIN: 'GPS_CHECKIN',
+    MANUAL_UPLOAD: 'MANUAL_UPLOAD'
+});
+
+const GPS_AUTO_PASS_RADIUS_METERS = 1000;
+
 class MilestoneEvidenceService {
     constructor({
         milestoneEvidenceRepository,
@@ -10,7 +17,8 @@ class MilestoneEvidenceService {
         disbursementRequestRepository,
         mediaRepository,
         transactionManager,
-        escrowRepository // [NEW]: Inject thÃªm Repo nÃ y qua DI
+        escrowRepository, // [NEW]: Inject thÃªm Repo nÃ y qua DI
+        eventBus = null
     }) {
         this.milestoneEvidenceRepository = milestoneEvidenceRepository;
         this.projectRepository = projectRepository;
@@ -18,13 +26,94 @@ class MilestoneEvidenceService {
         this.mediaRepository = mediaRepository;
         this.transactionManager = transactionManager;
         this.escrowRepository = escrowRepository;
+        this.eventBus = eventBus;
     }
 
-    // [FIXED]: Láº¥y trá»±c tiáº¿p Single Source of Truth tá»« Escrow Ledger
     async _calculateFinancialContext(projectId) {
         const escrow = await this.escrowRepository.findByProjectId(projectId);
         const totalAvailable = escrow?.organizerRetainedBalance || 0;
         return { totalAvailable };
+    }
+
+    _normalizeSubmissionMode(mode) {
+        return mode === SUBMISSION_MODES.GPS_CHECKIN
+            ? SUBMISSION_MODES.GPS_CHECKIN
+            : SUBMISSION_MODES.MANUAL_UPLOAD;
+    }
+
+    _normalizeId(value) {
+        if (!value) return null;
+        return String(value?._id || value?.id || value);
+    }
+
+    _getMilestoneTargetLocation(project, milestone) {
+        if (milestone?.location?.coordinates?.length === 2) {
+            return milestone.location;
+        }
+        if (project?.location?.coordinates?.length === 2) {
+            return project.location;
+        }
+        return null;
+    }
+
+    _buildRealtimeMetadata({
+        domainEvent,
+        realtimeType,
+        project,
+        projectId,
+        milestone,
+        milestoneId,
+        evidence,
+        evidenceId,
+        disbursementRequestId,
+        organizerId,
+        status,
+        milestoneStatus,
+        projectStatus,
+        isAutoPass = false,
+        requestedAmount,
+        approvedAmount,
+        updatedAt = new Date()
+    }) {
+        return {
+            domainEvent,
+            realtimeType,
+            projectId: this._normalizeId(projectId || project?._id || evidence?.projectId),
+            milestoneId: milestoneId || milestone?.milestoneId || evidence?.milestoneId || null,
+            evidenceId: this._normalizeId(evidenceId || evidence?._id),
+            disbursementRequestId: this._normalizeId(disbursementRequestId),
+            organizerId: this._normalizeId(organizerId || project?.organizerId || evidence?.organizerId),
+            status: status || null,
+            milestoneStatus: milestoneStatus || null,
+            projectStatus: projectStatus || project?.status || null,
+            isAutoPass: Boolean(isAutoPass),
+            requestedAmount,
+            approvedAmount,
+            updatedAt: updatedAt instanceof Date ? updatedAt.toISOString() : updatedAt
+        };
+    }
+
+    async _emitSystemNotifications(events = []) {
+        if (!this.eventBus || !Array.isArray(events) || events.length === 0) return;
+
+        for (const event of events) {
+            try {
+                const results = await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, event);
+                const rejected = (results || []).filter((result) => result.status === 'rejected');
+                if (rejected.length > 0) {
+                    console.error('[MilestoneEvidenceService] Notification emit failed', {
+                        event: DOMAIN_EVENTS.SYSTEM_NOTIFICATION,
+                        rejectedCount: rejected.length,
+                        errors: rejected.map((result) => result.reason?.message || result.reason)
+                    });
+                }
+            } catch (error) {
+                console.error('[MilestoneEvidenceService] Notification emit failed', {
+                    event: DOMAIN_EVENTS.SYSTEM_NOTIFICATION,
+                    error: error?.message || error
+                });
+            }
+        }
     }
 
     async _getPreviousMilestoneUnspent(projectId, milestones, currentIdx) {
@@ -59,7 +148,7 @@ class MilestoneEvidenceService {
         }
     }
 
-    async _syncProjectCompletionStatus(projectId, session, dispatchEvent) {
+    async _syncProjectCompletionStatus(projectId, session, notificationEvents = []) {
         const project = await this.projectRepository.findById(projectId, session);
         if (!project) return;
         if (project.status !== PROJECT_STATUS.EXECUTING) return;
@@ -79,10 +168,31 @@ class MilestoneEvidenceService {
             session
         );
 
-        dispatchEvent(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, {
-            recipientIds: [String(project.organizerId), 'ADMIN_GROUP'],
+        const metadata = this._buildRealtimeMetadata({
+            domainEvent: DOMAIN_EVENTS.PROJECT_COMPLETION_SYNCED,
+            realtimeType: 'project_completion_synced',
+            project,
+            projectStatus: PROJECT_STATUS.COMPLETED
+        });
+
+        notificationEvents.push({
+            recipientIds: ['ADMIN_GROUP'],
             title: 'Du an da hoan thanh',
-            message: `Tat ca milestone cua du an "${project.title}" da duoc nghiem thu. He thong da chuyen trang thai du an sang COMPLETED.`
+            message: `Tat ca milestone cua du an "${project.title}" da duoc nghiem thu. He thong da chuyen trang thai du an sang COMPLETED.`,
+            actionUrl: `/admin/finance/${projectId}`,
+            entityType: 'project',
+            entityId: String(projectId),
+            metadata
+        });
+
+        notificationEvents.push({
+            recipientIds: [String(project.organizerId)],
+            title: 'Du an da hoan thanh',
+            message: `Tat ca milestone cua du an "${project.title}" da duoc nghiem thu. He thong da chuyen trang thai du an sang COMPLETED.`,
+            actionUrl: `/projects/${projectId}?tab=milestones`,
+            entityType: 'project',
+            entityId: String(projectId),
+            metadata
         });
     }
 
@@ -94,7 +204,7 @@ class MilestoneEvidenceService {
     }
 
     async _assertMediaOwnership(mediaIds = [], organizerId, contextMessage = 'mediaIds') {
-        if (!Array.isArray(mediaIds) || mediaIds.length === 0) return;
+        if (!Array.isArray(mediaIds) || mediaIds.length === 0) return [];
 
         const uniqueIds = [...new Set(mediaIds.map(String))];
         const ownedMedias = await this.mediaRepository.findManyByIdsAndOwner(uniqueIds, organizerId);
@@ -102,6 +212,8 @@ class MilestoneEvidenceService {
         if (ownedMedias.length !== uniqueIds.length) {
             throw new AppError(`CÃ³ file trong ${contextMessage} khÃ´ng thuá»™c quyá»n sá»Ÿ há»¯u cá»§a Organizer`, 403);
         }
+
+        return ownedMedias;
     }
 
     _buildFinancialReportPayload(totalAvailable, spentAmount, expenseItemsPayload = [], note = "") {
@@ -130,39 +242,60 @@ class MilestoneEvidenceService {
         };
     }
 
-    async _evaluateEvidencePayload(project, milestone, currentIdx, organizerId, financialReport, mediaIds) {
-        let geoVerifiedCount = 0;
-        if (mediaIds && mediaIds.length > 0) {
-            const targetLocation = milestone.location?.coordinates?.length === 2 ? milestone.location : project.location;
-            if (targetLocation && targetLocation.coordinates) {
-                const [mLong, mLat] = targetLocation.coordinates;
-                geoVerifiedCount = await this.mediaRepository.countGeoVerifiedMedias(mediaIds, organizerId, mLong, mLat, 500);
-            }
-        }
-
-        const isFinancialMilestone = milestone.targetAmount > 0;
+    async _evaluateEvidencePayload(project, milestone, currentIdx, organizerId, financialReport, mediaIds, submissionMode) {
+        const normalizedSubmissionMode = this._normalizeSubmissionMode(submissionMode);
+        const isFinancialMilestone = Number(milestone.targetAmount || 0) > 0;
 
         let finalStatus = 'PENDING';
         let finalMilestoneStatus = MILESTONE_STATUS.PROCESSING;
         let reviewNotes = null;
+        let geoVerifiedCount = 0;
+        let gpsFailureReason = null;
 
         if (isFinancialMilestone) {
             reviewNotes = 'ÄÃ£ ná»™p bÃ¡o cÃ¡o chi tiÃªu. Há»‡ thá»‘ng ghi nháº­n chá» Káº¿ toÃ¡n/Admin duyá»‡t thá»§ cÃ´ng.';
-        } else {
+        } else if (normalizedSubmissionMode === SUBMISSION_MODES.GPS_CHECKIN) {
+            const targetLocation = this._getMilestoneTargetLocation(project, milestone);
+            if (mediaIds && mediaIds.length > 0 && targetLocation?.coordinates?.length === 2) {
+                const [mLong, mLat] = targetLocation.coordinates;
+                geoVerifiedCount = await this.mediaRepository.countGeoVerifiedMedias(
+                    mediaIds,
+                    organizerId,
+                    mLong,
+                    mLat,
+                    GPS_AUTO_PASS_RADIUS_METERS
+                );
+            } else {
+                gpsFailureReason = 'MISSING_LOCATION';
+            }
+
             if (geoVerifiedCount >= 1) {
                 finalStatus = 'APPROVED';
                 finalMilestoneStatus = MILESTONE_STATUS.COMPLETED;
                 reviewNotes = `[Há»† THá»NG AUTO-PASS] XÃ¡c thá»±c thÃ nh cÃ´ng (${geoVerifiedCount} áº£nh há»£p lá»‡) táº¡i hiá»‡n trÆ°á»ng.`;
             } else {
+                gpsFailureReason = gpsFailureReason || 'OUT_OF_RANGE';
                 reviewNotes = `[Há»† THá»NG GHI NHáº¬N] Organizer ná»™p áº£nh thÆ°á»ng, khÃ´ng Ä‘áº¡t chuáº©n GPS táº¡i hiá»‡n trÆ°á»ng. Chuyá»ƒn tráº¡ng thÃ¡i chá» duyá»‡t thá»§ cÃ´ng.`;
             }
+        } else {
+            reviewNotes = '[HE THONG GHI NHAN] Organizer nop bang chung thu cong. Chuyen trang thai cho Admin duyet thu cong.';
         }
 
-        return { finalStatus, finalMilestoneStatus, reviewNotes, isFinancialMilestone };
+        return {
+            finalStatus,
+            finalMilestoneStatus,
+            reviewNotes,
+            isFinancialMilestone,
+            isAutoPass: finalStatus === 'APPROVED' && !isFinancialMilestone,
+            submissionMode: normalizedSubmissionMode,
+            geoVerifiedCount,
+            gpsFailureReason
+        };
     }
 
     async submitEvidence(payload) {
         const { projectId, milestoneId, organizerId, mediaIds, spentAmount, expenseItems, receiptMediaIds } = payload;
+        const submissionMode = this._normalizeSubmissionMode(payload.submissionMode);
 
         const project = await this.projectRepository.findById(projectId);
         if (!project) throw new AppError('KhÃ´ng tÃ¬m tháº¥y dá»± Ã¡n', 404);
@@ -223,7 +356,7 @@ class MilestoneEvidenceService {
         }
 
         const evaluation = await this._evaluateEvidencePayload(
-            project, milestone, currentIdx, organizerId, financialReport, mediaIds
+            project, milestone, currentIdx, organizerId, financialReport, mediaIds, submissionMode
         );
 
         const newEvidencePayload = {
@@ -238,7 +371,9 @@ class MilestoneEvidenceService {
             reviewedAt: evaluation.finalStatus === 'APPROVED' ? new Date() : null,
         };
 
-        return await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
+        const notificationEvents = [];
+
+        const createdEvidence = await this.transactionManager.runInTransaction(async (session) => {
             const newEvidence = await this.milestoneEvidenceRepository.upsertEvidenceAtomic(
                 projectId, milestoneId, newEvidencePayload, session
             );
@@ -247,19 +382,100 @@ class MilestoneEvidenceService {
 
             await this.projectRepository.updateMilestoneStatus(projectId, milestoneId, evaluation.finalMilestoneStatus, session);
 
-            // [NEW]: Náº¿u Auto-pass (má»‘c 0Ä‘, cÃ³ GPS), khÃ´ng trá»« tiá»n vÃ¬ spentAmount = 0
+            const evidenceMetadata = this._buildRealtimeMetadata({
+                domainEvent: evaluation.isAutoPass
+                    ? DOMAIN_EVENTS.EVIDENCE_AUTO_APPROVED_GPS
+                    : DOMAIN_EVENTS.EVIDENCE_SUBMITTED_MANUAL,
+                realtimeType: evaluation.isAutoPass
+                    ? 'evidence_auto_approved_gps'
+                    : 'evidence_submitted_manual',
+                project,
+                milestone,
+                evidence: newEvidence,
+                organizerId,
+                status: evaluation.finalStatus,
+                milestoneStatus: evaluation.finalMilestoneStatus,
+                isAutoPass: evaluation.isAutoPass,
+                updatedAt: newEvidence.updatedAt || newEvidence.createdAt || new Date()
+            });
+
             if (evaluation.finalStatus === 'APPROVED') {
-                dispatchEvent(DOMAIN_EVENTS.PROJECT_MILESTONE_COMPLETED, { projectId, milestoneId });
-                await this._syncProjectCompletionStatus(projectId, session, dispatchEvent);
+                notificationEvents.push({
+                    recipientIds: ['ADMIN_GROUP'],
+                    title: 'Moc da duoc nghiem thu tu dong',
+                    message: `Moc "${milestone.title}" cua du an "${project.title}" da duoc auto-pass bang GPS.`,
+                    actionUrl: `/admin/finance/${projectId}`,
+                    entityType: 'milestone_evidence',
+                    entityId: String(newEvidence._id),
+                    metadata: evidenceMetadata
+                });
+
+                notificationEvents.push({
+                    recipientIds: [String(organizerId)],
+                    title: 'Moc da duoc nghiem thu tu dong',
+                    message: `Moc "${milestone.title}" cua du an "${project.title}" da duoc auto-pass bang GPS.`,
+                    actionUrl: `/projects/${projectId}?tab=milestones`,
+                    entityType: 'milestone_evidence',
+                    entityId: String(newEvidence._id),
+                    metadata: evidenceMetadata
+                });
+
+                notificationEvents.push({
+                    recipientIds: ['ADMIN_GROUP'],
+                    title: 'Moc du an da hoan thanh',
+                    message: `Moc "${milestone.title}" cua du an "${project.title}" da chuyen sang COMPLETED.`,
+                    actionUrl: `/admin/finance/${projectId}`,
+                    entityType: 'project_milestone',
+                    entityId: String(projectId),
+                    metadata: {
+                        ...evidenceMetadata,
+                        domainEvent: DOMAIN_EVENTS.PROJECT_MILESTONE_COMPLETED,
+                        realtimeType: 'milestone_completed'
+                    }
+                });
+
+                notificationEvents.push({
+                    recipientIds: [String(organizerId)],
+                    title: 'Moc du an da hoan thanh',
+                    message: `Moc "${milestone.title}" cua du an "${project.title}" da chuyen sang COMPLETED.`,
+                    actionUrl: `/projects/${projectId}?tab=milestones`,
+                    entityType: 'project_milestone',
+                    entityId: String(projectId),
+                    metadata: {
+                        ...evidenceMetadata,
+                        domainEvent: DOMAIN_EVENTS.PROJECT_MILESTONE_COMPLETED,
+                        realtimeType: 'milestone_completed'
+                    }
+                });
+
+                await this._syncProjectCompletionStatus(projectId, session, notificationEvents);
             } else {
-                dispatchEvent(DOMAIN_EVENTS.EVIDENCE_SUBMITTED_MANUAL, { evidenceId: newEvidence._id, projectId });
+                notificationEvents.push({
+                    recipientIds: ['ADMIN_GROUP'],
+                    title: 'Bang chung moi cho duyet thu cong',
+                    message: `Organizer da nop bang chung cho moc "${milestone.title}" cua du an "${project.title}".`,
+                    actionUrl: `/admin/finance/${projectId}`,
+                    entityType: 'milestone_evidence',
+                    entityId: String(newEvidence._id),
+                    metadata: evidenceMetadata
+                });
             }
 
             return newEvidence;
         });
+
+        await this._emitSystemNotifications(notificationEvents);
+
+        return {
+            ...createdEvidence,
+            submissionMode: evaluation.submissionMode,
+            isAutoPass: evaluation.isAutoPass,
+            gpsFailureReason: evaluation.gpsFailureReason
+        };
     }
 
     async patchEvidence(evidenceId, organizerId, payload) {
+        const submissionMode = this._normalizeSubmissionMode(payload.submissionMode);
         const evidence = await this.milestoneEvidenceRepository.findById(evidenceId);
         if (!evidence) throw new AppError('KhÃ´ng tÃ¬m tháº¥y báº£n ghi', 404);
         if (String(evidence.organizerId) !== String(organizerId)) throw new AppError('KhÃ´ng cÃ³ quyá»n thao tÃ¡c', 403);
@@ -299,9 +515,11 @@ class MilestoneEvidenceService {
             newFinancialReport = this._buildFinancialReportPayload(totalAvailable, updatedSpentAmount, expenseItemsInput, evidence.financialReport?.note);
         }
 
-        const evaluation = await this._evaluateEvidencePayload(project, milestone, currentIdx, organizerId, newFinancialReport, updatedMediaIds);
+        const evaluation = await this._evaluateEvidencePayload(project, milestone, currentIdx, organizerId, newFinancialReport, updatedMediaIds, submissionMode);
 
-        return await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
+        const notificationEvents = [];
+
+        const updatedEvidenceResult = await this.transactionManager.runInTransaction(async (session) => {
             let finalReviewNotes = evaluation.reviewNotes;
             if (evaluation.finalStatus === 'PENDING') {
                 finalReviewNotes = `[ÄÃƒ Ná»˜P Bá»” SUNG] ${finalReviewNotes || 'Organizer Ä‘Ã£ cáº­p nháº­t bÃ¡o cÃ¡o. Äang chá» duyá»‡t láº¡i.'}`;
@@ -323,15 +541,96 @@ class MilestoneEvidenceService {
 
             await this.projectRepository.updateMilestoneStatus(evidence.projectId, evidence.milestoneId, evaluation.finalMilestoneStatus, session);
 
+            const evidenceMetadata = this._buildRealtimeMetadata({
+                domainEvent: evaluation.isAutoPass
+                    ? DOMAIN_EVENTS.EVIDENCE_AUTO_APPROVED_GPS
+                    : DOMAIN_EVENTS.EVIDENCE_SUBMITTED_MANUAL,
+                realtimeType: evaluation.isAutoPass
+                    ? 'evidence_auto_approved_gps'
+                    : 'evidence_submitted_manual',
+                project,
+                milestone,
+                evidence: updatedEvidence,
+                organizerId,
+                status: evaluation.finalStatus,
+                milestoneStatus: evaluation.finalMilestoneStatus,
+                isAutoPass: evaluation.isAutoPass,
+                updatedAt: updatedEvidence.updatedAt || new Date()
+            });
+
             if (evaluation.finalStatus === 'APPROVED') {
-                dispatchEvent(DOMAIN_EVENTS.PROJECT_MILESTONE_COMPLETED, { projectId: evidence.projectId, milestoneId: evidence.milestoneId });
-                await this._syncProjectCompletionStatus(evidence.projectId, session, dispatchEvent);
+                notificationEvents.push({
+                    recipientIds: ['ADMIN_GROUP'],
+                    title: 'Moc da duoc nghiem thu tu dong',
+                    message: `Moc "${milestone.title}" cua du an "${project.title}" da duoc auto-pass bang GPS.`,
+                    actionUrl: `/admin/finance/${evidence.projectId}`,
+                    entityType: 'milestone_evidence',
+                    entityId: String(updatedEvidence._id),
+                    metadata: evidenceMetadata
+                });
+
+                notificationEvents.push({
+                    recipientIds: [String(organizerId)],
+                    title: 'Moc da duoc nghiem thu tu dong',
+                    message: `Moc "${milestone.title}" cua du an "${project.title}" da duoc auto-pass bang GPS.`,
+                    actionUrl: `/projects/${evidence.projectId}?tab=milestones`,
+                    entityType: 'milestone_evidence',
+                    entityId: String(updatedEvidence._id),
+                    metadata: evidenceMetadata
+                });
+
+                notificationEvents.push({
+                    recipientIds: ['ADMIN_GROUP'],
+                    title: 'Moc du an da hoan thanh',
+                    message: `Moc "${milestone.title}" cua du an "${project.title}" da chuyen sang COMPLETED.`,
+                    actionUrl: `/admin/finance/${evidence.projectId}`,
+                    entityType: 'project_milestone',
+                    entityId: String(evidence.projectId),
+                    metadata: {
+                        ...evidenceMetadata,
+                        domainEvent: DOMAIN_EVENTS.PROJECT_MILESTONE_COMPLETED,
+                        realtimeType: 'milestone_completed'
+                    }
+                });
+
+                notificationEvents.push({
+                    recipientIds: [String(organizerId)],
+                    title: 'Moc du an da hoan thanh',
+                    message: `Moc "${milestone.title}" cua du an "${project.title}" da chuyen sang COMPLETED.`,
+                    actionUrl: `/projects/${evidence.projectId}?tab=milestones`,
+                    entityType: 'project_milestone',
+                    entityId: String(evidence.projectId),
+                    metadata: {
+                        ...evidenceMetadata,
+                        domainEvent: DOMAIN_EVENTS.PROJECT_MILESTONE_COMPLETED,
+                        realtimeType: 'milestone_completed'
+                    }
+                });
+
+                await this._syncProjectCompletionStatus(evidence.projectId, session, notificationEvents);
             } else {
-                dispatchEvent(DOMAIN_EVENTS.EVIDENCE_SUBMITTED_MANUAL, { evidenceId, projectId: evidence.projectId });
+                notificationEvents.push({
+                    recipientIds: ['ADMIN_GROUP'],
+                    title: 'Bang chung moi cho duyet thu cong',
+                    message: `Organizer da nop lai bang chung cho moc "${milestone.title}" cua du an "${project.title}".`,
+                    actionUrl: `/admin/finance/${evidence.projectId}`,
+                    entityType: 'milestone_evidence',
+                    entityId: String(evidenceId),
+                    metadata: evidenceMetadata
+                });
             }
 
             return updatedEvidence;
         });
+
+        await this._emitSystemNotifications(notificationEvents);
+
+        return {
+            ...updatedEvidenceResult,
+            submissionMode: evaluation.submissionMode,
+            isAutoPass: evaluation.isAutoPass,
+            gpsFailureReason: evaluation.gpsFailureReason
+        };
     }
 
     async reviewEvidence(evidenceId, reviewerId, payload) {
@@ -341,7 +640,9 @@ class MilestoneEvidenceService {
             throw new AppError('Chi duoc gui approvedSpentAmount khi duyet APPROVED', 400);
         }
 
-        return await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
+        const notificationEvents = [];
+
+        const reviewedEvidence = await this.transactionManager.runInTransaction(async (session) => {
             const evidence = await this.milestoneEvidenceRepository.findById(evidenceId, session);
             if (!evidence) throw new AppError('Khong tim thay ban ghi bang chung', 404);
             if (evidence.status !== 'PENDING') throw new AppError('Bang chung nay da duoc xu ly', 400);
@@ -399,19 +700,82 @@ class MilestoneEvidenceService {
 
             await this.projectRepository.updateMilestoneStatus(evidence.projectId, evidence.milestoneId, nextMilestoneStatus, session);
 
-            dispatchEvent(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, {
+            const milestone = (project.milestones || []).find(
+                (item) => item.milestoneId === evidence.milestoneId
+            );
+            const reviewMetadata = this._buildRealtimeMetadata({
+                domainEvent: DOMAIN_EVENTS.EVIDENCE_REVIEWED,
+                realtimeType: 'evidence_reviewed',
+                project,
+                milestone,
+                evidence: updatedEvidence,
+                organizerId: evidence.organizerId,
+                status,
+                milestoneStatus: nextMilestoneStatus,
+                isAutoPass: false,
+                updatedAt: updatedEvidence.updatedAt || new Date()
+            });
+
+            notificationEvents.push({
+                recipientIds: ['ADMIN_GROUP'],
+                title: `Ket qua nghiem thu Moc du an`,
+                message: `Bao cao nghiem thu da duoc chuyen sang trang thai: ${status}. ${reviewNotes ? `Ghi chu: ${reviewNotes}` : ''}`,
+                actionUrl: `/admin/finance/${evidence.projectId}`,
+                entityType: 'milestone_evidence',
+                entityId: String(evidenceId),
+                metadata: reviewMetadata
+            });
+
+            notificationEvents.push({
                 recipientIds: [String(evidence.organizerId)],
                 title: `Ket qua nghiem thu Moc du an`,
-                message: `Bao cao nghiem thu cua ban da duoc chuyen sang trang thai: ${status}. ${reviewNotes ? `Ghi chu: ${reviewNotes}` : ''}`
+                message: `Bao cao nghiem thu da duoc chuyen sang trang thai: ${status}. ${reviewNotes ? `Ghi chu: ${reviewNotes}` : ''}`,
+                actionUrl: `/projects/${evidence.projectId}?tab=milestones`,
+                entityType: 'milestone_evidence',
+                entityId: String(evidenceId),
+                metadata: reviewMetadata
             });
 
             if (status === 'APPROVED') {
-                dispatchEvent(DOMAIN_EVENTS.PROJECT_MILESTONE_COMPLETED, { projectId: evidence.projectId, milestoneId: evidence.milestoneId });
-                await this._syncProjectCompletionStatus(evidence.projectId, session, dispatchEvent);
+                notificationEvents.push({
+                    recipientIds: ['ADMIN_GROUP'],
+                    title: 'Moc du an da hoan thanh',
+                    message: `Moc "${milestone?.title || evidence.milestoneId}" cua du an "${project.title}" da chuyen sang COMPLETED.`,
+                    actionUrl: `/admin/finance/${evidence.projectId}`,
+                    entityType: 'project_milestone',
+                    entityId: String(evidence.projectId),
+                    metadata: {
+                        ...reviewMetadata,
+                        domainEvent: DOMAIN_EVENTS.PROJECT_MILESTONE_COMPLETED,
+                        realtimeType: 'milestone_completed',
+                        milestoneStatus: MILESTONE_STATUS.COMPLETED
+                    }
+                });
+
+                notificationEvents.push({
+                    recipientIds: [String(evidence.organizerId)],
+                    title: 'Moc du an da hoan thanh',
+                    message: `Moc "${milestone?.title || evidence.milestoneId}" cua du an "${project.title}" da chuyen sang COMPLETED.`,
+                    actionUrl: `/projects/${evidence.projectId}?tab=milestones`,
+                    entityType: 'project_milestone',
+                    entityId: String(evidence.projectId),
+                    metadata: {
+                        ...reviewMetadata,
+                        domainEvent: DOMAIN_EVENTS.PROJECT_MILESTONE_COMPLETED,
+                        realtimeType: 'milestone_completed',
+                        milestoneStatus: MILESTONE_STATUS.COMPLETED
+                    }
+                });
+
+                await this._syncProjectCompletionStatus(evidence.projectId, session, notificationEvents);
             }
 
             return updatedEvidence;
         });
+
+        await this._emitSystemNotifications(notificationEvents);
+
+        return reviewedEvidence;
     }
 
     async getOrganizerEvidenceList(organizerId, query) {
@@ -484,7 +848,6 @@ class MilestoneEvidenceService {
 
             publicData.financialContext = {
                 platformDisbursed: actualDisbursed,
-                // Æ¯á»›c lÆ°á»£ng hiá»ƒn thá»‹ tiá»n rollover cá»§a cÃ¡c má»‘c trÆ°á»›c dá»“n láº¡i
                 rolloverFromPrevious: Math.max(0, totalAvailable - actualDisbursed),
                 totalAvailable: totalAvailable,
                 approvedSpentAmount: evidence.financialReport?.approvedSpentAmount || evidence.financialReport?.spentAmount,

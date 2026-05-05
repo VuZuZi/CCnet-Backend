@@ -1,8 +1,13 @@
 export const DOMAIN_EVENTS = Object.freeze({
+  SYSTEM_ANNOUNCEMENT_CREATED: 'system.announcement_created',
+  SYSTEM_NOTIFICATION: 'system.notification',
+
   PROJECT_UPDATED: 'project.updated',
   PROJECT_SUBMITTED_FOR_APPROVAL: 'project.submitted_for_approval',
   PROJECT_STATUS_UPDATED: 'project.status_updated',
   PROJECT_REVIEW_DECIDED: 'project.review_decided',
+  PROJECT_MILESTONE_COMPLETED: 'project.milestone_completed',
+  PROJECT_COMPLETION_SYNCED: 'project.completion_synced',
 
   PROJECT_REVIEW_SUBMITTED_TO_ADMINS: 'project.review_submitted_to_admins',
   PROJECT_RESUBMITTED_FOR_APPROVAL: 'project.resubmitted_for_approval',
@@ -22,6 +27,13 @@ export const DOMAIN_EVENTS = Object.freeze({
   HELP_REQUEST_ASSIGNMENT_RESPONDED: 'help_request.assignment_responded',
 
   DONATION_SUCCESSFUL: 'donation.successful',
+
+  EVIDENCE_SUBMITTED_MANUAL: 'evidence.submitted_manual',
+  EVIDENCE_AUTO_APPROVED_GPS: 'evidence.auto_approved_gps',
+  EVIDENCE_REVIEWED: 'evidence.reviewed',
+
+  DISBURSEMENT_REQUESTED: 'disbursement.requested',
+  DISBURSEMENT_STATUS_CHANGED: 'disbursement.status_changed',
 
   REFUND_REQUEST_SUBMITTED: 'refund_request.submitted',
   TRANSACTION_REFUNDED: 'transaction.refunded',
