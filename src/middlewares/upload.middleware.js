@@ -16,11 +16,28 @@ const storage = multer.diskStorage({
   }
 });
 
-const ALLOWED_MIME_TYPES = [
-  'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+const IMAGE_MIME_TYPES = [
+  'image/jpeg', 'image/png', 'image/webp', 'image/gif'
+];
+
+const DOCUMENT_MIME_TYPES = [
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/msword'
+];
+
+const FEED_VIDEO_MIME_TYPES = [
+  'video/mp4', 'video/webm', 'video/quicktime'
+];
+
+const ALLOWED_MIME_TYPES = [
+  ...IMAGE_MIME_TYPES,
+  ...DOCUMENT_MIME_TYPES
+];
+
+const ALLOWED_MEDIA_TYPES = [
+  ...IMAGE_MIME_TYPES,
+  ...FEED_VIDEO_MIME_TYPES
 ];
 
 const fileFilter = (req, file, cb) => {
@@ -57,15 +74,10 @@ export const uploadFiles = multer({
 
 // Media upload (images and videos) for feed posts
 const mediaFileFilter = (req, file, cb) => {
-  const ALLOWED_MEDIA_TYPES = [
-    'image/jpeg', 'image/png', 'image/webp', 'image/gif',
-    'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo'
-  ];
-  
   if (ALLOWED_MEDIA_TYPES.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new AppError(`Định dạng file không hợp lệ: ${file.mimetype}. Chỉ cho phép ảnh và video.`, 400), false);
+    cb(new AppError(`Định dạng file không hợp lệ: ${file.mimetype}. Chỉ cho phép ảnh JPEG, PNG, WEBP, GIF hoặc video MP4, WEBM, MOV.`, 400), false);
   }
 };
 
@@ -75,41 +87,57 @@ export const uploadMedia = multer({
   limits: { fileSize: 50 * 1024 * 1024, files: 1 }
 });
 
-const MAGIC_BYTES = {
-  'ffd8ffe0': 'image/jpeg',
-  'ffd8ffe1': 'image/jpeg',
-  'ffd8ffe2': 'image/jpeg',
-  'ffd8ffee': 'image/jpeg',
-  '89504e47': 'image/png',
-  '52494646': 'image/webp',
-  '47494638': 'image/gif',
-  '25504446': 'application/pdf',
-  '504b0304': 'application/msword'
-};
-
-const checkMagicBytes = async (filePath) => {
+const detectMagicMimeTypes = async (filePath) => {
   let fileHandle;
   try {
-    const buffer = Buffer.alloc(4);
+    const buffer = Buffer.alloc(64);
     fileHandle = await fsPromises.open(filePath, 'r');
-    await fileHandle.read(buffer, 0, 4, 0);
+    const { bytesRead } = await fileHandle.read(buffer, 0, 64, 0);
+    const header = buffer.subarray(0, bytesRead);
+    const hex = header.toString('hex').toLowerCase();
 
-    const hex = buffer.toString('hex').toLowerCase();
-
-    if (hex === '52494646') {
-      const webpBuffer = Buffer.alloc(4);
-      await fileHandle.read(webpBuffer, 0, 4, 8);
-      if (webpBuffer.toString() !== 'WEBP') return false;
-      return true;
+    if (hex.startsWith('ffd8ff')) return ['image/jpeg'];
+    if (hex.startsWith('89504e470d0a1a0a')) return ['image/png'];
+    if (header.subarray(0, 6).toString('ascii') === 'GIF87a') return ['image/gif'];
+    if (header.subarray(0, 6).toString('ascii') === 'GIF89a') return ['image/gif'];
+    if (
+      header.subarray(0, 4).toString('ascii') === 'RIFF' &&
+      header.subarray(8, 12).toString('ascii') === 'WEBP'
+    ) {
+      return ['image/webp'];
     }
+    if (header.subarray(0, 4).toString('ascii') === '%PDF') {
+      return ['application/pdf'];
+    }
+    if (hex.startsWith('504b0304')) {
+      return [
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/msword'
+      ];
+    }
+    if (hex.startsWith('d0cf11e0')) return ['application/msword'];
+    if (header.indexOf(Buffer.from('ftyp')) >= 4) {
+      return ['video/mp4', 'video/quicktime'];
+    }
+    if (['moov', 'mdat', 'wide', 'free', 'skip'].includes(
+      header.subarray(4, 8).toString('ascii')
+    )) {
+      return ['video/mp4', 'video/quicktime'];
+    }
+    if (hex.startsWith('1a45dfa3')) return ['video/webm'];
 
-    return Object.keys(MAGIC_BYTES).some(signature => hex.startsWith(signature));
+    return [];
   } catch (error) {
     console.error('[CTO Security] Lỗi đọc Magic Bytes:', error.message);
-    return false;
+    return [];
   } finally {
     if (fileHandle) await fileHandle.close();
   }
+};
+
+const checkMagicBytes = async (file) => {
+  const detectedMimeTypes = await detectMagicMimeTypes(file.path);
+  return detectedMimeTypes.includes(file.mimetype);
 };
 
 export const validateMagicBytes = async (req, res, next) => {
@@ -128,10 +156,10 @@ export const validateMagicBytes = async (req, res, next) => {
 
   try {
     for (const file of filesToCheck) {
-      const isValid = await checkMagicBytes(file.path);
+      const isValid = await checkMagicBytes(file);
       if (!isValid) {
         await Promise.allSettled(filesToCheck.map(f => fsPromises.unlink(f.path)));
-        return next(new AppError(`[Security Block] Cảnh báo: Định dạng file ${file.originalname} bị làm giả!`, 403));
+        return next(new AppError(`Định dạng file ${file.originalname} không khớp nội dung thực tế. Vui lòng chọn ảnh hoặc video hợp lệ.`, 415));
       }
     }
     next();

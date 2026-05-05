@@ -112,8 +112,22 @@ class ProjectFeedService {
               : "image",
           },
         ];
-      } catch {
-        throw new AppError("Lỗi khi tải lên media.", 500);
+      } catch (error) {
+        const uploadStatus = Number(
+          error?.http_code || error?.statusCode || error?.status,
+        );
+
+        if (uploadStatus >= 400 && uploadStatus < 500) {
+          throw new AppError(
+            "Tệp media không hợp lệ hoặc không được hỗ trợ. Vui lòng chọn ảnh/video đúng định dạng.",
+            400,
+          );
+        }
+
+        throw new AppError(
+          "Không thể tải media lúc này. Vui lòng thử lại sau.",
+          502,
+        );
       } finally {
         if (media.path && fs.existsSync(media.path)) {
           fsPromises.unlink(media.path).catch(() => {});
