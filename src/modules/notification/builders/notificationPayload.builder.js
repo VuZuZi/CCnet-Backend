@@ -264,9 +264,10 @@ export function buildNotificationPayload(input) {
         title: ensureText(input.title, 'Thông báo hệ thống'),
         message: ensureText(input.message, 'Bạn có một thông báo hệ thống mới.'),
         actionUrl: input.actionUrl ? String(input.actionUrl).trim() : null,
-        entityType: 'system',
+        entityType: ensureText(input.entityType, 'system'),
         entityId: input.entityId || null,
         metadata: {
+          ...(input.metadata || {}),
           severity: input.severity || 'info',
         },
       };

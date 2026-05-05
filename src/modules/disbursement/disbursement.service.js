@@ -14,7 +14,8 @@ class DisbursementService {
         transactionRepository,
         milestoneEvidenceRepository,
         transactionManager,
-        redis
+        redis,
+        eventBus = null
     }) {
         this.disbursementRequestRepository = disbursementRequestRepository;
         this.projectRepository = projectRepository;
@@ -24,6 +25,7 @@ class DisbursementService {
         this.milestoneEvidenceRepository = milestoneEvidenceRepository;
         this.transactionManager = transactionManager;
         this.redis = redis;
+        this.eventBus = eventBus;
     }
 
 
@@ -39,6 +41,47 @@ class DisbursementService {
             await redisClient.publish(`disbursement:${requestId}:status`, message);
         } catch (err) {
             console.error(`[Redis PubSub] Disbursement Publish Error (${requestId}):`, err.message);
+        }
+    }
+
+    _normalizeId(value) {
+        if (!value) return null;
+        return String(value?._id || value?.id || value);
+    }
+
+    _buildDisbursementMetadata(request, realtimeType, extra = {}) {
+        return {
+            domainEvent: DOMAIN_EVENTS.DISBURSEMENT_STATUS_CHANGED,
+            realtimeType,
+            projectId: this._normalizeId(request?.projectId),
+            milestoneId: request?.milestoneId || null,
+            disbursementRequestId: this._normalizeId(request?._id),
+            organizerId: this._normalizeId(request?.organizerId),
+            status: request?.status || extra.status || null,
+            requestedAmount: request?.requestedAmount,
+            approvedAmount: request?.approvedAmount,
+            updatedAt: new Date().toISOString(),
+            ...extra
+        };
+    }
+
+    async _emitSystemNotification(event) {
+        if (!this.eventBus || !event) return;
+        try {
+            const results = await this.eventBus.emit(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, event);
+            const rejected = (results || []).filter((result) => result.status === 'rejected');
+            if (rejected.length > 0) {
+                console.error('[DisbursementService] Notification emit failed', {
+                    event: DOMAIN_EVENTS.SYSTEM_NOTIFICATION,
+                    rejectedCount: rejected.length,
+                    errors: rejected.map((result) => result.reason?.message || result.reason)
+                });
+            }
+        } catch (error) {
+            console.error('[DisbursementService] Notification emit failed', {
+                event: DOMAIN_EVENTS.SYSTEM_NOTIFICATION,
+                error: error?.message || error
+            });
         }
     }
 
@@ -106,6 +149,8 @@ class DisbursementService {
             request.approvedAmount,
             session
         );
+
+        return markedRequest;
     }
 
     async getOrganizerRequests(organizerId, query) {
@@ -202,25 +247,33 @@ class DisbursementService {
             bin: bin
         };
 
-        return await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
+        const newRequest = await this.transactionManager.runInTransaction(async (session) => {
             const newRequest = await this.disbursementRequestRepository.create({
                 projectId, milestoneId, organizerId, requestedAmount, requiredApprovals, bankAccountSnapshot: snapshot, status: 'PENDING'
             }, session);
 
-            dispatchEvent(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, {
-                recipientIds: ['ADMIN_GROUP'],
-                title: 'YÃªu cáº§u giáº£i ngÃ¢n má»›i',
-                message: `Dá»± Ã¡n ${project.title} vá»«a xin giáº£i ngÃ¢n ${requestedAmount.toLocaleString()}Ä‘ cho má»‘c ${milestone.title}`
-            });
-
             return newRequest;
         });
+
+        await this._emitSystemNotification({
+            recipientIds: ['ADMIN_GROUP'],
+            title: 'Yeu cau giai ngan moi',
+            message: `Du an ${project.title} vua xin giai ngan ${requestedAmount.toLocaleString()}d cho moc ${milestone.title}`,
+            actionUrl: `/admin/finance/${projectId}`,
+            entityType: 'disbursement_request',
+            entityId: String(newRequest._id),
+            metadata: this._buildDisbursementMetadata(newRequest, 'disbursement_requested', {
+                domainEvent: DOMAIN_EVENTS.DISBURSEMENT_REQUESTED
+            })
+        });
+
+        return newRequest;
     }
 
     async processApproval(requestId, managerId, payload) {
         const { decision, note } = payload;
 
-        const result = await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
+        const result = await this.transactionManager.runInTransaction(async (session) => {
             const request = await this.disbursementRequestRepository.findById(requestId, session);
             if (!request) throw new AppError('KhÃ´ng tÃ¬m tháº¥y yÃªu cáº§u', 404);
             if (request.status !== 'PENDING') throw new AppError(`KhÃ´ng thá»ƒ duyá»‡t yÃªu cáº§u Ä‘ang á»Ÿ tráº¡ng thÃ¡i: ${request.status}`, 400);
@@ -270,17 +323,6 @@ class DisbursementService {
 
             if (newStatus === 'APPROVED_PENDING_TRANSFER') {
                 qrData = this._generateVietQRData(finalRequest);
-                dispatchEvent(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, {
-                    recipientIds: [String(finalRequest.organizerId)],
-                    title: 'YÃªu cáº§u giáº£i ngÃ¢n Ä‘Ã£ Ä‘Æ°á»£c duyá»‡t',
-                    message: `YÃªu cáº§u giáº£i ngÃ¢n ${finalRequest.approvedAmount.toLocaleString()}Ä‘ cá»§a báº¡n Ä‘Ã£ Ä‘Æ°á»£c duyá»‡t vÃ  Ä‘ang chá» káº¿ toÃ¡n chuyá»ƒn khoáº£n.`
-                });
-            } else if (['REJECTED', 'HOLD'].includes(newStatus)) {
-                dispatchEvent(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, {
-                    recipientIds: [String(finalRequest.organizerId)],
-                    title: `YÃªu cáº§u giáº£i ngÃ¢n bá»‹ ${newStatus}`,
-                    message: `LÃ½ do: ${note || 'Vui lÃ²ng kiá»ƒm tra láº¡i há»“ sÆ¡'}`
-                });
             }
 
             return { request: finalRequest, paymentInfo: qrData };
@@ -291,13 +333,55 @@ class DisbursementService {
                 approvedAmount: result.request.approvedAmount
             });
         }
+
+        if (result.request && result.request.status !== 'PENDING') {
+            const requestStatus = result.request.status;
+            const isApprovedPendingTransfer = requestStatus === 'APPROVED_PENDING_TRANSFER';
+            const isRejectedOrHeld = ['REJECTED', 'HOLD'].includes(requestStatus);
+            const realtimeType = isApprovedPendingTransfer
+                ? 'disbursement_approved'
+                : 'disbursement_status_changed';
+            const title = isApprovedPendingTransfer
+                ? 'Yeu cau giai ngan da duoc duyet'
+                : isRejectedOrHeld
+                    ? `Yeu cau giai ngan ${requestStatus === 'HOLD' ? 'dang bi tam giu' : 'da bi tu choi'}`
+                    : 'Yêu cầu giải ngân đang chờ đủ phê duyệt.';
+            const message = isApprovedPendingTransfer
+                ? `Yeu cau giai ngan ${Number(result.request.approvedAmount || 0).toLocaleString()}d da duoc duyet va dang cho chuyen khoan.`
+                : isRejectedOrHeld
+                    ? `Ly do: ${note || 'Vui long kiem tra lai ho so'}`
+                    : 'Yêu cầu giải ngân đang chờ đủ phê duyệt.';
+            const metadata = this._buildDisbursementMetadata(result.request, realtimeType);
+
+            await this._emitSystemNotification({
+                recipientIds: ['ADMIN_GROUP'],
+                title,
+                message,
+                actionUrl: `/admin/finance/${result.request.projectId}`,
+                entityType: 'disbursement_request',
+                entityId: String(result.request._id),
+                metadata
+            });
+
+            await this._emitSystemNotification({
+                recipientIds: [String(result.request.organizerId)],
+                title,
+                message,
+                actionUrl: `/projects/${result.request.projectId}?tab=milestones`,
+                entityType: 'disbursement_request',
+                entityId: String(result.request._id),
+                metadata
+            });
+        }
+
         return result;
     }
 
     async confirmAutoTransfer(requestId, bankTransactionRef, transferredAmount) {
         let finalStatus = null;
+        let notificationRequest = null;
 
-        const success = await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
+        const success = await this.transactionManager.runInTransaction(async (session) => {
             const request = await this.disbursementRequestRepository.findById(requestId, session);
             
             if (!request || request.status !== 'APPROVED_PENDING_TRANSFER') {
@@ -309,25 +393,13 @@ class DisbursementService {
                 const isOverTransfer = transferredAmount > request.approvedAmount;
                 console.error(`[Disbursement Auto] ðŸ›‘ Cáº¢NH BÃO Äá»Ž: Káº¿ toÃ¡n chuyá»ƒn ${isOverTransfer ? 'DÆ¯' : 'THIáº¾U'} tiá»n (Chuyá»ƒn: ${transferredAmount}Ä‘, YÃªu cáº§u: ${request.approvedAmount}Ä‘).`);
 
-                await this.disbursementRequestRepository.updateStatusWithPayload(requestId, 'HOLD', {}, session);
-                
-                dispatchEvent(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, {
-                    recipientIds: ['ADMIN_GROUP'],
-                    title: `ðŸš¨ BÃO Äá»˜NG: Chuyá»ƒn ${isOverTransfer ? 'DÆ¯' : 'THIáº¾U'} tiá»n Giáº£i ngÃ¢n`,
-                    message: `Há»‡ thá»‘ng ghi nháº­n káº¿ toÃ¡n chuyá»ƒn ${isOverTransfer ? 'DÆ¯' : 'THIáº¾U'} tiá»n cho Request ID: ${requestId} (Thá»±c táº¿: ${transferredAmount.toLocaleString()}Ä‘ so vá»›i YÃªu cáº§u: ${request.approvedAmount.toLocaleString()}Ä‘). Giao dá»‹ch Ä‘Ã£ bá»‹ Ä‘Ã³ng bÄƒng (HOLD).`
-                });
+                notificationRequest = await this.disbursementRequestRepository.updateStatusWithPayload(requestId, 'HOLD', {}, session);
                 
                 finalStatus = 'HOLD';
                 return false;
             }
 
-            await this._executeDisbursementCommit(request, bankTransactionRef, null, session);
-
-            dispatchEvent(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, {
-                recipientIds: [String(request.organizerId)],
-                title: 'Giáº£i ngÃ¢n tá»± Ä‘á»™ng thÃ nh cÃ´ng',
-                message: `Há»‡ thá»‘ng vá»«a Ä‘á»‘i soÃ¡t vÃ  ghi nháº­n khoáº£n tiá»n ${request.approvedAmount.toLocaleString()}Ä‘ Ä‘Ã£ tá»›i STK ${request.bankAccountSnapshot.accountNumber} cá»§a báº¡n.`
-            });
+            notificationRequest = await this._executeDisbursementCommit(request, bankTransactionRef, null, session);
 
             console.log(`[Disbursement Auto] ÄÃ£ chá»‘t sá»• tá»± Ä‘á»™ng thÃ nh cÃ´ng Request ${requestId}`);
             
@@ -342,6 +414,42 @@ class DisbursementService {
             });
         }
 
+        if (notificationRequest) {
+            const title = finalStatus === 'COMPLETED'
+                ? 'Giai ngan tu dong thanh cong'
+                : 'Lenh giai ngan bi HOLD';
+            const message = finalStatus === 'COMPLETED'
+                ? `He thong da ghi nhan khoan tien ${Number(notificationRequest.approvedAmount || 0).toLocaleString()}d da toi STK ${notificationRequest.bankAccountSnapshot?.accountNumber || ''}.`
+                : `He thong ghi nhan so tien chuyen khong khop cho Request ID: ${requestId}.`;
+            const metadata = this._buildDisbursementMetadata(
+                notificationRequest,
+                finalStatus === 'COMPLETED'
+                    ? 'disbursement_transfer_completed'
+                    : 'disbursement_status_changed',
+                { status: finalStatus, bankTransactionRef }
+            );
+
+            await this._emitSystemNotification({
+                recipientIds: ['ADMIN_GROUP'],
+                title,
+                message,
+                actionUrl: `/admin/finance/${notificationRequest.projectId}`,
+                entityType: 'disbursement_request',
+                entityId: String(notificationRequest._id),
+                metadata
+            });
+
+            await this._emitSystemNotification({
+                recipientIds: [String(notificationRequest.organizerId)],
+                title,
+                message,
+                actionUrl: `/projects/${notificationRequest.projectId}?tab=milestones`,
+                entityType: 'disbursement_request',
+                entityId: String(notificationRequest._id),
+                metadata
+            });
+        }
+
         return success;
     }
 
@@ -351,23 +459,46 @@ class DisbursementService {
             throw new AppError('Thieu bankTransactionRef', 400);
         }
 
-        const result = await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
+        const result = await this.transactionManager.runInTransaction(async (session) => {
             const request = await this.disbursementRequestRepository.findById(requestId, session);
             if (!request) throw new AppError('Khong tim thay yeu cau', 404);
             if (request.status !== 'APPROVED_PENDING_TRANSFER') throw new AppError('Chi co the xac nhan chuyen khoan cho yeu cau da duyet xong', 400);
 
-            await this._executeDisbursementCommit(request, bankTransactionRef, adminId, session);
+            const completedRequest = await this._executeDisbursementCommit(request, bankTransactionRef, adminId, session);
 
-            dispatchEvent(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, {
-                recipientIds: [String(request.organizerId)],
-                title: 'Giai ngan thanh cong',
-                message: `He thong da chuyen khoan ${request.approvedAmount.toLocaleString()}d vao STK ${request.bankAccountSnapshot.accountNumber}. Vui long kiem tra ung dung ngan hang.`
-            });
-
-            return { success: true, message: 'Xac nhan chuyen khoan bang tay thanh cong' };
+            return { success: true, message: 'Xac nhan chuyen khoan bang tay thanh cong', request: completedRequest };
         });
 
         await this._publishStatusUpdate(requestId, 'COMPLETED', { bankTransactionRef });
+
+        if (result.request) {
+            const metadata = this._buildDisbursementMetadata(
+                result.request,
+                'disbursement_transfer_completed',
+                { status: 'COMPLETED', bankTransactionRef }
+            );
+
+            await this._emitSystemNotification({
+                recipientIds: ['ADMIN_GROUP'],
+                title: 'Giai ngan thanh cong',
+                message: `He thong da chuyen khoan ${Number(result.request.approvedAmount || 0).toLocaleString()}d vao STK ${result.request.bankAccountSnapshot?.accountNumber || ''}.`,
+                actionUrl: `/admin/finance/${result.request.projectId}`,
+                entityType: 'disbursement_request',
+                entityId: String(result.request._id),
+                metadata
+            });
+
+            await this._emitSystemNotification({
+                recipientIds: [String(result.request.organizerId)],
+                title: 'Giai ngan thanh cong',
+                message: `He thong da chuyen khoan ${Number(result.request.approvedAmount || 0).toLocaleString()}d vao STK ${result.request.bankAccountSnapshot?.accountNumber || ''}.`,
+                actionUrl: `/projects/${result.request.projectId}?tab=milestones`,
+                entityType: 'disbursement_request',
+                entityId: String(result.request._id),
+                metadata
+            });
+        }
+
         return result;
     }
 
@@ -377,32 +508,53 @@ class DisbursementService {
             throw new AppError('Thieu ly do fail transfer', 400);
         }
 
-        const request = await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
+        const request = await this.transactionManager.runInTransaction(async (session) => {
             const req = await this.disbursementRequestRepository.findById(requestId, session);
             if (!req) throw new AppError('Khong tim thay yeu cau', 404);
             if (req.status !== 'APPROVED_PENDING_TRANSFER') throw new AppError('Chi co the bao loi cho cac yeu cau dang cho chuyen khoan', 400);
 
-            await this.disbursementRequestRepository.updateStatusWithPayload(requestId, 'HOLD', {}, session);
+            const heldRequest = await this.disbursementRequestRepository.updateStatusWithPayload(requestId, 'HOLD', {}, session);
 
             const accounts = await this.bankAccountRepository.findByAccountNumber(req.bankAccountSnapshot.accountNumber, req.bankAccountSnapshot.bankName);
             const targetAcc = accounts.find(a => String(a.userId) === String(req.organizerId));
 
             if (targetAcc) await this.bankAccountRepository.updateById(targetAcc._id, { status: BANK_ACCOUNT_STATUS.FLAGGED }, session);
 
-            dispatchEvent(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, {
-                recipientIds: [String(req.organizerId)],
-                title: 'Giai ngan that bai (Loi Ngan hang)',
-                message: `Qua trinh chuyen khoan bi loi. Ly do: ${reason}. Tai khoan ngan hang cua ban da bi khoa. Vui long cap nhat tai khoan moi de nhan tien.`
-            });
-
-            return req;
+            return heldRequest || req;
         });
 
         await this._publishStatusUpdate(requestId, 'HOLD', { reason });
+
+        const metadata = this._buildDisbursementMetadata(
+            request,
+            'disbursement_status_changed',
+            { status: 'HOLD', reason }
+        );
+
+        await this._emitSystemNotification({
+            recipientIds: ['ADMIN_GROUP'],
+            title: 'Giai ngan that bai',
+            message: `Qua trinh chuyen khoan bi loi. Ly do: ${reason}.`,
+            actionUrl: `/admin/finance/${request.projectId}`,
+            entityType: 'disbursement_request',
+            entityId: String(request._id),
+            metadata
+        });
+
+        await this._emitSystemNotification({
+            recipientIds: [String(request.organizerId)],
+            title: 'Giai ngan that bai',
+            message: `Qua trinh chuyen khoan bi loi. Ly do: ${reason}.`,
+            actionUrl: `/projects/${request.projectId}?tab=milestones`,
+            entityType: 'disbursement_request',
+            entityId: String(request._id),
+            metadata
+        });
+
         return request;
     }
     async updateHoldRequestBankAccount(requestId, organizerId, payload) {
-        const updatedRequest = await this.transactionManager.runInTransaction(async (session, dispatchEvent) => {
+        const updatedRequest = await this.transactionManager.runInTransaction(async (session) => {
             const request = await this.disbursementRequestRepository.findById(requestId, session);
             if (!request) throw new AppError('KhÃ´ng tÃ¬m tháº¥y yÃªu cáº§u', 404);
             if (String(request.organizerId) !== String(organizerId)) throw new AppError('KhÃ´ng cÃ³ quyá»n', 403);
@@ -430,15 +582,37 @@ class DisbursementService {
                 requestId, 'APPROVED_PENDING_TRANSFER', { bankAccountSnapshot: snapshot }, session
             );
 
-            dispatchEvent(DOMAIN_EVENTS.SYSTEM_NOTIFICATION, {
-                recipientIds: ['ADMIN_GROUP'], title: 'Organizer Ä‘Ã£ cáº­p nháº­t sá»‘ tÃ i khoáº£n má»›i',
-                message: `YÃªu cáº§u giáº£i ngÃ¢n bá»‹ lá»—i trÆ°á»›c Ä‘Ã³ Ä‘Ã£ cÃ³ sá»‘ tÃ i khoáº£n má»›i (${snapshot.accountNumber}). Vui lÃ²ng quÃ©t láº¡i QR code Ä‘á»ƒ chuyá»ƒn tiá»n.`
-            });
-
             return updatedReq;
         });
 
         await this._publishStatusUpdate(requestId, 'APPROVED_PENDING_TRANSFER');
+
+        const metadata = this._buildDisbursementMetadata(
+            updatedRequest,
+            'disbursement_status_changed',
+            { status: 'APPROVED_PENDING_TRANSFER' }
+        );
+
+        await this._emitSystemNotification({
+            recipientIds: ['ADMIN_GROUP'],
+            title: 'Organizer da cap nhat so tai khoan moi',
+            message: `Yeu cau giai ngan bi HOLD da co so tai khoan moi (${updatedRequest.bankAccountSnapshot?.accountNumber || ''}).`,
+            actionUrl: `/admin/finance/${updatedRequest.projectId}`,
+            entityType: 'disbursement_request',
+            entityId: String(updatedRequest._id),
+            metadata
+        });
+
+        await this._emitSystemNotification({
+            recipientIds: [String(updatedRequest.organizerId)],
+            title: 'Organizer da cap nhat so tai khoan moi',
+            message: `Yeu cau giai ngan bi HOLD da co so tai khoan moi (${updatedRequest.bankAccountSnapshot?.accountNumber || ''}).`,
+            actionUrl: `/projects/${updatedRequest.projectId}?tab=milestones`,
+            entityType: 'disbursement_request',
+            entityId: String(updatedRequest._id),
+            metadata
+        });
+
         return updatedRequest;
     }
 
