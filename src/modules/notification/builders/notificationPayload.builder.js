@@ -453,25 +453,6 @@ export function buildNotificationPayload(input) {
       };
     }
 
-    case NOTIFICATION_TYPES.MESSAGE_REACTED: {
-      const actorName = ensureText(input.actorName, 'Một người dùng');
-
-      return {
-        title: 'Tin nhắn của bạn có tương tác mới',
-        message: `${actorName} đã bày tỏ cảm xúc với tin nhắn của bạn${input.emoji ? `: ${input.emoji}` : '.'}`,
-        actionUrl: ensureText(input.actionUrl, `/chat?conversationId=${input.conversationId || ''}`),
-        entityType: 'message_reaction',
-        entityId: input.messageId || null,
-        metadata: {
-          conversationId: input.conversationId || null,
-          messageId: input.messageId || null,
-          emoji: input.emoji || null,
-          actorName: input.actorName || null,
-          actorAvatar: input.actorAvatar || null,
-        },
-      };
-    }
-
     default:
       throw new Error(`Unsupported notification type: ${type}`);
   }

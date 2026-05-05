@@ -44,7 +44,6 @@ function createTypeToSettingKey() {
   add(NOTIFICATION_TYPES.POST_COMMENTED, 'postEnabled');
   add(NOTIFICATION_TYPES.COMMENT_REPLIED, 'postEnabled');
   add(NOTIFICATION_TYPES.COMMENT_REACTED, 'postEnabled');
-  add(NOTIFICATION_TYPES.MESSAGE_REACTED, 'postEnabled');
 
   add(NOTIFICATION_TYPES.KYC_EXPIRING_WARNING, 'systemEnabled');
   add(NOTIFICATION_TYPES.KYC_EXPIRED, 'systemEnabled');

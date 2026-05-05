@@ -3,13 +3,32 @@ class SimpleEventBus {
     this.listeners = new Map();
   }
 
+  isValidEventName(eventName) {
+    return typeof eventName === "string" && eventName.trim().length > 0;
+  }
+
   on(eventName, handler) {
+    if (!this.isValidEventName(eventName)) {
+      console.warn("[EventBus] Ignored listener registration with invalid event name", {
+        eventName,
+      });
+      return;
+    }
+
     const current = this.listeners.get(eventName) || [];
     current.push(handler);
     this.listeners.set(eventName, current);
   }
 
   async emit(eventName, payload) {
+    if (!this.isValidEventName(eventName)) {
+      console.warn("[EventBus] Ignored emit with invalid event name", {
+        eventName,
+        payloadType: payload?.type || null,
+      });
+      return [];
+    }
+
     const handlers = this.listeners.get(eventName) || [];
     return Promise.allSettled(handlers.map((handler) => handler(payload)));
   }

@@ -29,6 +29,10 @@ function normalizeRoleSelections(roleSelections = []) {
     .filter((selection) => selection.role);
 }
 
+function hasMessageContent(event) {
+  return Boolean(String(event?.message || "").trim());
+}
+
 function expandRecipientAliases(recipientIds = []) {
   const normalizedRecipientIds = normalizeStringArray(recipientIds);
   const roleSelections = [];
@@ -81,6 +85,13 @@ export function registerSystemNotificationListener({
 }) {
   const handleSystemAnnouncement = async (event) => {
     try {
+      if (!hasMessageContent(event)) {
+        logger?.warn?.("Skipped system notification without message content", {
+          event,
+        });
+        return emptyBroadcastResult();
+      }
+
       const payload = {
         title: event.title,
         message: event.message,
@@ -129,6 +140,13 @@ export function registerSystemNotificationListener({
 
   const handleTargetedSystemNotification = async (event) => {
     try {
+      if (!hasMessageContent(event)) {
+        logger?.warn?.("Skipped targeted system notification without message content", {
+          event,
+        });
+        return emptyBroadcastResult();
+      }
+
       const payload = {
         title: event.title,
         message: event.message,
