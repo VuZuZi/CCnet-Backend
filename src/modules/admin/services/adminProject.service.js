@@ -2,6 +2,7 @@ import AppError from "../../../core/AppError.js";
 import { DOMAIN_EVENTS } from "../../../config/notification.js";
 import { PROJECT_STATUS, PROJECT_TYPE } from "../../project/project.constant.js";
 import {
+  COMPLETED_PROJECT_STATUSES,
   buildProjectActionName,
   buildProjectStatusNotificationMessage,
   buildProjectUpdateData,
@@ -25,6 +26,7 @@ class AdminProjectService {
     eventBus,
     volunteerRepository,
     conversationService,
+    volunteerEngagementService = null,
   }) {
     this.adminProjectRepository = adminProjectRepository;
     this.adminActionLogRepository = adminActionLogRepository;
@@ -37,6 +39,7 @@ class AdminProjectService {
     this.eventBus = eventBus;
     this.volunteerRepository = volunteerRepository;
     this.conversationService = conversationService;
+    this.volunteerEngagementService = volunteerEngagementService;
   }
 
   _ensureReason(reason) {
@@ -236,12 +239,31 @@ class AdminProjectService {
     return project;
   }
 
+  async _initializeVolunteerReviewsIfCompleted(project) {
+    if (!this.volunteerEngagementService || !project?._id) return;
+
+    const normalizedStatus = normalizeProjectStatus(project.status);
+    if (!COMPLETED_PROJECT_STATUSES.includes(normalizedStatus)) return;
+
+    try {
+      await this.volunteerEngagementService.onProjectCompleted(project._id);
+    } catch (error) {
+      console.error(
+        "[AdminProjectService] Failed to initialize volunteer reviews for completed project:",
+        {
+          projectId: String(project._id),
+          error: error?.message || error,
+        },
+      );
+    }
+  }
+
   async updateProjectStatus(projectId, targetStatus, feedback, adminId, options = {}) {
     if (!targetStatus) {
       throw new AppError("Project status is required.", 400);
     }
 
-    return this.transactionManager.runInTransaction(async (session) => {
+    const updatedProject = await this.transactionManager.runInTransaction(async (session) => {
       const project = await this.projectRepository.findById(projectId, session);
 
       if (!project) {
@@ -510,6 +532,10 @@ class AdminProjectService {
 
       return updatedProject;
     });
+
+    await this._initializeVolunteerReviewsIfCompleted(updatedProject);
+
+    return updatedProject;
   }
 }
 
