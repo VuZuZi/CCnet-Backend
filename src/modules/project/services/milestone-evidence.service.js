@@ -17,7 +17,7 @@ class MilestoneEvidenceService {
         disbursementRequestRepository,
         mediaRepository,
         transactionManager,
-        escrowRepository, // [NEW]: Inject thÃªm Repo nÃ y qua DI
+        escrowRepository, // [NEW]: Inject th?m Repo n?y qua DI
         eventBus = null,
         volunteerEngagementService = null
     }) {
@@ -225,7 +225,7 @@ class MilestoneEvidenceService {
         const ownedMedias = await this.mediaRepository.findManyByIdsAndOwner(uniqueIds, organizerId);
 
         if (ownedMedias.length !== uniqueIds.length) {
-            throw new AppError(`CÃ³ file trong ${contextMessage} khÃ´ng thuá»™c quyá»n sá»Ÿ há»¯u cá»§a Organizer`, 403);
+            throw new AppError(`Có file trong ${contextMessage} không thuộc quyền sở hữu của Organizer`, 403);
         }
 
         return ownedMedias;
@@ -241,7 +241,7 @@ class MilestoneEvidenceService {
             : 0;
 
         const formattedItems = Array.isArray(expenseItemsPayload) ? expenseItemsPayload.map(item => ({
-            itemName: item.itemName || "HÃ³a Ä‘Æ¡n/Chá»©ng tá»« tá»•ng há»£p",
+            itemName: item.itemName || "Hóa đơn/Chứng từ tổng hợp",
             amount: Number(item.amount) || 0,
             note: item.note || "",
             receiptMediaId: item.receiptMediaId || null
@@ -253,7 +253,7 @@ class MilestoneEvidenceService {
             unspentAmount,
             overspentAmount,
             expenseItems: formattedItems,
-            note: note || "Khai bÃ¡o chi tiÃªu tá»« Organizer. Äang chá» Káº¿ toÃ¡n duyá»‡t."
+            note: note || "Khai báo chi tiêu từ Organizer. Đang chờ Kế toán duyệt."
         };
     }
 
@@ -268,7 +268,7 @@ class MilestoneEvidenceService {
         let gpsFailureReason = null;
 
         if (isFinancialMilestone) {
-            reviewNotes = 'ÄÃ£ ná»™p bÃ¡o cÃ¡o chi tiÃªu. Há»‡ thá»‘ng ghi nháº­n chá» Káº¿ toÃ¡n/Admin duyá»‡t thá»§ cÃ´ng.';
+            reviewNotes = 'Đã nộp báo cáo chi tiêu. Hệ thống ghi nhận và duyệt.';
         } else if (normalizedSubmissionMode === SUBMISSION_MODES.GPS_CHECKIN) {
             const targetLocation = this._getMilestoneTargetLocation(project, milestone);
             if (mediaIds && mediaIds.length > 0 && targetLocation?.coordinates?.length === 2) {
@@ -287,13 +287,13 @@ class MilestoneEvidenceService {
             if (geoVerifiedCount >= 1) {
                 finalStatus = 'APPROVED';
                 finalMilestoneStatus = MILESTONE_STATUS.COMPLETED;
-                reviewNotes = `[Há»† THá»NG AUTO-PASS] XÃ¡c thá»±c thÃ nh cÃ´ng (${geoVerifiedCount} áº£nh há»£p lá»‡) táº¡i hiá»‡n trÆ°á»ng.`;
+                reviewNotes = `[HỆ THỐNG AUTO-PASS] Xác thực thành công (${geoVerifiedCount} ảnh hợp lệ) tại hiện trường.`;
             } else {
                 gpsFailureReason = gpsFailureReason || 'OUT_OF_RANGE';
-                reviewNotes = `[Há»† THá»NG GHI NHáº¬N] Organizer ná»™p áº£nh thÆ°á»ng, khÃ´ng Ä‘áº¡t chuáº©n GPS táº¡i hiá»‡n trÆ°á»ng. Chuyá»ƒn tráº¡ng thÃ¡i chá» duyá»‡t thá»§ cÃ´ng.`;
+                reviewNotes = `[HỆ THỐNG GHI NHẬN] Organizer nộp ảnh thường, không đạt chuẩn GPS tại hiện trường. Chuyển trạng thái chờ duyệt thủ công.`;
             }
         } else {
-            reviewNotes = '[HE THONG GHI NHAN] Organizer nop bang chung thu cong. Chuyen trang thai cho Admin duyet thu cong.';
+            reviewNotes = '[HE THONG GHI NHAN] Organizer nop bang chung thu cong. Chuyen trang thai cho duyet.';
         }
 
         return {
@@ -313,27 +313,27 @@ class MilestoneEvidenceService {
         const submissionMode = this._normalizeSubmissionMode(payload.submissionMode);
 
         const project = await this.projectRepository.findById(projectId);
-        if (!project) throw new AppError('KhÃ´ng tÃ¬m tháº¥y dá»± Ã¡n', 404);
+        if (!project) throw new AppError('Không tìm thấy dự án', 404);
 
         if (String(project.organizerId) !== String(organizerId)) {
-            throw new AppError('Báº¡n khÃ´ng cÃ³ quyá»n thao tÃ¡c trÃªn dá»± Ã¡n nÃ y', 403);
+            throw new AppError('Bạn không có quyền thao tác trên dự án này', 403);
         }
 
         if (project.status !== PROJECT_STATUS.EXECUTING) {
-            throw new AppError('Chá»‰ cÃ³ thá»ƒ ná»™p báº±ng chá»©ng khi dá»± Ã¡n Ä‘ang trong giai Ä‘oáº¡n Thá»±c thi (EXECUTING)', 400);
+            throw new AppError('Chỉ có thể nộp bằng chứng khi dự án đang trong giai đoạn thực thi', 400);
         }
 
         const milestones = project.milestones || [];
         const currentIdx = milestones.findIndex(m => m.milestoneId === milestoneId);
         const milestone = milestones[currentIdx];
 
-        if (!milestone) throw new AppError('Má»‘c thá»i gian khÃ´ng tá»“n táº¡i', 404);
-        if (milestone.status === MILESTONE_STATUS.COMPLETED) throw new AppError('Má»‘c nÃ y Ä‘Ã£ Ä‘Æ°á»£c nghiá»‡m thu hoÃ n táº¥t', 400);
+        if (!milestone) throw new AppError('Mốc thời gian không tồn tại', 404);
+        if (milestone.status === MILESTONE_STATUS.COMPLETED) throw new AppError('Mốc này đã được nghiệm thu hoàn tất', 400);
 
         if (currentIdx > 0) {
             const prevMilestone = milestones[currentIdx - 1];
             if (prevMilestone.status !== MILESTONE_STATUS.COMPLETED) {
-                throw new AppError('NguyÃªn táº¯c cuá»‘n chiáº¿u: Má»‘c liá»n trÆ°á»›c Ä‘Ã³ pháº£i Ä‘Æ°á»£c hoÃ n thÃ nh trÆ°á»›c.', 400);
+                throw new AppError('Mốc liền trước phải được hoàn thành trước.', 400);
             }
         }
 
@@ -393,7 +393,7 @@ class MilestoneEvidenceService {
                 projectId, milestoneId, newEvidencePayload, session
             );
 
-            if (!newEvidence) throw new AppError('Má»‘c nÃ y Ä‘ang chá» duyá»‡t hoáº·c Ä‘Ã£ Ä‘Æ°á»£c duyá»‡t. KhÃ´ng thá»ƒ ná»™p Ä‘Ãºp.', 409);
+            if (!newEvidence) throw new AppError('Mốc này đang chờ duyệt hoặc đã được duyệt. Không thể nộp đúp.', 409);
 
             await this.projectRepository.updateMilestoneStatus(projectId, milestoneId, evaluation.finalMilestoneStatus, session);
 
@@ -492,9 +492,9 @@ class MilestoneEvidenceService {
     async patchEvidence(evidenceId, organizerId, payload) {
         const submissionMode = this._normalizeSubmissionMode(payload.submissionMode);
         const evidence = await this.milestoneEvidenceRepository.findById(evidenceId);
-        if (!evidence) throw new AppError('KhÃ´ng tÃ¬m tháº¥y báº£n ghi', 404);
-        if (String(evidence.organizerId) !== String(organizerId)) throw new AppError('KhÃ´ng cÃ³ quyá»n thao tÃ¡c', 403);
-        if (evidence.status !== 'REVISION_REQUESTED') throw new AppError('Chá»‰ cÃ³ thá»ƒ ná»™p bá»• sung khi Admin cÃ³ yÃªu cáº§u sá»­a Ä‘á»•i', 400);
+        if (!evidence) throw new AppError('Không tìm thấy bản ghi', 404);
+        if (String(evidence.organizerId) !== String(organizerId)) throw new AppError('Không có quyền thao tác', 403);
+        if (evidence.status !== 'REVISION_REQUESTED') throw new AppError('Chỉ có thể nộp bổ sung khi có yêu cầu sửa đổi', 400);
 
         const project = await this.projectRepository.findById(evidence.projectId);
         if (!project) throw new AppError('Khong tim thay du an', 404);
@@ -514,7 +514,7 @@ class MilestoneEvidenceService {
             const updatedSpentAmount = payload.spentAmount !== undefined ? payload.spentAmount : evidence.financialReport?.spentAmount;
 
             if (updatedSpentAmount === undefined || updatedSpentAmount === null || updatedSpentAmount < 0) {
-                throw new AppError('Báº¯t buá»™c pháº£i khai bÃ¡o tá»•ng sá»‘ tiá»n Ä‘Ã£ chi há»£p lá»‡.', 400);
+                throw new AppError('Bắt buộc phải khai báo tổng số tiền đã chi hợp lệ.', 400);
             }
 
             const expenseItemsInput = (payload.expenseItems && payload.expenseItems.length > 0)
@@ -537,7 +537,7 @@ class MilestoneEvidenceService {
         const updatedEvidenceResult = await this.transactionManager.runInTransaction(async (session) => {
             let finalReviewNotes = evaluation.reviewNotes;
             if (evaluation.finalStatus === 'PENDING') {
-                finalReviewNotes = `[ÄÃƒ Ná»˜P Bá»” SUNG] ${finalReviewNotes || 'Organizer Ä‘Ã£ cáº­p nháº­t bÃ¡o cÃ¡o. Äang chá» duyá»‡t láº¡i.'}`;
+                finalReviewNotes = `[ĐÃ NỘP BỔ SUNG] ${finalReviewNotes || 'Organizer đã cập nhật báo cáo. Đang chờ duyệt lại.'}`;
             }
 
             const updatedEvidence = await this.milestoneEvidenceRepository.updateStatus(
@@ -817,7 +817,7 @@ class MilestoneEvidenceService {
         const evidence = await this.milestoneEvidenceRepository.findDetailWithPopulate(evidenceId);
 
         if (!evidence) {
-            throw new AppError('KhÃ´ng tÃ¬m tháº¥y báº±ng chá»©ng nghiá»‡m thu', 404);
+            throw new AppError('Không tìm thấy bằng chứng nghiệm thu', 404);
         }
 
         const organizerId = evidence.organizerId._id || evidence.organizerId;
@@ -826,7 +826,7 @@ class MilestoneEvidenceService {
 
         if (!isOwner && !isPrivileged) {
             if (evidence.status !== 'APPROVED') {
-                throw new AppError('Báº¡n khÃ´ng cÃ³ quyá»n xem bÃ¡o cÃ¡o nÃ y khi chÆ°a Ä‘Æ°á»£c phÃª duyá»‡t', 403);
+                throw new AppError('Bạn không có quyền xem báo cáo này khi chưa được phê duyệt', 403);
             }
             return this.getPublicEvidence(evidence.projectId._id || evidence.projectId, evidence.milestoneId);
         }
@@ -836,18 +836,18 @@ class MilestoneEvidenceService {
 
     async getPublicEvidence(projectId, milestoneId) {
         const project = await this.projectRepository.findById(projectId);
-        if (!project) throw new AppError('Dá»± Ã¡n khÃ´ng tá»“n táº¡i', 404);
+        if (!project) throw new AppError('Dự án không tồn tại', 404);
 
         const milestone = project.milestones.find(m => m.milestoneId === milestoneId);
-        if (!milestone) throw new AppError('Má»‘c thá»i gian khÃ´ng tá»“n táº¡i', 404);
+        if (!milestone) throw new AppError('Mốc thời gian không tồn tại', 404);
 
         const evidence = await this.milestoneEvidenceRepository.findPublicApprovedByMilestone(projectId, milestoneId);
 
         if (!evidence) {
             if (milestone.status === MILESTONE_STATUS.COMPLETED) {
-                return { message: "Báº±ng chá»©ng Ä‘ang Ä‘Æ°á»£c há»‡ thá»‘ng tá»•ng há»£p láº¡i.", status: milestone.status };
+                return { message: "Bằng chứng đang được hệ thống tổng hợp lại.", status: milestone.status };
             }
-            throw new AppError('Báº±ng chá»©ng nghiá»‡m thu hiá»‡n chÆ°a sáºµn dá»¥ng hoáº·c Ä‘ang Ä‘Æ°á»£c kiá»ƒm duyá»‡t.', 404);
+            throw new AppError('Bằng chứng nghiệm thu hiện chưa sẵn dùng hoặc đang được kiểm duyệt.', 404);
         }
 
         const publicData = {
