@@ -24,6 +24,21 @@ class OrganizerRequestRepository {
       .exec();
   }
 
+  async findLatestApprovedByUserId(userId, session = null) {
+    const query = OrganizerRequest.findOne({
+      userId,
+      status: ORGANIZER_REQUEST_STATUS.APPROVED,
+    })
+      .sort({ reviewedAt: -1, createdAt: -1 })
+      .select(
+        "bankAccountId bankName bankAccountNumber bankAccountName organizationName status reviewedAt"
+      );
+
+    if (session) query.session(session);
+
+    return query.lean().exec();
+  }
+
   async findById(id) {
     return OrganizerRequest.findById(id)
       .populate(
